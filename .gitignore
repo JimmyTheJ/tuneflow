@@ -6,6 +6,7 @@ __pycache__/
 venv/
 .env
 *.db
+*.pid
 
 # Node / Expo
 node_modules/
