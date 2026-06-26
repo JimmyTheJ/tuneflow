@@ -1,33 +1,57 @@
+import { router } from "expo-router";
 import { useEffect, useState } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 
-import { getApiToken, getApiUrl, setApiToken, setApiUrl } from "@/lib/settings";
+import { getApiUrl, setApiUrl } from "@/lib/settings";
+import { useAuthStore } from "@/stores/auth";
 
 export default function SettingsScreen() {
+  const user = useAuthStore((state) => state.user);
+  const logout = useAuthStore((state) => state.logout);
   const [apiUrl, setApiUrlState] = useState("http://localhost:8000");
-  const [apiToken, setApiTokenState] = useState("");
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
     void (async () => {
       setApiUrlState(await getApiUrl());
-      setApiTokenState(await getApiToken());
     })();
   }, []);
 
   const save = async () => {
     await setApiUrl(apiUrl);
-    await setApiToken(apiToken);
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   };
 
   return (
     <View style={styles.container}>
-      <Text style={styles.heading}>Server</Text>
+      <Text style={styles.heading}>Account</Text>
+      {user ? (
+        <View style={styles.card}>
+          <Text style={styles.label}>Signed in as</Text>
+          <Text style={styles.value}>
+            {user.display_name} ({user.role})
+          </Text>
+        </View>
+      ) : null}
+
+      <Pressable
+        style={styles.secondaryButton}
+        onPress={() => void logout()}
+      >
+        <Text style={styles.secondaryButtonText}>Sign out</Text>
+      </Pressable>
+
+      {user?.role === "parent" ? (
+        <Pressable style={styles.secondaryButton} onPress={() => router.push("/parental")}>
+          <Text style={styles.secondaryButtonText}>Parental controls</Text>
+        </Pressable>
+      ) : null}
+
+      <Text style={[styles.heading, { marginTop: 28 }]}>Server</Text>
       <Text style={styles.help}>
-        Point the app at your self-hosted Tuneflow API. On a real phone, use your PC’s LAN IP or a
-        Tailscale address instead of localhost.
+        Point the app at your self-hosted Tuneflow API. On a phone, use your PC’s LAN IP or Tailscale
+        address.
       </Text>
 
       <Text style={styles.label}>API URL</Text>
@@ -41,20 +65,8 @@ export default function SettingsScreen() {
         placeholderTextColor="#737373"
       />
 
-      <Text style={styles.label}>API token</Text>
-      <TextInput
-        value={apiToken}
-        onChangeText={setApiTokenState}
-        autoCapitalize="none"
-        autoCorrect={false}
-        secureTextEntry
-        style={styles.input}
-        placeholder="Matches TUNEFLOW_API_TOKEN on the server"
-        placeholderTextColor="#737373"
-      />
-
       <Pressable style={styles.button} onPress={() => void save()}>
-        <Text style={styles.buttonText}>{saved ? "Saved" : "Save settings"}</Text>
+        <Text style={styles.buttonText}>{saved ? "Saved" : "Save server URL"}</Text>
       </Pressable>
     </View>
   );
@@ -79,11 +91,21 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     marginBottom: 20,
   },
+  card: {
+    backgroundColor: "#171717",
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 12,
+  },
   label: {
-    color: "#d4d4d4",
-    fontSize: 14,
-    marginBottom: 8,
-    marginTop: 12,
+    color: "#a3a3a3",
+    fontSize: 13,
+    marginBottom: 4,
+  },
+  value: {
+    color: "#fff",
+    fontSize: 17,
+    fontWeight: "600",
   },
   input: {
     backgroundColor: "#171717",
@@ -92,9 +114,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 12,
     fontSize: 16,
+    marginBottom: 12,
   },
   button: {
-    marginTop: 24,
     backgroundColor: "#22c55e",
     borderRadius: 12,
     paddingVertical: 14,
@@ -104,5 +126,17 @@ const styles = StyleSheet.create({
     color: "#052e16",
     fontWeight: "700",
     fontSize: 16,
+  },
+  secondaryButton: {
+    backgroundColor: "#171717",
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: "center",
+    marginBottom: 10,
+  },
+  secondaryButtonText: {
+    color: "#fff",
+    fontWeight: "600",
+    fontSize: 15,
   },
 });

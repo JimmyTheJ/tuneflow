@@ -1,15 +1,61 @@
+import enum
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
+
+
+class UserRole(str, enum.Enum):
+    parent = "parent"
+    adult = "adult"
+    child = "child"
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    username: Mapped[str] = mapped_column(String(80), unique=True, nullable=False, index=True)
+    display_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    role: Mapped[UserRole] = mapped_column(Enum(UserRole), nullable=False, default=UserRole.adult)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    parental_settings: Mapped["ParentalSettings | None"] = relationship(
+        back_populates="child_user", uselist=False, cascade="all, delete-orphan"
+    )
+    playlists: Mapped[list["Playlist"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    play_history: Mapped[list["PlayHistory"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    likes: Mapped[list["Like"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+
+
+class ParentalSettings(Base):
+    __tablename__ = "parental_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    child_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), unique=True)
+    block_explicit: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    search_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    max_daily_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    allowed_start_hour: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    allowed_end_hour: Mapped[int] = mapped_column(Integer, nullable=False, default=23)
+    blocked_keywords: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    blocked_video_ids: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    child_user: Mapped[User] = relationship(back_populates="parental_settings")
 
 
 class Playlist(Base):
     __tablename__ = "playlists"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -17,6 +63,7 @@ class Playlist(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
+    user: Mapped[User] = relationship(back_populates="playlists")
     tracks: Mapped[list["PlaylistTrack"]] = relationship(
         back_populates="playlist", cascade="all, delete-orphan", order_by="PlaylistTrack.position"
     )
@@ -43,6 +90,7 @@ class PlayHistory(Base):
     __tablename__ = "play_history"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     video_id: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     title: Mapped[str] = mapped_column(String(500), nullable=False)
     artist: Mapped[str | None] = mapped_column(String(300), nullable=True)
@@ -51,15 +99,20 @@ class PlayHistory(Base):
     listened_sec: Mapped[int | None] = mapped_column(Integer, nullable=True)
     played_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
 
+    user: Mapped[User] = relationship(back_populates="play_history")
+
 
 class Like(Base):
     __tablename__ = "likes"
-    __table_args__ = (UniqueConstraint("video_id", name="uq_like_video"),)
+    __table_args__ = (UniqueConstraint("user_id", "video_id", name="uq_user_like_video"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     video_id: Mapped[str] = mapped_column(String(20), nullable=False)
     title: Mapped[str] = mapped_column(String(500), nullable=False)
     artist: Mapped[str | None] = mapped_column(String(300), nullable=True)
     thumbnail_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     duration_sec: Mapped[int | None] = mapped_column(Integer, nullable=True)
     liked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    user: Mapped[User] = relationship(back_populates="likes")

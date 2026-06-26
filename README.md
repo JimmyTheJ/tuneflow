@@ -1,11 +1,12 @@
 # Tuneflow
 
-Personal, self-hostable YouTube music player with playlists, history, and likes.
+Personal, self-hostable YouTube music player for your household — separate accounts, playlists, history, parental controls, and AI recommendations.
 
 ## Stack
 
-- **API**: FastAPI + SQLite
+- **API**: FastAPI + SQLite + JWT auth
 - **Discovery/streams**: [Piped](https://github.com/TeamPiped/Piped) (public instance by default, self-host optional)
+- **AI**: OpenAI-compatible LLM API (Ollama, LM Studio, OpenAI, etc. on your LAN or cloud)
 - **Mobile**: Expo (React Native) with `expo-av` playback
 
 ## Quick start (API)
@@ -13,25 +14,28 @@ Personal, self-hostable YouTube music player with playlists, history, and likes.
 ```powershell
 cd D:\workspace\tuneflow
 copy .env.example .env
-# Edit .env and set TUNEFLOW_API_TOKEN
+# Edit JWT_SECRET, BOOTSTRAP_* and LLM_BASE_URL
 
 docker compose up --build api
 ```
 
-API runs at `http://localhost:8000`. Docs at `http://localhost:8000/docs`.
+API runs at `http://localhost:8000`. Interactive docs at `http://localhost:8000/docs`.
 
-### Local Python dev (without Docker)
+**Schema upgrade:** if you used an older single-user build, delete `data/tuneflow.db` before starting.
+
+### Local Python dev
 
 ```powershell
 cd services\api
 python -m venv .venv
 .\.venv\Scripts\activate
 pip install -r requirements.txt
-mkdir ..\..\data
+mkdir data -Force
 copy ..\..\.env.example ..\..\.env
-$env:DATABASE_URL="sqlite+aiosqlite:///./data/tuneflow.db"
 uvicorn app.main:app --reload --port 8000
 ```
+
+On first startup (or via the mobile setup screen), a **parent** account is created from `BOOTSTRAP_USERNAME` / `BOOTSTRAP_PASSWORD` in `.env`.
 
 ## Mobile app
 
@@ -41,14 +45,11 @@ npm install
 npx expo start
 ```
 
-1. Open the app on your phone with Expo Go (or a dev build).
-2. Go to **Settings** and set:
-   - **API URL** — your server address (`http://192.168.x.x:8000` on LAN, or Tailscale IP)
-   - **API token** — same value as `TUNEFLOW_API_TOKEN` in `.env`
+1. Set **API URL** in Settings (`http://192.168.x.x:8000` on LAN, or Tailscale).
+2. First launch walks through **parent account setup** (or sign in).
+3. Each family member signs in with their own username — playlists, history, and likes are per user.
 
-Then use **Search** to find music and play it. History and playlists sync to your server.
-
-### Phone ↔ PC networking tips
+### Phone ↔ server networking
 
 | Scenario | API URL example |
 |----------|-----------------|
@@ -56,41 +57,91 @@ Then use **Search** to find music and play it. History and playlists sync to you
 | Same Wi‑Fi | `http://192.168.1.50:8000` |
 | Tailscale | `http://100.x.x.x:8000` |
 
+## Family accounts
+
+| Role | Capabilities |
+|------|----------------|
+| **parent** | Manage child accounts, parental controls, view all settings |
+| **adult** | Full personal library, search, AI discover |
+| **child** | Personal library, subject to parental rules |
+
+Parents create accounts via API (`POST /api/users`) or the mobile parental screen (child management UI can be expanded).
+
+```json
+POST /api/users
+{
+  "username": "kid1",
+  "password": "their-pin",
+  "display_name": "Alex",
+  "role": "child"
+}
+```
+
+## Parental controls (child accounts)
+
+Configured by parents at `PUT /api/parental/{child_id}/settings` or in the mobile **Parental controls** screen:
+
+- Block explicit content (keyword filter)
+- Custom blocked keywords and video IDs
+- Disable search
+- Daily listening limit (minutes)
+- Allowed listening hours (server local time)
+
+Search results for blocked content show as unavailable; streams are rejected server-side.
+
+## AI / LLM setup
+
+Tuneflow calls any **OpenAI-compatible** chat API. Works with:
+
+| Provider | Example `LLM_BASE_URL` |
+|----------|------------------------|
+| **Ollama** (LAN) | `http://192.168.1.100:11434/v1` |
+| **LM Studio** | `http://192.168.1.100:1234/v1` |
+| **OpenAI** | `https://api.openai.com/v1` |
+
+```env
+LLM_ENABLED=true
+LLM_BASE_URL=http://192.168.1.100:11434/v1
+LLM_API_KEY=          # leave blank for Ollama
+LLM_MODEL=llama3.2
+```
+
+The LLM does **not** need to run on the same machine as the API — only on a reachable LAN IP.
+
+Mobile **Discover** tab:
+- `GET /api/ai/insights` — listening patterns summary
+- `GET /api/ai/recommendations` — personalized song suggestions (LLM proposes searches, server resolves tracks via Piped)
+
+Check connectivity: `GET /api/ai/status`
+
 ## Self-hosted Piped (optional)
 
-By default the API uses a public Piped instance. To run your own:
-
 ```powershell
-# In .env:
-# PIPED_BASE_URL=http://piped-backend:8080
-
+# In .env: PIPED_BASE_URL=http://piped-backend:8080
 docker compose --profile piped up --build
 ```
 
-For a full production Piped deployment (PostgreSQL, proxy, etc.), see the [official Piped docs](https://github.com/TeamPiped/Piped).
-
 ## API overview
 
-All `/api/*` routes require `Authorization: Bearer <TUNEFLOW_API_TOKEN>`.
+Authenticated routes use `Authorization: Bearer <jwt>`.
 
 | Endpoint | Description |
 |----------|-------------|
+| `GET /api/auth/setup-status` | Whether first-time setup is needed |
+| `POST /api/auth/setup` | Create first parent account |
+| `POST /api/auth/login` | Sign in |
+| `GET /api/auth/me` | Current user |
+| `GET/POST /api/users` | List/create family accounts (parent) |
+| `GET/PUT /api/parental/{child_id}/settings` | Parental controls |
+| `GET /api/ai/status` | LLM connectivity |
+| `GET /api/ai/insights` | AI listening analysis |
+| `GET /api/ai/recommendations` | AI music suggestions |
 | `GET /api/music/search?q=` | Search songs |
 | `GET /api/music/stream/{video_id}` | Resolve audio stream URL |
-| `GET/POST /api/playlists` | List/create playlists |
-| `GET /api/playlists/{id}` | Playlist with tracks |
-| `POST /api/playlists/{id}/tracks` | Add track |
-| `GET/POST /api/history` | Play history |
-| `GET/POST/DELETE /api/likes` | Liked songs |
-
-## Roadmap
-
-- [ ] Like button in player UI
-- [ ] Add-to-playlist picker from search
-- [ ] `react-native-track-player` dev build for richer lock-screen controls
-- [ ] YouTube playlist import by URL
-- [ ] Simple recommendations from play history
+| `GET/POST /api/playlists` | Per-user playlists |
+| `GET/POST /api/history` | Per-user play history |
+| `GET/POST/DELETE /api/likes` | Per-user likes |
 
 ## Personal use note
 
-This project wraps YouTube for personal listening. It is not a licensed music service and is not intended for public distribution.
+This project wraps YouTube for personal household listening. It is not a licensed music service and is not intended for public distribution.

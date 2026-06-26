@@ -37,6 +37,8 @@ export default function SearchScreen() {
     }
   };
 
+  const playable = results.filter((track) => !track.blocked_reason);
+
   return (
     <View style={styles.container}>
       <View style={styles.searchRow}>
@@ -61,7 +63,13 @@ export default function SearchScreen() {
         data={results}
         keyExtractor={(item) => item.video_id}
         renderItem={({ item }) => (
-          <TrackRow track={item} onPress={() => void playTrack(item, results)} />
+          <TrackRow
+            track={item}
+            subtitle={item.blocked_reason ? `Blocked: ${item.blocked_reason}` : item.artist ?? "Unknown artist"}
+            onPress={
+              item.blocked_reason ? undefined : () => void playTrack(item, playable)
+            }
+          />
         )}
         ListEmptyComponent={
           !loading ? <Text style={styles.empty}>Search YouTube’s music catalog via your server.</Text> : null

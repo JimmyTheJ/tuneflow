@@ -1,6 +1,13 @@
 from datetime import datetime
+from enum import Enum
 
 from pydantic import BaseModel, Field
+
+
+class UserRole(str, Enum):
+    parent = "parent"
+    adult = "adult"
+    child = "child"
 
 
 class TrackBase(BaseModel):
@@ -13,6 +20,83 @@ class TrackBase(BaseModel):
 
 class TrackRead(TrackBase):
     pass
+
+
+class UserRead(BaseModel):
+    id: int
+    username: str
+    display_name: str
+    role: UserRole
+    is_active: bool
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class LoginRequest(BaseModel):
+    username: str = Field(min_length=2, max_length=80)
+    password: str = Field(min_length=4, max_length=128)
+
+
+class SetupRequest(BaseModel):
+    username: str = Field(min_length=2, max_length=80)
+    password: str = Field(min_length=4, max_length=128)
+    display_name: str = Field(min_length=1, max_length=120)
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: UserRead
+
+
+class SetupStatus(BaseModel):
+    needs_setup: bool
+
+
+class UserCreate(BaseModel):
+    username: str = Field(min_length=2, max_length=80)
+    password: str = Field(min_length=4, max_length=128)
+    display_name: str = Field(min_length=1, max_length=120)
+    role: UserRole = UserRole.adult
+
+
+class UserUpdate(BaseModel):
+    display_name: str | None = Field(default=None, min_length=1, max_length=120)
+    is_active: bool | None = None
+
+
+class ResetPasswordRequest(BaseModel):
+    password: str = Field(min_length=4, max_length=128)
+
+
+class ParentalSettingsRead(BaseModel):
+    child_user_id: int
+    block_explicit: bool
+    search_enabled: bool
+    max_daily_minutes: int | None
+    allowed_start_hour: int = Field(ge=0, le=23)
+    allowed_end_hour: int = Field(ge=0, le=23)
+    blocked_keywords: list[str]
+    blocked_video_ids: list[str]
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ParentalSettingsUpdate(BaseModel):
+    block_explicit: bool | None = None
+    search_enabled: bool | None = None
+    max_daily_minutes: int | None = Field(default=None, ge=0, le=24 * 60)
+    allowed_start_hour: int | None = Field(default=None, ge=0, le=23)
+    allowed_end_hour: int | None = Field(default=None, ge=0, le=23)
+    blocked_keywords: list[str] | None = None
+    blocked_video_ids: list[str] | None = None
+
+
+class ChildProfile(BaseModel):
+    user: UserRead
+    settings: ParentalSettingsRead
 
 
 class PlaylistCreate(BaseModel):
@@ -72,7 +156,7 @@ class LikeRead(TrackBase):
 
 
 class SearchResult(TrackRead):
-    pass
+    blocked_reason: str | None = None
 
 
 class StreamInfo(BaseModel):
@@ -86,3 +170,30 @@ class StreamInfo(BaseModel):
 
 class ReorderTracksRequest(BaseModel):
     track_ids: list[int] = Field(min_length=1)
+
+
+class LlmStatus(BaseModel):
+    enabled: bool
+    configured: bool
+    reachable: bool
+    base_url: str
+    model: str
+    detail: str | None = None
+
+
+class AiSuggestion(BaseModel):
+    query: str
+    reason: str
+    tracks: list[TrackRead] = []
+
+
+class AiRecommendations(BaseModel):
+    summary: str
+    suggestions: list[AiSuggestion]
+
+
+class AiInsights(BaseModel):
+    summary: str
+    top_artists: list[str]
+    listening_patterns: list[str]
+    recommendations: list[str]

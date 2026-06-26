@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.database import init_db
-from app.routers import history, likes, music, playlists
+from app.routers import ai, auth, history, likes, music, parental, playlists, users
 
 
 @asynccontextmanager
@@ -14,7 +14,7 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title="Tuneflow API", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Tuneflow API", version="0.2.0", lifespan=lifespan)
 
 origins = [origin.strip() for origin in settings.cors_origins.split(",") if origin.strip()]
 app.add_middleware(
@@ -25,6 +25,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth.router, prefix="/api")
+app.include_router(users.router, prefix="/api")
+app.include_router(parental.router, prefix="/api")
+app.include_router(ai.router, prefix="/api")
 app.include_router(music.router, prefix="/api")
 app.include_router(playlists.router, prefix="/api")
 app.include_router(history.router, prefix="/api")

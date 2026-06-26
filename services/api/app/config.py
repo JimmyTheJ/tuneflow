@@ -4,10 +4,23 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    tuneflow_api_token: str = "dev-token-change-me"
     database_url: str = "sqlite+aiosqlite:///./data/tuneflow.db"
     piped_base_url: str = "https://pipedapi.kavin.rocks"
     cors_origins: str = "*"
+
+    jwt_secret: str = "change-me-to-a-long-random-jwt-secret"
+    jwt_algorithm: str = "HS256"
+    access_token_expire_minutes: int = 60 * 24 * 7
+
+    bootstrap_username: str = "admin"
+    bootstrap_password: str = "changeme"
+    bootstrap_display_name: str = "Parent"
+
+    llm_enabled: bool = True
+    llm_base_url: str = "http://127.0.0.1:11434/v1"
+    llm_api_key: str = ""
+    llm_model: str = "llama3.2"
+    llm_timeout_sec: int = 120
 
 
 settings = Settings()
