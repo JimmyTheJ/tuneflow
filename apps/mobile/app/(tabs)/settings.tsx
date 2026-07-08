@@ -2,25 +2,110 @@ import { router } from "expo-router";
 import { useEffect, useState } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 
+import { PinModal } from "@/components/PinModal";
+import { api } from "@/lib/api";
 import { getApiUrl, setApiUrl } from "@/lib/settings";
 import { useAuthStore } from "@/stores/auth";
+import type { ParentalSettings } from "@/types";
 
 export default function SettingsScreen() {
   const user = useAuthStore((state) => state.user);
   const logout = useAuthStore((state) => state.logout);
   const [apiUrl, setApiUrlState] = useState("http://localhost:8000");
   const [saved, setSaved] = useState(false);
+  const [parentPin, setParentPin] = useState("");
+  const [hasParentPin, setHasParentPin] = useState(false);
+  const [childSettings, setChildSettings] = useState<ParentalSettings | null>(null);
+  const [pinModalVisible, setPinModalVisible] = useState(false);
+  const [pinAction, setPinAction] = useState<"logout" | "switch" | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const isChild = user?.role === "child";
+  const isParent = user?.role === "parent";
 
   useEffect(() => {
     void (async () => {
       setApiUrlState(await getApiUrl());
+      if (isParent) {
+        try {
+          const status = await api.parentPinStatus();
+          setHasParentPin(status.has_pin);
+        } catch {
+          // ignore
+        }
+      }
+      if (isChild) {
+        try {
+          setChildSettings(await api.getMyChildSettings());
+        } catch {
+          // ignore
+        }
+      }
     })();
-  }, []);
+  }, [isChild, isParent]);
 
-  const save = async () => {
+  const saveServer = async () => {
     await setApiUrl(apiUrl);
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
+  };
+
+  const saveParentPin = async () => {
+    if (parentPin.length < 4) {
+      setError("PIN must be at least 4 characters");
+      return;
+    }
+    setError(null);
+    try {
+      await api.setParentPin(parentPin);
+      setHasParentPin(true);
+      setParentPin("");
+      setMessage("Parent PIN saved");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save PIN");
+    }
+  };
+
+  const requestProtectedAction = async (action: "logout" | "switch") => {
+    if (!isChild) {
+      if (action === "logout") {
+        await logout();
+      } else {
+        await logout();
+        router.replace("/(auth)/login");
+      }
+      return;
+    }
+
+    try {
+      const { enforced } = await api.parentPinEnforced();
+      if (!enforced) {
+        if (action === "logout") {
+          await logout();
+        } else {
+          await logout();
+          router.replace("/(auth)/login");
+        }
+        return;
+      }
+    } catch {
+      // fall through to PIN modal
+    }
+
+    setPinAction(action);
+    setPinModalVisible(true);
+  };
+
+  const handlePinSuccess = async () => {
+    setPinModalVisible(false);
+    if (pinAction === "logout") {
+      await logout();
+    } else if (pinAction === "switch") {
+      await logout();
+      router.replace("/(auth)/login");
+    }
+    setPinAction(null);
   };
 
   return (
@@ -35,39 +120,94 @@ export default function SettingsScreen() {
         </View>
       ) : null}
 
-      <Pressable
-        style={styles.secondaryButton}
-        onPress={() => void logout()}
-      >
+      {isChild && childSettings ? (
+        <View style={styles.card}>
+          <Text style={styles.label}>Your limits</Text>
+          <Text style={styles.limitText}>
+            {childSettings.max_daily_minutes != null
+              ? `${childSettings.max_daily_minutes} min/day`
+              : "No daily limit"}
+            {" · "}
+            {childSettings.search_enabled ? "Search on" : "Search off"}
+          </Text>
+        </View>
+      ) : null}
+
+      <Pressable style={styles.secondaryButton} onPress={() => void requestProtectedAction("switch")}>
+        <Text style={styles.secondaryButtonText}>Switch account</Text>
+      </Pressable>
+
+      <Pressable style={styles.secondaryButton} onPress={() => void requestProtectedAction("logout")}>
         <Text style={styles.secondaryButtonText}>Sign out</Text>
       </Pressable>
 
-      {user?.role === "parent" ? (
-        <Pressable style={styles.secondaryButton} onPress={() => router.push("/parental")}>
-          <Text style={styles.secondaryButtonText}>Parental controls</Text>
-        </Pressable>
+      {isParent ? (
+        <>
+          <Pressable style={styles.secondaryButton} onPress={() => router.push("/family")}>
+            <Text style={styles.secondaryButtonText}>Family members</Text>
+          </Pressable>
+          <Pressable style={styles.secondaryButton} onPress={() => router.push("/parental")}>
+            <Text style={styles.secondaryButtonText}>Parental controls</Text>
+          </Pressable>
+
+          <Text style={[styles.heading, { marginTop: 20, fontSize: 22 }]}>Parent PIN</Text>
+          <Text style={styles.help}>
+            Required for children to switch accounts or sign out on a shared device.
+            {hasParentPin ? " PIN is set." : " No PIN set yet."}
+          </Text>
+          <TextInput
+            value={parentPin}
+            onChangeText={setParentPin}
+            keyboardType="number-pad"
+            secureTextEntry
+            style={styles.input}
+            placeholder="4+ digit PIN"
+            placeholderTextColor="#737373"
+          />
+          <Pressable style={styles.secondaryButton} onPress={() => void saveParentPin()}>
+            <Text style={styles.secondaryButtonText}>
+              {hasParentPin ? "Update parent PIN" : "Set parent PIN"}
+            </Text>
+          </Pressable>
+        </>
       ) : null}
 
-      <Text style={[styles.heading, { marginTop: 28 }]}>Server</Text>
-      <Text style={styles.help}>
-        Point the app at your self-hosted Tuneflow API. On a phone, use your PC’s LAN IP or Tailscale
-        address.
-      </Text>
+      {!isChild ? (
+        <>
+          <Text style={[styles.heading, { marginTop: 28 }]}>Server</Text>
+          <Text style={styles.help}>
+            Point the app at your self-hosted Tuneflow API.
+          </Text>
+          <Text style={styles.label}>API URL</Text>
+          <TextInput
+            value={apiUrl}
+            onChangeText={setApiUrlState}
+            autoCapitalize="none"
+            autoCorrect={false}
+            style={styles.input}
+            placeholder="http://192.168.1.50:8000"
+            placeholderTextColor="#737373"
+          />
+          <Pressable style={styles.button} onPress={() => void saveServer()}>
+            <Text style={styles.buttonText}>{saved ? "Saved" : "Save server URL"}</Text>
+          </Pressable>
+        </>
+      ) : null}
 
-      <Text style={styles.label}>API URL</Text>
-      <TextInput
-        value={apiUrl}
-        onChangeText={setApiUrlState}
-        autoCapitalize="none"
-        autoCorrect={false}
-        style={styles.input}
-        placeholder="http://192.168.1.50:8000"
-        placeholderTextColor="#737373"
+      {message ? <Text style={styles.message}>{message}</Text> : null}
+      {error ? <Text style={styles.error}>{error}</Text> : null}
+
+      <PinModal
+        visible={pinModalVisible}
+        title="Parent PIN required"
+        message="Enter a parent PIN to switch accounts or sign out."
+        onVerify={async (pin) => (await api.verifyParentPin(pin)).valid}
+        onSuccess={() => void handlePinSuccess()}
+        onCancel={() => {
+          setPinModalVisible(false);
+          setPinAction(null);
+        }}
       />
-
-      <Pressable style={styles.button} onPress={() => void save()}>
-        <Text style={styles.buttonText}>{saved ? "Saved" : "Save server URL"}</Text>
-      </Pressable>
     </View>
   );
 }
@@ -89,7 +229,7 @@ const styles = StyleSheet.create({
     color: "#a3a3a3",
     fontSize: 15,
     lineHeight: 22,
-    marginBottom: 20,
+    marginBottom: 12,
   },
   card: {
     backgroundColor: "#171717",
@@ -106,6 +246,10 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 17,
     fontWeight: "600",
+  },
+  limitText: {
+    color: "#d4d4d4",
+    fontSize: 15,
   },
   input: {
     backgroundColor: "#171717",
@@ -138,5 +282,13 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontWeight: "600",
     fontSize: 15,
+  },
+  message: {
+    color: "#22c55e",
+    marginTop: 12,
+  },
+  error: {
+    color: "#f87171",
+    marginTop: 12,
   },
 });

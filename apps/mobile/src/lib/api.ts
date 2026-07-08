@@ -2,9 +2,12 @@ import type {
   AiInsights,
   AiRecommendations,
   ChildProfile,
+  ChildUsageToday,
   LikeEntry,
   LlmStatus,
   ParentalSettings,
+  ParentPinEnforced,
+  ParentPinStatus,
   PlayHistoryEntry,
   Playlist,
   PlaylistDetail,
@@ -100,8 +103,21 @@ export const api = {
     display_name: string;
     role: "adult" | "child";
   }) => request<User>("/api/users", { method: "POST", body: payload }),
+  updateUser: (userId: number, payload: { display_name?: string; is_active?: boolean }) =>
+    request<User>(`/api/users/${userId}`, { method: "PATCH", body: payload }),
+  resetPassword: (userId: number, password: string) =>
+    request<void>(`/api/users/${userId}/reset-password`, { method: "POST", body: { password } }),
+
+  parentPinStatus: () => request<ParentPinStatus>("/api/auth/parent-pin/status"),
+  parentPinEnforced: () => request<ParentPinEnforced>("/api/auth/parent-pin/enforced"),
+  setParentPin: (pin: string) =>
+    request<void>("/api/auth/parent-pin", { method: "PUT", body: { pin } }),
+  verifyParentPin: (pin: string) =>
+    request<{ valid: boolean }>("/api/auth/verify-parent-pin", { method: "POST", body: { pin } }),
 
   listChildren: () => request<ChildProfile[]>("/api/parental/children"),
+  getChildUsage: (childId: number) => request<ChildUsageToday>(`/api/parental/${childId}/usage`),
+  getChildHistory: (childId: number) => request<PlayHistoryEntry[]>(`/api/parental/${childId}/history`),
   updateChildSettings: (childId: number, settings: Partial<ParentalSettings>) =>
     request<ParentalSettings>(`/api/parental/${childId}/settings`, {
       method: "PUT",

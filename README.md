@@ -79,13 +79,14 @@ POST /api/users
 
 ## Parental controls (child accounts)
 
-Configured by parents at `PUT /api/parental/{child_id}/settings` or in the mobile **Parental controls** screen:
+Configured by parents in **Settings → Parental controls** (Controls + History tabs):
 
 - Block explicit content (keyword filter)
 - Custom blocked keywords and video IDs
 - Disable search
-- Daily listening limit (minutes)
+- Daily listening limit (minutes) with usage dashboard
 - Allowed listening hours (server local time)
+- Per-child play history view
 
 Search results for blocked content show as unavailable; streams are rejected server-side.
 
@@ -133,6 +134,11 @@ Authenticated routes use `Authorization: Bearer <jwt>`.
 | `GET /api/auth/me` | Current user |
 | `GET/POST /api/users` | List/create family accounts (parent) |
 | `GET/PUT /api/parental/{child_id}/settings` | Parental controls |
+| `GET /api/parental/{child_id}/usage` | Child's listening time today |
+| `GET /api/parental/{child_id}/history` | Child's play history (parent) |
+| `PUT /api/auth/parent-pin` | Set parent PIN |
+| `GET /api/auth/parent-pin/enforced` | Whether PIN is required for child exit |
+| `POST /api/auth/verify-parent-pin` | Verify parent PIN |
 | `GET /api/ai/status` | LLM connectivity |
 | `GET /api/ai/insights` | AI listening analysis |
 | `GET /api/ai/recommendations` | AI music suggestions |

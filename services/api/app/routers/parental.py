@@ -1,5 +1,7 @@
+from datetime import UTC, datetime
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -11,7 +13,7 @@ from app.auth import (
 )
 from app.database import get_db
 from app.models import ParentalSettings, PlayHistory, User, UserRole
-from app.schemas import ChildProfile, ParentalSettingsRead, ParentalSettingsUpdate, PlayHistoryRead, UserRead
+from app.schemas import ChildProfile, ChildUsageToday, ParentalSettingsRead, ParentalSettingsUpdate, PlayHistoryRead, UserRead
 
 router = APIRouter(prefix="/parental", tags=["parental"])
 
@@ -70,6 +72,32 @@ async def update_child_settings(
     await db.commit()
     await db.refresh(settings)
     return settings_to_read(settings)
+
+
+@router.get("/{child_id}/usage", response_model=ChildUsageToday)
+async def get_child_usage_today(
+    child_id: int,
+    _: User = Depends(require_parent),
+    db: AsyncSession = Depends(get_db),
+) -> ChildUsageToday:
+    settings = await _get_child_settings_row(db, child_id)
+    start_of_day = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+    listened_sec = await db.scalar(
+        select(func.coalesce(func.sum(PlayHistory.listened_sec), 0)).where(
+            PlayHistory.user_id == child_id,
+            PlayHistory.played_at >= start_of_day,
+        )
+    )
+    listened_minutes = int((listened_sec or 0) // 60)
+    remaining = None
+    if settings.max_daily_minutes is not None:
+        remaining = max(settings.max_daily_minutes - listened_minutes, 0)
+    return ChildUsageToday(
+        child_user_id=child_id,
+        listened_minutes_today=listened_minutes,
+        max_daily_minutes=settings.max_daily_minutes,
+        remaining_minutes=remaining,
+    )
 
 
 @router.get("/{child_id}/history", response_model=list[PlayHistoryRead])

@@ -70,6 +70,33 @@ class ResetPasswordRequest(BaseModel):
     password: str = Field(min_length=4, max_length=128)
 
 
+class ParentPinSet(BaseModel):
+    pin: str = Field(min_length=4, max_length=12)
+
+
+class ParentPinVerify(BaseModel):
+    pin: str = Field(min_length=4, max_length=12)
+
+
+class ParentPinStatus(BaseModel):
+    has_pin: bool
+
+
+class ParentPinEnforced(BaseModel):
+    enforced: bool
+
+
+class ParentPinVerifyResponse(BaseModel):
+    valid: bool
+
+
+class ChildUsageToday(BaseModel):
+    child_user_id: int
+    listened_minutes_today: int
+    max_daily_minutes: int | None
+    remaining_minutes: int | None
+
+
 class ParentalSettingsRead(BaseModel):
     child_user_id: int
     block_explicit: bool

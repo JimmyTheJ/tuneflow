@@ -74,9 +74,24 @@ export type ParentalSettings = {
   updated_at: string;
 };
 
+export type ChildUsageToday = {
+  child_user_id: number;
+  listened_minutes_today: number;
+  max_daily_minutes: number | null;
+  remaining_minutes: number | null;
+};
+
 export type ChildProfile = {
   user: User;
   settings: ParentalSettings;
+};
+
+export type ParentPinStatus = {
+  has_pin: boolean;
+};
+
+export type ParentPinEnforced = {
+  enforced: boolean;
 };
 
 export type LlmStatus = {
