@@ -65,7 +65,7 @@ npx expo start
 | **adult** | Full personal library, search, AI discover |
 | **child** | Personal library, subject to parental rules |
 
-Parents create accounts via API (`POST /api/users`) or the mobile parental screen (child management UI can be expanded).
+Parents create accounts in the app via **Settings → Family members**, or via API:
 
 ```json
 POST /api/users
@@ -76,6 +76,12 @@ POST /api/users
   "role": "child"
 }
 ```
+
+Each family member signs in with their own username — libraries stay separate.
+
+### Parent PIN (shared devices)
+
+Parents set a PIN under **Settings → Parent PIN**. When set, child accounts must enter it to switch accounts or sign out. If no PIN is configured, children can switch freely.
 
 ## Parental controls (child accounts)
 
