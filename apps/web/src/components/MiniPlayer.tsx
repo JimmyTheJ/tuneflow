@@ -1,12 +1,10 @@
 import { Link } from "react-router-dom";
+import { PlayerProgress } from "@/components/PlayerProgress";
+import { PlayerTransport } from "@/components/PlayerTransport";
 import { usePlayerStore } from "@/stores/playerStore";
 
 export function MiniPlayer() {
   const current = usePlayerStore((s) => s.current);
-  const isPlaying = usePlayerStore((s) => s.isPlaying);
-  const isLoading = usePlayerStore((s) => s.isLoading);
-  const togglePlayback = usePlayerStore((s) => s.togglePlayback);
-  const playNext = usePlayerStore((s) => s.playNext);
   const error = usePlayerStore((s) => s.error);
   const clearError = usePlayerStore((s) => s.clearError);
 
@@ -23,19 +21,22 @@ export function MiniPlayer() {
         </div>
       ) : null}
       <div className="mini-player">
-      <Link to="/player" className="mini-player-meta">
-        <div className="track-title">{current.title}</div>
-        <div className="track-subtitle">{current.artist ?? "Unknown artist"}</div>
-      </Link>
-      <div className="mini-player-controls">
-        <button type="button" onClick={() => togglePlayback()} aria-label="Play/Pause">
-          {isLoading ? "…" : isPlaying ? "⏸" : "▶"}
-        </button>
-        <button type="button" onClick={() => void playNext()} aria-label="Next">
-          ⏭
-        </button>
+        <div className="mini-player-top">
+          <Link to="/player" className="mini-player-meta">
+            {current.thumbnail_url ? (
+              <img src={current.thumbnail_url} alt="" className="mini-player-thumb" />
+            ) : (
+              <div className="mini-player-thumb mini-player-thumb-fallback" />
+            )}
+            <div className="mini-player-text">
+              <div className="track-title">{current.title}</div>
+              <div className="track-subtitle">{current.artist ?? "Unknown artist"}</div>
+            </div>
+          </Link>
+          <PlayerTransport />
+        </div>
+        <PlayerProgress className="mini-player-progress" />
       </div>
-    </div>
     </>
   );
 }

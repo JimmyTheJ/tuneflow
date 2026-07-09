@@ -1,14 +1,18 @@
+import { PlayerProgress } from "@/components/PlayerProgress";
+import { PlayerTransport } from "@/components/PlayerTransport";
 import { usePlayerStore } from "@/stores/playerStore";
 
 export function PlayerPage() {
   const current = usePlayerStore((s) => s.current);
-  const isPlaying = usePlayerStore((s) => s.isPlaying);
-  const isLoading = usePlayerStore((s) => s.isLoading);
-  const togglePlayback = usePlayerStore((s) => s.togglePlayback);
-  const playNext = usePlayerStore((s) => s.playNext);
   const stop = usePlayerStore((s) => s.stop);
 
-  if (!current) return <div className="page"><p className="muted">Nothing playing</p></div>;
+  if (!current) {
+    return (
+      <div className="page">
+        <p className="muted">Nothing playing</p>
+      </div>
+    );
+  }
 
   return (
     <div className="page player-page">
@@ -19,12 +23,12 @@ export function PlayerPage() {
       )}
       <h1>{current.title}</h1>
       <p className="muted">{current.artist ?? "Unknown artist"}</p>
-      <div className="player-controls">
-        <button type="button" onClick={() => stop()}>Stop</button>
-        <button type="button" className="btn-primary btn-lg" onClick={() => togglePlayback()}>
-          {isLoading ? "…" : isPlaying ? "Pause" : "Play"}
+      <div className="player-page-controls">
+        <PlayerTransport size="large" />
+        <PlayerProgress className="player-page-progress" />
+        <button type="button" className="btn-secondary player-stop-btn" onClick={() => stop()}>
+          Stop
         </button>
-        <button type="button" onClick={() => void playNext()}>Next</button>
       </div>
     </div>
   );
