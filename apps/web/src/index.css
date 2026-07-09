@@ -236,6 +236,29 @@ textarea {
   margin: 0;
 }
 
+.mini-player-error {
+  position: fixed;
+  left: 220px;
+  right: 0;
+  bottom: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 24px;
+  background: #3a1f1f;
+  border-top: 1px solid #5c2b2b;
+  color: #ffb4b4;
+  font-size: 0.9rem;
+}
+
+.mini-player-error button {
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+}
+
 .mini-player {
   position: fixed;
   left: 220px;
@@ -448,7 +471,8 @@ textarea {
     padding: 16px;
   }
 
-  .mini-player {
+  .mini-player,
+  .mini-player-error {
     left: 0;
   }
 }

@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { api } from "@/lib/api";
+import { getAccessToken, getApiUrl } from "@/lib/settings";
 import type { Track } from "@/types";
 
 type PlayerState = {
@@ -8,10 +9,12 @@ type PlayerState = {
   isLoading: boolean;
   queue: Track[];
   audio: HTMLAudioElement | null;
+  error: string | null;
   playTrack: (track: Track, queue?: Track[]) => Promise<void>;
   togglePlayback: () => void;
   playNext: () => Promise<void>;
   stop: () => void;
+  clearError: () => void;
 };
 
 export const usePlayerStore = create<PlayerState>((set, get) => ({
@@ -20,6 +23,9 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   isLoading: false,
   queue: [],
   audio: null,
+  error: null,
+
+  clearError: () => set({ error: null }),
 
   playTrack: async (track, queue = []) => {
     const { audio: existing } = get();
@@ -28,20 +34,25 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       existing.src = "";
     }
 
-    set({ isLoading: true, current: track, queue: queue.length ? queue : [track] });
+    set({ isLoading: true, current: track, queue: queue.length ? queue : [track], error: null });
 
     try {
       const stream = await api.getStream(track.video_id);
-      const audio = new Audio(stream.audio_url);
+      const token = getAccessToken();
+      const audioUrl = `${getApiUrl()}${stream.audio_url}?token=${encodeURIComponent(token)}`;
+      const audio = new Audio(audioUrl);
       audio.addEventListener("ended", () => void get().playNext());
       audio.addEventListener("play", () => set({ isPlaying: true }));
       audio.addEventListener("pause", () => set({ isPlaying: false }));
+      audio.addEventListener("error", () => {
+        set({ isLoading: false, isPlaying: false, error: "Playback failed — try another track" });
+      });
       await audio.play();
       set({ audio, isPlaying: true, isLoading: false });
       void api.recordPlay(track).catch(() => undefined);
     } catch (error) {
-      set({ isLoading: false, isPlaying: false });
-      throw error;
+      const message = error instanceof Error ? error.message : "Playback failed";
+      set({ isLoading: false, isPlaying: false, error: message });
     }
   },
 

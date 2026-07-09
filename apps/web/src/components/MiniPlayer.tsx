@@ -7,11 +7,22 @@ export function MiniPlayer() {
   const isLoading = usePlayerStore((s) => s.isLoading);
   const togglePlayback = usePlayerStore((s) => s.togglePlayback);
   const playNext = usePlayerStore((s) => s.playNext);
+  const error = usePlayerStore((s) => s.error);
+  const clearError = usePlayerStore((s) => s.clearError);
 
   if (!current) return null;
 
   return (
-    <div className="mini-player">
+    <>
+      {error ? (
+        <div className="mini-player-error">
+          <span>{error}</span>
+          <button type="button" onClick={() => clearError()} aria-label="Dismiss">
+            ✕
+          </button>
+        </div>
+      ) : null}
+      <div className="mini-player">
       <Link to="/player" className="mini-player-meta">
         <div className="track-title">{current.title}</div>
         <div className="track-subtitle">{current.artist ?? "Unknown artist"}</div>
@@ -25,5 +36,6 @@ export function MiniPlayer() {
         </button>
       </div>
     </div>
+    </>
   );
 }

@@ -2,7 +2,7 @@ import json
 import re
 from datetime import UTC, datetime
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Query, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError
 from sqlalchemy import func, select
@@ -63,9 +63,23 @@ async def get_current_user(
 ) -> User:
     if credentials is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    return await _user_from_token(credentials.credentials, db)
 
+
+async def get_current_user_from_token(
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    token: str | None = Query(default=None, alias="token"),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    raw = credentials.credentials if credentials else token
+    if not raw:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    return await _user_from_token(raw, db)
+
+
+async def _user_from_token(raw_token: str, db: AsyncSession) -> User:
     try:
-        payload = decode_access_token(credentials.credentials)
+        payload = decode_access_token(raw_token)
         username = payload.get("sub")
         if not username:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")

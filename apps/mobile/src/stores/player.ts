@@ -2,6 +2,7 @@ import { Audio } from "expo-av";
 import { create } from "zustand";
 
 import { api } from "@/lib/api";
+import { getAccessToken, getApiUrl } from "@/lib/settings";
 import type { Track } from "@/types";
 
 type PlayerState = {
@@ -44,8 +45,10 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
     try {
       const stream = await api.getStream(track.video_id);
+      const token = getAccessToken();
+      const audioUrl = `${getApiUrl()}${stream.audio_url}?token=${encodeURIComponent(token)}`;
       const { sound } = await Audio.Sound.createAsync(
-        { uri: stream.audio_url },
+        { uri: audioUrl },
         { shouldPlay: true },
       );
 
@@ -59,7 +62,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
         }
       });
 
-      set({ sound, audioUrl: stream.audio_url, isPlaying: true, isLoading: false });
+      set({ sound, audioUrl, isPlaying: true, isLoading: false });
       void api.recordPlay(track).catch(() => undefined);
     } catch (error) {
       set({ isLoading: false, isPlaying: false });
