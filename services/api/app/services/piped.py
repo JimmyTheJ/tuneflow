@@ -17,18 +17,45 @@ def parse_artist_title(raw_title: str) -> tuple[str | None, str]:
     return match.group("artist").strip(), match.group("title").strip()
 
 
+def piped_instance_urls() -> list[str]:
+    urls = [settings.piped_base_url, *settings.piped_fallback_urls.split(",")]
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for raw in urls:
+        url = raw.strip().rstrip("/")
+        if url and url not in seen:
+            seen.add(url)
+            ordered.append(url)
+    return ordered
+
+
 class PipedClient:
-    def __init__(self, base_url: str | None = None) -> None:
-        self.base_url = (base_url or settings.piped_base_url).rstrip("/")
+    def __init__(self) -> None:
+        self._active_base_url: str | None = None
+
+    @property
+    def base_url(self) -> str:
+        if self._active_base_url:
+            return self._active_base_url
+        urls = piped_instance_urls()
+        return urls[0] if urls else settings.piped_base_url.rstrip("/")
+
+    async def _request_json(self, path: str, *, params: dict | None = None) -> dict:
+        errors: list[str] = []
+        for base_url in piped_instance_urls():
+            try:
+                async with httpx.AsyncClient(timeout=20.0) as client:
+                    response = await client.get(f"{base_url}{path}", params=params)
+                    response.raise_for_status()
+                    self._active_base_url = base_url
+                    return response.json()
+            except httpx.HTTPError as exc:
+                errors.append(f"{base_url}: {exc}")
+        detail = "; ".join(errors[:3])
+        raise httpx.HTTPError(f"All Piped instances failed. {detail}")
 
     async def search(self, query: str, limit: int = 20) -> list[SearchResult]:
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            response = await client.get(
-                f"{self.base_url}/search",
-                params={"q": query, "filter": "music_songs"},
-            )
-            response.raise_for_status()
-            payload = response.json()
+        payload = await self._request_json("/search", params={"q": query, "filter": "music_songs"})
 
         results: list[SearchResult] = []
         for item in payload.get("items", [])[:limit]:
@@ -47,10 +74,7 @@ class PipedClient:
         return results
 
     async def get_stream(self, video_id: str) -> StreamInfo:
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            response = await client.get(f"{self.base_url}/streams/{video_id}")
-            response.raise_for_status()
-            payload = response.json()
+        payload = await self._request_json(f"/streams/{video_id}")
 
         audio_streams = [
             stream

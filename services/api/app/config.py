@@ -5,7 +5,8 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     database_url: str = "sqlite+aiosqlite:///./data/tuneflow.db"
-    piped_base_url: str = "https://pipedapi.kavin.rocks"
+    piped_base_url: str = "https://api.piped.private.coffee"
+    piped_fallback_urls: str = "https://api.piped.private.coffee,https://pipedapi-libre.kavin.rocks,https://pipedapi.kavin.rocks"
     cors_origins: str = "*"
 
     jwt_secret: str = "change-me-to-a-long-random-jwt-secret"
