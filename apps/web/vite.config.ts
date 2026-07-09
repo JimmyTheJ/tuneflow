@@ -10,6 +10,11 @@ export default defineConfig({
     },
   },
   server: {
-    port: 5173,
+    port: Number(process.env.WEB_PORT) || 5190,
+    strictPort: false,
+  },
+  preview: {
+    port: Number(process.env.WEB_PORT) || 5190,
+    strictPort: false,
   },
 });

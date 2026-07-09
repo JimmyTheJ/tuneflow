@@ -116,7 +116,7 @@ export function SettingsPage() {
       {!isChild ? (
         <>
           <h2>Server</h2>
-          <p className="muted">API URL for this browser app (default: localhost:8000)</p>
+          <p className="muted">API URL for this browser app (default: localhost:8010)</p>
           <input className="input" value={apiUrl} onChange={(e) => setApiUrlState(e.target.value)} />
           <button
             type="button"

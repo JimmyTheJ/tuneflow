@@ -20,7 +20,10 @@ copy .env.example .env
 docker compose up --build api
 ```
 
-API runs at `http://localhost:8000`. Interactive docs at `http://localhost:8000/docs`.
+API runs at `http://localhost:8010` by default. Interactive docs at `http://localhost:8010/docs`.
+
+> **Port conflicts?** Defaults avoid common ports (8000, 5173). Override anytime:
+> `uvicorn app.main:app --port 8020` and `WEB_PORT=5195 npm run dev`
 
 **Schema upgrade:** if you used an older single-user build, delete `data/tuneflow.db` before starting.
 
@@ -33,7 +36,7 @@ python -m venv .venv
 pip install -r requirements.txt
 mkdir data -Force
 copy ..\..\.env.example ..\..\.env
-uvicorn app.main:app --reload --port 8000
+uvicorn app.main:app --reload --port 8010
 ```
 
 On first startup (or via the mobile setup screen), a **parent** account is created from `BOOTSTRAP_USERNAME` / `BOOTSTRAP_PASSWORD` in `.env`.
@@ -47,7 +50,7 @@ Works on **Windows, Linux, and macOS** in any modern browser — same features a
 ```powershell
 # Terminal 1 — API
 cd D:\workspace\tuneflow\services\api
-.\.venv\Scripts\uvicorn.exe app.main:app --reload --port 8000
+.\.venv\Scripts\uvicorn.exe app.main:app --reload --port 8010
 
 # Terminal 2 — Web UI
 cd D:\workspace\tuneflow\apps\web
@@ -55,7 +58,7 @@ npm install
 npm run dev
 ```
 
-Open **http://localhost:5173**. The default API URL is `http://localhost:8000` (change in Settings if needed).
+Open **http://localhost:5190**. The default API URL is `http://localhost:8010` (change in Settings if you used a different API port).
 
 ### Docker (API + web together)
 
@@ -66,9 +69,11 @@ docker compose up --build api web
 
 | Service | URL |
 |---------|-----|
-| Web UI | http://localhost:3000 |
-| API | http://localhost:8000 |
-| API docs | http://localhost:8000/docs |
+| Web UI | http://localhost:3010 |
+| API | http://localhost:8010 |
+| API docs | http://localhost:8010/docs |
+
+Override host ports in `.env`: `API_PORT=8020`, `WEB_PORT=3020`.
 
 Set `VITE_API_URL` in `.env` before building if the browser needs a different API address (e.g. LAN IP).
 

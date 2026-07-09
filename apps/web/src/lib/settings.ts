@@ -1,7 +1,7 @@
 const API_URL_KEY = "tuneflow.apiUrl";
 const ACCESS_TOKEN_KEY = "tuneflow.accessToken";
 
-const DEFAULT_API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
+const DEFAULT_API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8010";
 
 export function getApiUrl(): string {
   return localStorage.getItem(API_URL_KEY) ?? DEFAULT_API_URL;
