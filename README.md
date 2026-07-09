@@ -8,6 +8,7 @@ Personal, self-hostable YouTube music player for your household — separate acc
 - **Discovery/streams**: [Piped](https://github.com/TeamPiped/Piped) (public instance by default, self-host optional)
 - **AI**: OpenAI-compatible LLM API (Ollama, LM Studio, OpenAI, etc. on your LAN or cloud)
 - **Mobile**: Expo (React Native) with `expo-av` playback
+- **Web**: React + Vite browser app for Windows/Linux/macOS desktops
 
 ## Quick start (API)
 
@@ -36,6 +37,40 @@ uvicorn app.main:app --reload --port 8000
 ```
 
 On first startup (or via the mobile setup screen), a **parent** account is created from `BOOTSTRAP_USERNAME` / `BOOTSTRAP_PASSWORD` in `.env`.
+
+## Web app (desktop browser)
+
+Works on **Windows, Linux, and macOS** in any modern browser — same features as mobile.
+
+### Development
+
+```powershell
+# Terminal 1 — API
+cd D:\workspace\tuneflow\services\api
+.\.venv\Scripts\uvicorn.exe app.main:app --reload --port 8000
+
+# Terminal 2 — Web UI
+cd D:\workspace\tuneflow\apps\web
+npm install
+npm run dev
+```
+
+Open **http://localhost:5173**. The default API URL is `http://localhost:8000` (change in Settings if needed).
+
+### Docker (API + web together)
+
+```powershell
+cd D:\workspace\tuneflow
+docker compose up --build api web
+```
+
+| Service | URL |
+|---------|-----|
+| Web UI | http://localhost:3000 |
+| API | http://localhost:8000 |
+| API docs | http://localhost:8000/docs |
+
+Set `VITE_API_URL` in `.env` before building if the browser needs a different API address (e.g. LAN IP).
 
 ## Mobile app
 

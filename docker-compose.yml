@@ -12,6 +12,17 @@ services:
       - tuneflow-data:/app/data
     restart: unless-stopped
 
+  web:
+    build:
+      context: ./apps/web
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
+    ports:
+      - "3000:80"
+    depends_on:
+      - api
+    restart: unless-stopped
+
   piped-backend:
     image: 1337kavin/piped-backend:latest
     profiles: ["piped"]
