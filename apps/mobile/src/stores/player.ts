@@ -18,6 +18,26 @@ type PlayerState = {
   stop: () => Promise<void>;
 };
 
+let playGeneration = 0;
+
+function isActiveGeneration(generation: number): boolean {
+  return generation === playGeneration;
+}
+
+async function disposeSound(sound: Audio.Sound | null): Promise<void> {
+  if (!sound) return;
+  try {
+    await sound.stopAsync();
+  } catch {
+    /* already stopped */
+  }
+  try {
+    await sound.unloadAsync();
+  } catch {
+    /* already unloaded */
+  }
+}
+
 async function configureAudio() {
   await Audio.setAudioModeAsync({
     playsInSilentModeIOS: true,
@@ -35,27 +55,41 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   sound: null,
 
   playTrack: async (track, queue = []) => {
-    const { sound: existing } = get();
-    if (existing) {
-      await existing.unloadAsync();
-    }
+    const generation = ++playGeneration;
 
-    set({ isLoading: true, current: track, queue: queue.length ? queue : [track] });
+    await disposeSound(get().sound);
+
+    set({
+      sound: null,
+      audioUrl: null,
+      isLoading: true,
+      isPlaying: false,
+      current: track,
+      queue: queue.length ? queue : [track],
+    });
+
     await configureAudio();
+
+    let pendingSound: Audio.Sound | null = null;
 
     try {
       const stream = await api.getStream(track.video_id);
+      if (!isActiveGeneration(generation)) return;
+
       const token = getAccessToken();
       const audioUrl = `${getApiUrl()}${stream.audio_url}?token=${encodeURIComponent(token)}`;
-      const { sound } = await Audio.Sound.createAsync(
-        { uri: audioUrl },
-        { shouldPlay: true },
-      );
+      const { sound } = await Audio.Sound.createAsync({ uri: audioUrl }, { shouldPlay: true });
+      pendingSound = sound;
+
+      if (!isActiveGeneration(generation)) {
+        await disposeSound(pendingSound);
+        return;
+      }
 
       sound.setOnPlaybackStatusUpdate((status) => {
-        if (!status.isLoaded) {
-          return;
-        }
+        if (!isActiveGeneration(generation)) return;
+        if (!status.isLoaded) return;
+
         set({ isPlaying: status.isPlaying });
         if (status.didJustFinish) {
           void get().playNext();
@@ -63,8 +97,12 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       });
 
       set({ sound, audioUrl, isPlaying: true, isLoading: false });
+      pendingSound = null;
       void api.recordPlay(track).catch(() => undefined);
     } catch (error) {
+      if (pendingSound) await disposeSound(pendingSound);
+      if (!isActiveGeneration(generation)) return;
+
       set({ isLoading: false, isPlaying: false });
       throw error;
     }
@@ -100,10 +138,8 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   },
 
   stop: async () => {
-    const { sound } = get();
-    if (sound) {
-      await sound.unloadAsync();
-    }
-    set({ sound: null, current: null, audioUrl: null, isPlaying: false, queue: [] });
+    playGeneration += 1;
+    await disposeSound(get().sound);
+    set({ sound: null, current: null, audioUrl: null, isPlaying: false, isLoading: false, queue: [] });
   },
 }));

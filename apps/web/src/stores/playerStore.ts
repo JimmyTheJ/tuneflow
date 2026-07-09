@@ -21,6 +21,19 @@ type PlayerState = {
   clearError: () => void;
 };
 
+let playGeneration = 0;
+
+function isActiveGeneration(generation: number): boolean {
+  return generation === playGeneration;
+}
+
+function disposeAudio(audio: HTMLAudioElement | null): void {
+  if (!audio) return;
+  audio.pause();
+  audio.removeAttribute("src");
+  audio.load();
+}
+
 function syncProgress(audio: HTMLAudioElement, track: Track) {
   const duration = Number.isFinite(audio.duration) ? audio.duration : (track.duration_sec ?? 0);
   return {
@@ -32,20 +45,34 @@ function syncProgress(audio: HTMLAudioElement, track: Track) {
 function attachAudioListeners(
   audio: HTMLAudioElement,
   track: Track,
+  generation: number,
   set: (partial: Partial<PlayerState>) => void,
   get: () => PlayerState,
 ) {
+  const shouldHandle = () => isActiveGeneration(generation);
+
   const updateProgress = () => {
+    if (!shouldHandle()) return;
     set(syncProgress(audio, track));
   };
 
   audio.addEventListener("loadedmetadata", updateProgress);
   audio.addEventListener("durationchange", updateProgress);
   audio.addEventListener("timeupdate", updateProgress);
-  audio.addEventListener("ended", () => void get().playNext());
-  audio.addEventListener("play", () => set({ isPlaying: true }));
-  audio.addEventListener("pause", () => set({ isPlaying: false }));
+  audio.addEventListener("ended", () => {
+    if (!shouldHandle()) return;
+    void get().playNext();
+  });
+  audio.addEventListener("play", () => {
+    if (!shouldHandle()) return;
+    set({ isPlaying: true });
+  });
+  audio.addEventListener("pause", () => {
+    if (!shouldHandle()) return;
+    set({ isPlaying: false });
+  });
   audio.addEventListener("error", () => {
+    if (!shouldHandle()) return;
     set({ isLoading: false, isPlaying: false, error: "Playback failed — try another track" });
   });
 }
@@ -63,15 +90,15 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   clearError: () => set({ error: null }),
 
   playTrack: async (track, queue = []) => {
-    const { audio: existing } = get();
-    if (existing) {
-      existing.pause();
-      existing.src = "";
-    }
+    const generation = ++playGeneration;
+
+    disposeAudio(get().audio);
 
     const nextQueue = queue.length ? queue : [track];
     set({
+      audio: null,
       isLoading: true,
+      isPlaying: false,
       current: track,
       queue: nextQueue,
       error: null,
@@ -79,22 +106,35 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       durationSec: track.duration_sec ?? 0,
     });
 
+    let pendingAudio: HTMLAudioElement | null = null;
+
     try {
       const stream = await api.getStream(track.video_id);
+      if (!isActiveGeneration(generation)) return;
+
       const token = getAccessToken();
       const audioUrl = `${getApiUrl()}${stream.audio_url}?token=${encodeURIComponent(token)}`;
-      const audio = new Audio(audioUrl);
-      attachAudioListeners(audio, track, set, get);
+      pendingAudio = new Audio(audioUrl);
+      attachAudioListeners(pendingAudio, track, generation, set, get);
 
-      await audio.play();
+      await pendingAudio.play();
+      if (!isActiveGeneration(generation)) {
+        disposeAudio(pendingAudio);
+        return;
+      }
+
       set({
-        audio,
+        audio: pendingAudio,
         isPlaying: true,
         isLoading: false,
-        ...syncProgress(audio, track),
+        ...syncProgress(pendingAudio, track),
       });
+      pendingAudio = null;
       void api.recordPlay(track).catch(() => undefined);
     } catch (error) {
+      if (pendingAudio) disposeAudio(pendingAudio);
+      if (!isActiveGeneration(generation)) return;
+
       const message = error instanceof Error ? error.message : "Playback failed";
       set({ isLoading: false, isPlaying: false, error: message });
     }
@@ -164,15 +204,13 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   },
 
   stop: () => {
-    const { audio } = get();
-    if (audio) {
-      audio.pause();
-      audio.src = "";
-    }
+    playGeneration += 1;
+    disposeAudio(get().audio);
     set({
       audio: null,
       current: null,
       isPlaying: false,
+      isLoading: false,
       positionSec: 0,
       durationSec: 0,
       queue: [],
