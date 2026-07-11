@@ -50,19 +50,21 @@ function playableIdFromStream(stream: StreamInfo): string {
   return stream.playable_video_id ?? stream.video_id;
 }
 
-function buildMediaUrl(stream: StreamInfo, selection: StreamSelection): string {
+function buildMediaUrl(stream: StreamInfo, selection: StreamSelection, track?: Track | null): string {
   const token = encodeURIComponent(getAccessToken() ?? "");
   const base = getApiUrl();
   const playableId = playableIdFromStream(stream);
+  const params = new URLSearchParams({ token });
+  if (track?.title) params.set("title", track.title);
+  if (track?.artist) params.set("artist", track.artist);
 
   if (selection.video) {
     const videoOnly = !selection.audio;
-    const query = new URLSearchParams({ token });
-    if (videoOnly) query.set("video_only", "true");
-    return `${base}/api/music/video/${playableId}?${query.toString()}`;
+    if (videoOnly) params.set("video_only", "true");
+    return `${base}/api/music/video/${playableId}?${params.toString()}`;
   }
 
-  return `${base}/api/music/audio/${playableId}?token=${token}`;
+  return `${base}/api/music/audio/${playableId}?${params.toString()}`;
 }
 
 function disposeMedia(media: HTMLMediaElement | null): void {
@@ -177,7 +179,7 @@ async function loadMediaAt(
   startSec = 0,
   autoplay = true,
 ): Promise<HTMLMediaElement | null> {
-  const mediaUrl = buildMediaUrl(stream, selection);
+  const mediaUrl = buildMediaUrl(stream, selection, track);
   const media = createMediaElement(mediaUrl, selection);
   attachMediaListeners(media, track, generation, set, get);
 
@@ -239,7 +241,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     let pendingMedia: HTMLMediaElement | null = null;
 
     try {
-      const stream = await api.getStream(track.video_id);
+      const stream = await api.getStream(track.video_id, track);
       if (!isActiveGeneration(generation)) return;
 
       const resolvedSelection = normalizeSelection(selection, stream);

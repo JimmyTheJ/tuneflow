@@ -57,7 +57,8 @@ def matches_requested_track(
         topic_artist = wanted_artist.replace("- Topic", "").strip()
         combined = f"{candidate_title} {candidate_artist or ''}"
         return _normalize_text(topic_artist) in _normalize_text(combined)
-    return False
+    combined = f"{candidate_title} {candidate_artist or ''}"
+    return _normalize_text(wanted_artist.replace("- Topic", "").strip()) in _normalize_text(combined)
 
 
 def is_topic_upload(artist: str | None) -> bool:

@@ -71,7 +71,13 @@ export const api = {
     }),
   me: () => request<User>("/api/auth/me"),
   search: (q: string) => request<Track[]>(`/api/music/search?q=${encodeURIComponent(q)}`),
-  getStream: (videoId: string) => request<StreamInfo>(`/api/music/stream/${videoId}`),
+  getStream: (videoId: string, track?: Pick<Track, "title" | "artist">) => {
+    const params = new URLSearchParams();
+    if (track?.title) params.set("title", track.title);
+    if (track?.artist) params.set("artist", track.artist);
+    const query = params.toString();
+    return request<StreamInfo>(`/api/music/stream/${videoId}${query ? `?${query}` : ""}`);
+  },
   listPlaylists: () => request<Playlist[]>("/api/playlists"),
   getPlaylist: (id: number) => request<PlaylistDetail>(`/api/playlists/${id}`),
   createPlaylist: (name: string) => request<Playlist>("/api/playlists", { method: "POST", body: { name } }),

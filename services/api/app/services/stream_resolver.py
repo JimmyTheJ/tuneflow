@@ -106,14 +106,37 @@ async def _find_playable_alternate(
     return None
 
 
-async def resolve_stream(video_id: str) -> StreamInfo:
-    errors: list[str] = []
-    piped_meta: StreamInfo | None = None
+async def _lookup_track_metadata(
+    video_id: str,
+    title: str | None,
+    artist: str | None,
+) -> tuple[str, str | None]:
+    if title:
+        return title, artist
 
     try:
         piped_meta = await piped_client.get_stream(video_id)
+        return piped_meta.title, piped_meta.artist
     except (httpx.HTTPError, ValueError):
-        piped_meta = None
+        pass
+
+    try:
+        for result in await piped_client.search_piped(video_id, limit=5):
+            if result.video_id == video_id:
+                return result.title, result.artist
+    except httpx.HTTPError:
+        pass
+
+    return "Unknown", None
+
+
+async def resolve_stream(
+    video_id: str,
+    *,
+    title: str | None = None,
+    artist: str | None = None,
+) -> StreamInfo:
+    errors: list[str] = []
 
     try:
         stream = await get_stream_via_ytdlp(video_id)
@@ -121,10 +144,10 @@ async def resolve_stream(video_id: str) -> StreamInfo:
     except Exception as exc:
         errors.append(f"yt-dlp: {exc}")
 
-    if piped_meta is not None:
-        alternate = await _find_playable_alternate(video_id, piped_meta.title, piped_meta.artist)
-        if alternate is not None:
-            return _apply_proxy_urls(alternate)
+    resolved_title, resolved_artist = await _lookup_track_metadata(video_id, title, artist)
+    alternate = await _find_playable_alternate(video_id, resolved_title, resolved_artist)
+    if alternate is not None:
+        return _apply_proxy_urls(alternate)
 
     raise httpx.HTTPError("Could not resolve audio stream. " + "; ".join(errors))
 

@@ -70,13 +70,15 @@ async def search_music(
 @router.get("/stream/{video_id}", response_model=StreamInfo)
 async def get_stream(
     video_id: str,
+    title: str | None = Query(default=None),
+    artist: str | None = Query(default=None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> StreamInfo:
     child_settings = await enforce_child_access(db, current_user)
 
     try:
-        stream = await resolve_stream(video_id)
+        stream = await resolve_stream(video_id, title=title, artist=artist)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except httpx.HTTPError as exc:
@@ -97,13 +99,15 @@ async def get_stream(
 @router.get("/audio/{video_id}")
 async def stream_audio(
     video_id: str,
+    title: str | None = Query(default=None),
+    artist: str | None = Query(default=None),
     current_user: User = Depends(get_current_user_from_token),
     db: AsyncSession = Depends(get_db),
 ) -> FileResponse:
     child_settings = await enforce_child_access(db, current_user)
 
     try:
-        stream = await resolve_stream(video_id)
+        stream = await resolve_stream(video_id, title=title, artist=artist)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except httpx.HTTPError as exc:
