@@ -9,15 +9,19 @@ export function SearchPage() {
   const [results, setResults] = useState<Track[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [lastQuery, setLastQuery] = useState<string | null>(null);
   const playTrack = usePlayerStore((s) => s.playTrack);
 
   const runSearch = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!query.trim()) return;
+    const trimmed = query.trim();
+    if (!trimmed) return;
     setLoading(true);
     setError(null);
+    setLastQuery(trimmed);
+    setResults([]);
     try {
-      setResults(await api.search(query.trim()));
+      setResults(await api.search(trimmed));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Search failed");
     } finally {
@@ -36,12 +40,23 @@ export function SearchPage() {
           placeholder="Search songs, artists…"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
+          disabled={loading}
+          aria-busy={loading}
         />
-        <button className="btn-primary" type="submit" disabled={loading}>
-          {loading ? "…" : "Go"}
+        <button className="btn-primary" type="submit" disabled={loading || !query.trim()}>
+          {loading ? "Searching…" : "Go"}
         </button>
       </form>
+      {loading ? (
+        <p className="search-status" role="status" aria-live="polite">
+          <span className="search-spinner" aria-hidden="true" />
+          Searching for &ldquo;{lastQuery}&rdquo;&hellip;
+        </p>
+      ) : null}
       {error ? <p className="error">{error}</p> : null}
+      {!loading && lastQuery && results.length === 0 && !error ? (
+        <p className="search-status search-status-empty">No results for &ldquo;{lastQuery}&rdquo;.</p>
+      ) : null}
       {results.map((track) => (
         <TrackRow
           key={track.video_id}

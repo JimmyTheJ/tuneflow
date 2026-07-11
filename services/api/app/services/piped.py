@@ -162,50 +162,7 @@ class PipedClient:
         return results[:limit]
 
     async def search(self, query: str, limit: int = 20) -> list[SearchResult]:
-        from app.services.stream_resolver import resolve_stream
-        from app.services.ytdlp import search_video_ids
-
-        piped_results = await self.search_piped(query, limit=limit * 2)
-
-        merged: list[SearchResult] = []
-        seen: set[str] = set()
-
-        async def add_if_playable(video_id: str) -> bool:
-            if video_id in seen:
-                return False
-            seen.add(video_id)
-            try:
-                stream = await resolve_stream(video_id)
-            except Exception:
-                return False
-            if stream.video_id in seen and stream.video_id != video_id:
-                return False
-            seen.add(stream.video_id)
-            merged.append(
-                SearchResult(
-                    video_id=stream.video_id,
-                    title=stream.title,
-                    artist=stream.artist,
-                    thumbnail_url=stream.thumbnail_url,
-                    duration_sec=stream.duration_sec,
-                )
-            )
-            return True
-
-        try:
-            for video_id in await search_video_ids(query, limit=limit * 2):
-                if len(merged) >= limit:
-                    break
-                await add_if_playable(video_id)
-        except Exception:
-            pass
-
-        for result in piped_results:
-            if len(merged) >= limit:
-                break
-            await add_if_playable(result.video_id)
-
-        return merged[:limit]
+        return await self.search_piped(query, limit=limit)
 
     async def get_stream(self, video_id: str) -> StreamInfo:
         payload = await self._request_json(f"/streams/{video_id}")

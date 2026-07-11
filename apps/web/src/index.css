@@ -236,6 +236,34 @@ textarea {
   margin: 0;
 }
 
+.search-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 16px;
+  color: #a3a3a3;
+}
+
+.search-status-empty {
+  color: #737373;
+}
+
+.search-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid #333;
+  border-top-color: #22c55e;
+  border-radius: 50%;
+  animation: search-spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes search-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .mini-player-error {
   position: fixed;
   left: 220px;
