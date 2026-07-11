@@ -303,6 +303,10 @@ textarea {
   color: #737373;
 }
 
+.search-load-sentinel {
+  height: 1px;
+}
+
 .search-spinner {
   width: 16px;
   height: 16px;

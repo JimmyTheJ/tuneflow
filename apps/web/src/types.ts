@@ -21,6 +21,11 @@ export type Track = {
   short_description?: string | null;
 };
 
+export type SearchResultsPage = {
+  results: Track[];
+  next_page: string | null;
+};
+
 export type Playlist = {
   id: number;
   name: string;

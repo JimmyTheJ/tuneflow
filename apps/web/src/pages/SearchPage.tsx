@@ -1,18 +1,33 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { TrackRow } from "@/components/TrackRow";
 import { api } from "@/lib/api";
 import { usePlayerStore } from "@/stores/playerStore";
 import type { Track } from "@/types";
 
+function mergeTracks(existing: Track[], incoming: Track[]): Track[] {
+  const seen = new Set(existing.map((track) => track.video_id));
+  const merged = [...existing];
+  for (const track of incoming) {
+    if (seen.has(track.video_id)) continue;
+    seen.add(track.video_id);
+    merged.push(track);
+  }
+  return merged;
+}
+
 export function SearchPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const urlQuery = searchParams.get("q") ?? "";
   const [query, setQuery] = useState(urlQuery);
   const [results, setResults] = useState<Track[]>([]);
+  const [nextPage, setNextPage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [lastQuery, setLastQuery] = useState<string | null>(null);
+  const loadMoreRef = useRef<HTMLDivElement>(null);
+  const loadingMoreRef = useRef(false);
   const playTrack = usePlayerStore((s) => s.playTrack);
 
   useEffect(() => {
@@ -23,22 +38,29 @@ export function SearchPage() {
     const trimmed = urlQuery.trim();
     if (!trimmed) {
       setResults([]);
+      setNextPage(null);
       setLastQuery(null);
       setError(null);
       setLoading(false);
+      setLoadingMore(false);
       return;
     }
 
     let cancelled = false;
     setLoading(true);
+    setLoadingMore(false);
     setError(null);
     setLastQuery(trimmed);
     setResults([]);
+    setNextPage(null);
 
     void (async () => {
       try {
-        const tracks = await api.search(trimmed);
-        if (!cancelled) setResults(tracks);
+        const page = await api.search(trimmed);
+        if (!cancelled) {
+          setResults(page.results);
+          setNextPage(page.next_page);
+        }
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : "Search failed");
@@ -52,6 +74,43 @@ export function SearchPage() {
       cancelled = true;
     };
   }, [urlQuery]);
+
+  const loadMore = useCallback(async () => {
+    const trimmed = urlQuery.trim();
+    if (!trimmed || !nextPage || loadingMoreRef.current || loading) return;
+
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+    setError(null);
+
+    try {
+      const page = await api.search(trimmed, { nextPage });
+      setResults((current) => mergeTracks(current, page.results));
+      setNextPage(page.next_page);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not load more results");
+    } finally {
+      loadingMoreRef.current = false;
+      setLoadingMore(false);
+    }
+  }, [urlQuery, nextPage, loading]);
+
+  useEffect(() => {
+    const node = loadMoreRef.current;
+    if (!node || !nextPage || loading) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          void loadMore();
+        }
+      },
+      { rootMargin: "240px" },
+    );
+
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [loadMore, nextPage, loading, results.length]);
 
   const runSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -101,6 +160,13 @@ export function SearchPage() {
           onClick={() => void playTrack(track, playable)}
         />
       ))}
+      {nextPage ? <div ref={loadMoreRef} className="search-load-sentinel" aria-hidden="true" /> : null}
+      {loadingMore ? (
+        <p className="search-status" role="status" aria-live="polite">
+          <span className="search-spinner" aria-hidden="true" />
+          Loading more results&hellip;
+        </p>
+      ) : null}
     </div>
   );
 }

@@ -11,7 +11,7 @@ from app.auth import (
 )
 from app.database import get_db
 from app.models import User
-from app.schemas import SearchResult, StreamInfo
+from app.schemas import SearchResult, SearchResultsPage, StreamInfo
 from app.services.cache_manager import resolve_audio
 from app.services.piped import piped_client
 from app.services.stream_resolver import resolve_stream, stream_video_chunks
@@ -27,23 +27,27 @@ def _piped_unavailable(exc: Exception) -> HTTPException:
     )
 
 
-@router.get("/search", response_model=list[SearchResult])
+@router.get("/search", response_model=SearchResultsPage)
 async def search_music(
     q: str = Query(min_length=1),
     limit: int = Query(default=20, ge=1, le=50),
+    next_page: str | None = Query(default=None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> list[SearchResult]:
+) -> SearchResultsPage:
     child_settings = await enforce_child_access(db, current_user)
     if child_settings is not None and not child_settings.search_enabled:
         raise HTTPException(status_code=403, detail="Search is disabled for this account")
 
     blocked_query = check_content_allowed(settings=child_settings, query=q)
     if blocked_query:
-        return []
+        return SearchResultsPage(results=[], next_page=None)
 
     try:
-        results = await piped_client.search(q, limit=limit)
+        if next_page:
+            results, next_token = await piped_client.search_piped_next(q, next_page, limit=limit)
+        else:
+            results, next_token = await piped_client.search_piped(q, limit=limit)
     except httpx.HTTPError as exc:
         raise _piped_unavailable(exc) from exc
 
@@ -67,7 +71,7 @@ async def search_music(
                 blocked_reason=reason,
             )
         )
-    return filtered
+    return SearchResultsPage(results=filtered, next_page=next_token)
 
 
 @router.get("/stream/{video_id}", response_model=StreamInfo)

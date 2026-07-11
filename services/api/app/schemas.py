@@ -190,6 +190,11 @@ class SearchResult(TrackRead):
     short_description: str | None = None
 
 
+class SearchResultsPage(BaseModel):
+    results: list[SearchResult]
+    next_page: str | None = None
+
+
 class StreamInfo(BaseModel):
     video_id: str
     title: str

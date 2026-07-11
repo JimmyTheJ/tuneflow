@@ -19,6 +19,7 @@ import type {
   ScrobblerConnectionStatus,
   ScrobblerLinkStart,
   ScrobblerProviderInfo,
+  SearchResultsPage,
   SetupStatus,
   StreamInfo,
   TokenResponse,
@@ -78,7 +79,12 @@ export const api = {
       body: { username, password },
     }),
   me: () => request<User>("/api/auth/me"),
-  search: (q: string) => request<Track[]>(`/api/music/search?q=${encodeURIComponent(q)}`),
+  search: (q: string, options?: { limit?: number; nextPage?: string }) => {
+    const params = new URLSearchParams({ q });
+    if (options?.limit) params.set("limit", String(options.limit));
+    if (options?.nextPage) params.set("next_page", options.nextPage);
+    return request<SearchResultsPage>(`/api/music/search?${params.toString()}`);
+  },
   getStream: (videoId: string, track?: Pick<Track, "title" | "artist">) => {
     const params = new URLSearchParams();
     if (track?.title) params.set("title", track.title);

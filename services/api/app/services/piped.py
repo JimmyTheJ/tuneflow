@@ -115,6 +115,41 @@ def piped_instance_urls() -> list[str]:
     return ordered
 
 
+def _parse_search_items(payload: dict) -> list[SearchResult]:
+    results: list[SearchResult] = []
+    for item in payload.get("items", []):
+        if item.get("type") != "stream":
+            continue
+        raw_title = (item.get("title") or "Unknown").strip()
+        artist, title = parse_artist_title(raw_title)
+        video_id = item["url"].split("=")[-1]
+        uploader = item.get("uploaderName") or artist
+        short_description = item.get("shortDescription")
+        if isinstance(short_description, str):
+            short_description = short_description.strip() or None
+        else:
+            short_description = None
+        results.append(
+            SearchResult(
+                video_id=video_id,
+                title=title,
+                artist=uploader,
+                thumbnail_url=youtube_thumbnail_url(video_id),
+                duration_sec=item.get("duration"),
+                source_title=raw_title,
+                short_description=short_description,
+            )
+        )
+    return results
+
+
+def _next_page_token(payload: dict) -> str | None:
+    next_page = payload.get("nextpage")
+    if not next_page:
+        return None
+    return str(next_page)
+
+
 class PipedClient:
     def __init__(self) -> None:
         self._active_base_url: str | None = None
@@ -140,38 +175,28 @@ class PipedClient:
         detail = "; ".join(errors[:3])
         raise httpx.HTTPError(f"All Piped instances failed. {detail}")
 
-    async def search_piped(self, query: str, limit: int = 20) -> list[SearchResult]:
+    async def search_piped(self, query: str, limit: int = 20) -> tuple[list[SearchResult], str | None]:
         payload = await self._request_json("/search", params={"q": query, "filter": "music_songs"})
-
-        results: list[SearchResult] = []
-        for item in payload.get("items", []):
-            if item.get("type") != "stream":
-                continue
-            raw_title = (item.get("title") or "Unknown").strip()
-            artist, title = parse_artist_title(raw_title)
-            video_id = item["url"].split("=")[-1]
-            uploader = item.get("uploaderName") or artist
-            short_description = item.get("shortDescription")
-            if isinstance(short_description, str):
-                short_description = short_description.strip() or None
-            else:
-                short_description = None
-            results.append(
-                SearchResult(
-                    video_id=video_id,
-                    title=title,
-                    artist=uploader,
-                    thumbnail_url=youtube_thumbnail_url(video_id),
-                    duration_sec=item.get("duration"),
-                    source_title=raw_title,
-                    short_description=short_description,
-                )
-            )
+        results = _parse_search_items(payload)
         results.sort(key=_search_rank_key)
-        return results[:limit]
+        return results[:limit], _next_page_token(payload)
+
+    async def search_piped_next(
+        self,
+        query: str,
+        next_page: str,
+        limit: int = 20,
+    ) -> tuple[list[SearchResult], str | None]:
+        payload = await self._request_json(
+            "/nextpage/search",
+            params={"q": query, "filter": "music_songs", "nextpage": next_page},
+        )
+        results = _parse_search_items(payload)
+        return results[:limit], _next_page_token(payload)
 
     async def search(self, query: str, limit: int = 20) -> list[SearchResult]:
-        return await self.search_piped(query, limit=limit)
+        results, _ = await self.search_piped(query, limit=limit)
+        return results
 
     async def get_stream(self, video_id: str) -> StreamInfo:
         payload = await self._request_json(f"/streams/{video_id}")
