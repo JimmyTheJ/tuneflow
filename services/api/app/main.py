@@ -29,9 +29,10 @@ async def _cache_cleanup_worker() -> None:
 async def lifespan(_: FastAPI):
     await init_db()
     async with SessionLocal() as db:
-        from app.services.cache_manager import backfill_orphaned_files
+        from app.services.cache_manager import backfill_missing_titles, backfill_orphaned_files
 
         await backfill_orphaned_files(db)
+        await backfill_missing_titles(db)
     task = asyncio.create_task(_cache_cleanup_worker())
     yield
     task.cancel()

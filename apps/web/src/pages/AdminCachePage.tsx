@@ -241,9 +241,11 @@ export function AdminCachePage() {
       {entries.map((entry) => (
         <div key={entry.video_id} className="member-row">
           <div>
-            <div className="track-title">{entry.video_id}</div>
+            <div className="track-title">{entry.title ?? "Unknown track"}</div>
             <div className="track-subtitle">
-              {formatBytes(entry.file_size_bytes)} · cached {new Date(entry.cached_at).toLocaleString()}
+              {entry.artist ? `${entry.artist} · ` : ""}
+              {entry.video_id} · {formatBytes(entry.file_size_bytes)} · cached{" "}
+              {new Date(entry.cached_at).toLocaleString()}
               {entry.cached_by_username ? ` · first by ${entry.cached_by_username}` : ""}
             </div>
             <div className="muted">

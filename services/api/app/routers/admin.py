@@ -16,7 +16,7 @@ from app.services.cache_manager import (
     entry_to_read,
     get_cache_stats,
     get_system_settings,
-    list_cache_entries,
+    list_cache_entries_with_titles,
     purge_all,
     purge_older_than,
     purge_user,
@@ -67,7 +67,7 @@ async def cache_entries(
     _: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> list[CacheEntryRead]:
-    entries = await list_cache_entries(db, offset=offset, limit=limit, user_id=user_id)
+    entries = await list_cache_entries_with_titles(db, offset=offset, limit=limit, user_id=user_id)
     return [CacheEntryRead(**entry_to_read(entry)) for entry in entries]
 
 

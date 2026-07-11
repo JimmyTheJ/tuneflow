@@ -305,6 +305,8 @@ class CacheAccessUser(BaseModel):
 
 class CacheEntryRead(BaseModel):
     video_id: str
+    title: str | None
+    artist: str | None
     file_size_bytes: int
     mime_type: str
     cached_at: datetime

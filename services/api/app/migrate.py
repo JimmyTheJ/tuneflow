@@ -80,6 +80,8 @@ async def run_migrations() -> None:
                         cached_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
                         last_accessed_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
                         cached_by_user_id INTEGER,
+                        title VARCHAR(500),
+                        artist VARCHAR(300),
                         CONSTRAINT uq_audio_cache_video UNIQUE (video_id),
                         FOREIGN KEY(cached_by_user_id) REFERENCES users (id) ON DELETE SET NULL
                     )
@@ -121,6 +123,13 @@ async def run_migrations() -> None:
             await conn.execute(
                 text("CREATE INDEX ix_audio_cache_access_cache_entry_id ON audio_cache_access (cache_entry_id)")
             )
+
+        cache_entry_columns = await conn.execute(text("PRAGMA table_info(audio_cache_entries)"))
+        cache_entry_cols = {row[1] for row in cache_entry_columns.fetchall()}
+        if "title" not in cache_entry_cols:
+            await conn.execute(text("ALTER TABLE audio_cache_entries ADD COLUMN title VARCHAR(500)"))
+        if "artist" not in cache_entry_cols:
+            await conn.execute(text("ALTER TABLE audio_cache_entries ADD COLUMN artist VARCHAR(300)"))
 
         admin_result = await conn.execute(
             text("SELECT id FROM users WHERE role = 'admin' LIMIT 1")

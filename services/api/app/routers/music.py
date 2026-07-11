@@ -126,7 +126,13 @@ async def stream_audio(
         raise HTTPException(status_code=403, detail=f"Content blocked: {reason}")
 
     try:
-        resolution = await resolve_audio(db, video_id=stream.video_id, user_id=current_user.id)
+        resolution = await resolve_audio(
+            db,
+            video_id=stream.video_id,
+            user_id=current_user.id,
+            title=stream.title,
+            artist=stream.artist,
+        )
     except (FileNotFoundError, ValueError) as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:

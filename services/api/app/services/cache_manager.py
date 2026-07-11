@@ -7,7 +7,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models import AudioCacheAccess, AudioCacheEntry, SystemSettings, User
+from app.models import AudioCacheAccess, AudioCacheEntry, PlayHistory, SystemSettings, User
 from app.services.audio_cache import (
     _AUDIO_SUFFIXES,
     _cache_dir,
@@ -32,6 +32,35 @@ async def get_system_settings(db: AsyncSession) -> SystemSettings:
         await db.commit()
         await db.refresh(settings)
     return settings
+
+
+def _apply_track_metadata(entry: AudioCacheEntry, *, title: str | None, artist: str | None) -> None:
+    if title:
+        entry.title = title.strip()
+    if artist:
+        entry.artist = artist.strip()
+
+
+async def backfill_missing_titles(db: AsyncSession) -> int:
+    entries = (
+        await db.execute(select(AudioCacheEntry).where(AudioCacheEntry.title.is_(None)))
+    ).scalars().all()
+    updated = 0
+    for entry in entries:
+        history = await db.scalar(
+            select(PlayHistory)
+            .where(PlayHistory.video_id == entry.video_id)
+            .order_by(PlayHistory.played_at.desc())
+            .limit(1)
+        )
+        if history is None:
+            continue
+        entry.title = history.title
+        entry.artist = history.artist
+        updated += 1
+    if updated:
+        await db.commit()
+    return updated
 
 
 async def backfill_orphaned_files(db: AsyncSession) -> int:
@@ -61,8 +90,16 @@ async def backfill_orphaned_files(db: AsyncSession) -> int:
     return created
 
 
-async def _record_access(db: AsyncSession, *, user_id: int, entry: AudioCacheEntry) -> None:
+async def _record_access(
+    db: AsyncSession,
+    *,
+    user_id: int,
+    entry: AudioCacheEntry,
+    title: str | None = None,
+    artist: str | None = None,
+) -> None:
     now = datetime.now(UTC)
+    _apply_track_metadata(entry, title=title, artist=artist)
     access = await db.scalar(
         select(AudioCacheAccess).where(
             AudioCacheAccess.user_id == user_id,
@@ -90,6 +127,8 @@ async def resolve_audio(
     *,
     video_id: str,
     user_id: int,
+    title: str | None = None,
+    artist: str | None = None,
 ) -> AudioResolution:
     settings = await get_system_settings(db)
     if not settings.cache_enabled or settings.cache_retention_days == 0:
@@ -101,20 +140,34 @@ async def resolve_audio(
     if entry is not None:
         path = Path(entry.file_path)
         if path.exists() and path.stat().st_size > 0:
-            await _record_access(db, user_id=user_id, entry=entry)
+            await _record_access(db, user_id=user_id, entry=entry, title=title, artist=artist)
             return AudioResolution(path=path, mime_type=entry.mime_type, stream=False)
         await db.delete(entry)
         await db.commit()
 
     existing_file = await asyncio.to_thread(_find_cached_file, cache_dir, video_id)
     if existing_file is not None:
-        entry = await _upsert_entry_from_file(db, video_id=video_id, path=existing_file, cached_by_user_id=user_id)
-        await _record_access(db, user_id=user_id, entry=entry)
+        entry = await _upsert_entry_from_file(
+            db,
+            video_id=video_id,
+            path=existing_file,
+            cached_by_user_id=user_id,
+            title=title,
+            artist=artist,
+        )
+        await _record_access(db, user_id=user_id, entry=entry, title=title, artist=artist)
         return AudioResolution(path=existing_file, mime_type=entry.mime_type, stream=False)
 
     path = await download_audio_to_cache(video_id)
-    entry = await _upsert_entry_from_file(db, video_id=video_id, path=path, cached_by_user_id=user_id)
-    await _record_access(db, user_id=user_id, entry=entry)
+    entry = await _upsert_entry_from_file(
+        db,
+        video_id=video_id,
+        path=path,
+        cached_by_user_id=user_id,
+        title=title,
+        artist=artist,
+    )
+    await _record_access(db, user_id=user_id, entry=entry, title=title, artist=artist)
     return AudioResolution(path=path, mime_type=entry.mime_type, stream=False)
 
 
@@ -124,6 +177,8 @@ async def _upsert_entry_from_file(
     video_id: str,
     path: Path,
     cached_by_user_id: int,
+    title: str | None = None,
+    artist: str | None = None,
 ) -> AudioCacheEntry:
     now = datetime.now(UTC)
     size = path.stat().st_size
@@ -138,6 +193,8 @@ async def _upsert_entry_from_file(
             cached_at=now,
             last_accessed_at=now,
             cached_by_user_id=cached_by_user_id,
+            title=title.strip() if title else None,
+            artist=artist.strip() if artist else None,
         )
         db.add(entry)
     else:
@@ -147,6 +204,7 @@ async def _upsert_entry_from_file(
         entry.last_accessed_at = now
         if entry.cached_by_user_id is None:
             entry.cached_by_user_id = cached_by_user_id
+        _apply_track_metadata(entry, title=title, artist=artist)
     await db.commit()
     await db.refresh(entry)
     return entry
@@ -190,6 +248,17 @@ async def list_cache_entries(
     return list(result.scalars().unique().all())
 
 
+async def list_cache_entries_with_titles(
+    db: AsyncSession,
+    *,
+    offset: int = 0,
+    limit: int = 50,
+    user_id: int | None = None,
+) -> list[AudioCacheEntry]:
+    await backfill_missing_titles(db)
+    return await list_cache_entries(db, offset=offset, limit=limit, user_id=user_id)
+
+
 def entry_to_read(entry: AudioCacheEntry) -> dict:
     users = [
         {
@@ -203,6 +272,8 @@ def entry_to_read(entry: AudioCacheEntry) -> dict:
     ]
     return {
         "video_id": entry.video_id,
+        "title": entry.title,
+        "artist": entry.artist,
         "file_size_bytes": entry.file_size_bytes,
         "mime_type": entry.mime_type,
         "cached_at": entry.cached_at,

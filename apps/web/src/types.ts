@@ -157,6 +157,8 @@ export type CacheAccessUser = {
 
 export type CacheEntry = {
   video_id: string;
+  title: string | null;
+  artist: string | null;
   file_size_bytes: number;
   mime_type: string;
   cached_at: string;
