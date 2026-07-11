@@ -8,6 +8,9 @@ from app.security import hash_password
 
 
 async def bootstrap_parent_if_needed(db: AsyncSession) -> None:
+    if not settings.bootstrap_enabled:
+        return
+
     count = await db.scalar(select(func.count()).select_from(User))
     if count and count > 0:
         return

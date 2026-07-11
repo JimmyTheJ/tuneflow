@@ -1,10 +1,18 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import ACCOUNT_DISABLED_MESSAGE, ACCOUNT_REMOVED_MESSAGE, get_current_user, require_parent
+from app.config import settings
 from app.database import get_db
 from app.models import User, UserRole
+from app.rate_limit import (
+    enforce_attempt_budget,
+    enforce_not_locked,
+    get_client_ip,
+    limiter,
+    record_failures,
+)
 from app.schemas import (
     LoginRequest,
     ParentPinEnforced,
@@ -29,10 +37,28 @@ async def setup_status(db: AsyncSession = Depends(get_db)) -> SetupStatus:
 
 
 @router.post("/setup", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
-async def setup_first_parent(payload: SetupRequest, db: AsyncSession = Depends(get_db)) -> TokenResponse:
+async def setup_first_parent(
+    payload: SetupRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> TokenResponse:
     count = await db.scalar(select(func.count()).select_from(User))
     if count and count > 0:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Server already set up")
+
+    client_ip = get_client_ip(request)
+    await enforce_attempt_budget(
+        f"setup:ip:{client_ip}",
+        limit=settings.setup_rate_limit_attempts,
+        window_sec=settings.setup_rate_limit_window_sec,
+    )
+
+    password = payload.password
+    if len(password) < settings.setup_min_password_length:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Password must be at least {settings.setup_min_password_length} characters",
+        )
 
     user = User(
         username=payload.username.strip().lower(),
@@ -49,16 +75,31 @@ async def setup_first_parent(payload: SetupRequest, db: AsyncSession = Depends(g
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)) -> TokenResponse:
-    result = await db.execute(select(User).where(User.username == payload.username.strip().lower()))
+async def login(payload: LoginRequest, request: Request, db: AsyncSession = Depends(get_db)) -> TokenResponse:
+    username = payload.username.strip().lower()
+    client_ip = get_client_ip(request)
+    rate_keys = [f"login:ip:{client_ip}", f"login:user:{username}"]
+    await enforce_not_locked(
+        rate_keys,
+        limit=settings.login_rate_limit_attempts,
+        window_sec=settings.login_rate_limit_window_sec,
+    )
+
+    result = await db.execute(select(User).where(User.username == username))
     user = result.scalar_one_or_none()
     if user is None or not verify_password(payload.password, user.password_hash):
+        await record_failures(
+            rate_keys,
+            limit=settings.login_rate_limit_attempts,
+            window_sec=settings.login_rate_limit_window_sec,
+        )
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid username or password")
     if user.deleted_at is not None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ACCOUNT_REMOVED_MESSAGE)
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ACCOUNT_DISABLED_MESSAGE)
 
+    await limiter.clear(f"login:user:{username}")
     token = create_access_token(user.username)
     return TokenResponse(access_token=token, user=UserRead.model_validate(user, from_attributes=True))
 
@@ -93,12 +134,27 @@ async def set_parent_pin(
 @router.post("/verify-parent-pin", response_model=ParentPinVerifyResponse)
 async def verify_parent_pin(
     payload: ParentPinVerify,
+    request: Request,
     _: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ParentPinVerifyResponse:
+    client_ip = get_client_ip(request)
+    rate_key = f"pin:ip:{client_ip}"
+    await enforce_not_locked(
+        [rate_key],
+        limit=settings.pin_rate_limit_attempts,
+        window_sec=settings.pin_rate_limit_window_sec,
+    )
+
     result = await db.execute(select(User).where(User.role == UserRole.parent, User.is_active.is_(True)))
     parents = result.scalars().all()
     for parent in parents:
         if parent.parent_pin_hash and verify_password(payload.pin, parent.parent_pin_hash):
             return ParentPinVerifyResponse(valid=True)
+
+    await record_failures(
+        [rate_key],
+        limit=settings.pin_rate_limit_attempts,
+        window_sec=settings.pin_rate_limit_window_sec,
+    )
     return ParentPinVerifyResponse(valid=False)

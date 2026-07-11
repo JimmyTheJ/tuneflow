@@ -39,7 +39,20 @@ copy ..\..\.env.example ..\..\.env
 uvicorn app.main:app --reload --port 8010
 ```
 
-On first startup (or via the mobile setup screen), a **parent** account is created from `BOOTSTRAP_USERNAME` / `BOOTSTRAP_PASSWORD` in `.env`.
+On first startup, the setup wizard creates a **local parent account** (username + password stored in Tuneflow). This is required before LDAP or other external auth can be wired in later.
+
+Optional: set `BOOTSTRAP_ENABLED=true` in `.env` to auto-create the first account from `BOOTSTRAP_USERNAME` / `BOOTSTRAP_PASSWORD` for headless installs.
+
+### Exposing to the internet
+
+For a public subdomain, at minimum:
+
+1. Put TLS termination in front (Caddy, nginx, Traefik).
+2. Set `JWT_SECRET` to a long random value.
+3. Set `TRUST_PROXY_HEADERS=true` so rate limits use real client IPs.
+4. Restrict `CORS_ORIGINS` to your web UI origin.
+5. Set `DOCS_ENABLED=false` in production.
+6. Login/setup/PIN endpoints are rate-limited by default (10 failed logins per 15 min per IP and username).
 
 ## Web app (desktop browser)
 

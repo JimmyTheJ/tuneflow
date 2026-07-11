@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.database import SessionLocal, init_db
+from app.middleware import SecurityHeadersMiddleware
 from app.routers import admin, ai, auth, history, likes, music, parental, playlists, scrobbler, users
 
 
@@ -40,7 +41,16 @@ async def lifespan(_: FastAPI):
         await task
 
 
-app = FastAPI(title="Tuneflow API", version="0.2.0", lifespan=lifespan)
+app = FastAPI(
+    title="Tuneflow API",
+    version="0.2.0",
+    lifespan=lifespan,
+    docs_url="/docs" if settings.docs_enabled else None,
+    redoc_url="/redoc" if settings.docs_enabled else None,
+    openapi_url="/openapi.json" if settings.docs_enabled else None,
+)
+
+app.add_middleware(SecurityHeadersMiddleware)
 
 origins = [origin.strip() for origin in settings.cors_origins.split(",") if origin.strip()]
 app.add_middleware(

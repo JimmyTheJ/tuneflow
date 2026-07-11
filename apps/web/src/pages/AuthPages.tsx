@@ -76,10 +76,17 @@ export function SetupPage() {
     <div className="auth-page">
       <form className="auth-card" onSubmit={(e) => void submit(e)}>
         <h1>Welcome to Tuneflow</h1>
-        <p className="muted">Create the parent account for your household</p>
+        <p className="muted">Create the local parent account for your household. LDAP can be added later.</p>
         <input className="input" placeholder="Display name" value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
         <input className="input" placeholder="Username" value={username} onChange={(e) => setUsername(e.target.value)} />
-        <input className="input" type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} />
+        <input
+          className="input"
+          type="password"
+          placeholder="Password (8+ characters)"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          minLength={8}
+        />
         {error ? <p className="error">{error}</p> : null}
         <button className="btn-primary" type="submit">
           Create account

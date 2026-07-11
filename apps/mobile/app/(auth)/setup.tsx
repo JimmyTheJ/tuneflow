@@ -26,7 +26,7 @@ export default function SetupScreen() {
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Welcome to Tuneflow</Text>
-      <Text style={styles.subtitle}>Create the parent account for your household</Text>
+      <Text style={styles.subtitle}>Create the local parent account for your household</Text>
 
       <TextInput
         value={displayName}
@@ -48,7 +48,7 @@ export default function SetupScreen() {
         value={password}
         onChangeText={setPassword}
         secureTextEntry
-        placeholder="Password"
+        placeholder="Password (8+ characters)"
         placeholderTextColor="#737373"
         style={styles.input}
       />

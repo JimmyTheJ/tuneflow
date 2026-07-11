@@ -31,10 +31,27 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 60 * 24 * 7
 
+    # Interactive setup is the default first-run path. Enable bootstrap only for
+    # headless installs where env-provided credentials are intentional.
+    bootstrap_enabled: bool = False
     bootstrap_username: str = "admin"
     bootstrap_password: str = "changeme"
     bootstrap_display_name: str = "Admin"
     bootstrap_is_admin: bool = True
+
+    setup_min_password_length: int = 8
+
+    docs_enabled: bool = True
+    security_headers_enabled: bool = True
+    trust_proxy_headers: bool = False
+
+    rate_limit_enabled: bool = True
+    login_rate_limit_attempts: int = 10
+    login_rate_limit_window_sec: int = 900
+    setup_rate_limit_attempts: int = 5
+    setup_rate_limit_window_sec: int = 3600
+    pin_rate_limit_attempts: int = 10
+    pin_rate_limit_window_sec: int = 900
 
     llm_enabled: bool = True
     llm_base_url: str = "http://127.0.0.1:11434/v1"
