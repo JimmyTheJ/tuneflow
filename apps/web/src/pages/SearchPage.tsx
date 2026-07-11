@@ -1,31 +1,64 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { TrackRow } from "@/components/TrackRow";
 import { api } from "@/lib/api";
 import { usePlayerStore } from "@/stores/playerStore";
 import type { Track } from "@/types";
 
 export function SearchPage() {
-  const [query, setQuery] = useState("");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const urlQuery = searchParams.get("q") ?? "";
+  const [query, setQuery] = useState(urlQuery);
   const [results, setResults] = useState<Track[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [lastQuery, setLastQuery] = useState<string | null>(null);
   const playTrack = usePlayerStore((s) => s.playTrack);
 
-  const runSearch = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const trimmed = query.trim();
-    if (!trimmed) return;
+  useEffect(() => {
+    setQuery(urlQuery);
+  }, [urlQuery]);
+
+  useEffect(() => {
+    const trimmed = urlQuery.trim();
+    if (!trimmed) {
+      setResults([]);
+      setLastQuery(null);
+      setError(null);
+      setLoading(false);
+      return;
+    }
+
+    let cancelled = false;
     setLoading(true);
     setError(null);
     setLastQuery(trimmed);
     setResults([]);
-    try {
-      setResults(await api.search(trimmed));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Search failed");
-    } finally {
-      setLoading(false);
+
+    void (async () => {
+      try {
+        const tracks = await api.search(trimmed);
+        if (!cancelled) setResults(tracks);
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "Search failed");
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [urlQuery]);
+
+  const runSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = query.trim();
+    if (!trimmed) return;
+    if (trimmed !== urlQuery.trim()) {
+      setSearchParams({ q: trimmed });
     }
   };
 
@@ -34,7 +67,7 @@ export function SearchPage() {
   return (
     <div className="page">
       <h1>Search</h1>
-      <form className="search-row" onSubmit={(e) => void runSearch(e)}>
+      <form className="search-row" onSubmit={runSearch}>
         <input
           className="input"
           placeholder="Search songs, artists…"
