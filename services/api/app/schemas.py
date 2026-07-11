@@ -229,3 +229,39 @@ class AiInsights(BaseModel):
     top_artists: list[str]
     listening_patterns: list[str]
     recommendations: list[str]
+
+
+class ScrobblerProviderInfo(BaseModel):
+    id: str
+    name: str
+
+
+class ScrobblerConnectionRead(BaseModel):
+    provider: str
+    username: str
+    scrobbling_enabled: bool
+    linked_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ScrobblerConnectionStatus(BaseModel):
+    provider: str
+    configured: bool
+    linked: bool
+    username: str | None = None
+    scrobbling_enabled: bool = False
+    linked_at: datetime | None = None
+
+
+class ScrobblerLinkStart(BaseModel):
+    token: str
+    authorize_url: str
+
+
+class ScrobblerLinkComplete(BaseModel):
+    token: str = Field(min_length=1, max_length=255)
+
+
+class ScrobblerSettingsUpdate(BaseModel):
+    scrobbling_enabled: bool

@@ -13,6 +13,11 @@ class UserRole(str, enum.Enum):
     child = "child"
 
 
+class ScrobblerProvider(str, enum.Enum):
+    lastfm = "lastfm"
+    librefm = "librefm"
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -31,6 +36,9 @@ class User(Base):
     playlists: Mapped[list["Playlist"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     play_history: Mapped[list["PlayHistory"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     likes: Mapped[list["Like"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    scrobbler_connections: Mapped[list["ScrobblerConnection"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
 
 
 class ParentalSettings(Base):
@@ -101,6 +109,24 @@ class PlayHistory(Base):
     played_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
 
     user: Mapped[User] = relationship(back_populates="play_history")
+
+
+class ScrobblerConnection(Base):
+    __tablename__ = "scrobbler_connections"
+    __table_args__ = (UniqueConstraint("user_id", "provider", name="uq_user_scrobbler_provider"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    provider: Mapped[ScrobblerProvider] = mapped_column(Enum(ScrobblerProvider), nullable=False)
+    username: Mapped[str] = mapped_column(String(120), nullable=False)
+    session_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    scrobbling_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    linked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    user: Mapped[User] = relationship(back_populates="scrobbler_connections")
 
 
 class Like(Base):

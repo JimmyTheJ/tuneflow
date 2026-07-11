@@ -130,3 +130,29 @@ export type AiInsights = {
   listening_patterns: string[];
   recommendations: string[];
 };
+
+export type ScrobblerProviderInfo = {
+  id: string;
+  name: string;
+};
+
+export type ScrobblerConnectionStatus = {
+  provider: string;
+  configured: boolean;
+  linked: boolean;
+  username?: string | null;
+  scrobbling_enabled: boolean;
+  linked_at?: string | null;
+};
+
+export type ScrobblerLinkStart = {
+  token: string;
+  authorize_url: string;
+};
+
+export type ScrobblerConnection = {
+  provider: string;
+  username: string;
+  scrobbling_enabled: boolean;
+  linked_at: string;
+};

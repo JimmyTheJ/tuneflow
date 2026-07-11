@@ -23,5 +23,10 @@ class Settings(BaseSettings):
     llm_model: str = "llama3.2"
     llm_timeout_sec: int = 120
 
+    scrobbler_lastfm_api_key: str = ""
+    scrobbler_lastfm_api_secret: str = ""
+    scrobbler_librefm_api_key: str = ""
+    scrobbler_librefm_api_secret: str = ""
+
 
 settings = Settings()

@@ -11,6 +11,10 @@ import type {
   PlayHistoryEntry,
   Playlist,
   PlaylistDetail,
+  ScrobblerConnection,
+  ScrobblerConnectionStatus,
+  ScrobblerLinkStart,
+  ScrobblerProviderInfo,
   SetupStatus,
   StreamInfo,
   TokenResponse,
@@ -109,4 +113,21 @@ export const api = {
   aiStatus: () => request<LlmStatus>("/api/ai/status"),
   aiInsights: () => request<AiInsights>("/api/ai/insights"),
   aiRecommendations: () => request<AiRecommendations>("/api/ai/recommendations"),
+  listScrobblerProviders: () => request<ScrobblerProviderInfo[]>("/api/scrobbler/providers"),
+  getScrobblerStatus: (provider: string) =>
+    request<ScrobblerConnectionStatus>(`/api/scrobbler/${provider}`),
+  startScrobblerLink: (provider: string) =>
+    request<ScrobblerLinkStart>(`/api/scrobbler/${provider}/link/start`, { method: "POST" }),
+  completeScrobblerLink: (provider: string, token: string) =>
+    request<ScrobblerConnection>(`/api/scrobbler/${provider}/link/complete`, {
+      method: "POST",
+      body: { token },
+    }),
+  updateScrobblerSettings: (provider: string, scrobblingEnabled: boolean) =>
+    request<ScrobblerConnection>(`/api/scrobbler/${provider}`, {
+      method: "PATCH",
+      body: { scrobbling_enabled: scrobblingEnabled },
+    }),
+  unlinkScrobbler: (provider: string) =>
+    request<void>(`/api/scrobbler/${provider}`, { method: "DELETE" }),
 };

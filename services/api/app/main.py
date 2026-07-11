@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.database import init_db
-from app.routers import ai, auth, history, likes, music, parental, playlists, users
+from app.routers import ai, auth, history, likes, music, parental, playlists, scrobbler, users
 
 
 @asynccontextmanager
@@ -33,6 +33,7 @@ app.include_router(music.router, prefix="/api")
 app.include_router(playlists.router, prefix="/api")
 app.include_router(history.router, prefix="/api")
 app.include_router(likes.router, prefix="/api")
+app.include_router(scrobbler.router, prefix="/api")
 
 
 @app.get("/health")

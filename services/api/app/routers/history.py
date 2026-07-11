@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import get_current_user
 from app.database import get_db
 from app.models import PlayHistory, User
+from app.routers.scrobbler import schedule_scrobble
 from app.schemas import PlayHistoryCreate, PlayHistoryRead
 
 router = APIRouter(prefix="/history", tags=["history"])
@@ -43,4 +44,11 @@ async def record_play(
     db.add(entry)
     await db.commit()
     await db.refresh(entry)
+    schedule_scrobble(
+        current_user.id,
+        title=entry.title,
+        artist=entry.artist,
+        duration_sec=entry.duration_sec,
+        listened_sec=entry.listened_sec,
+    )
     return PlayHistoryRead.model_validate(entry, from_attributes=True)

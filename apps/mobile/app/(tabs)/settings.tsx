@@ -1,4 +1,5 @@
 import { router } from "expo-router";
+import * as Linking from "expo-linking";
 import { useEffect, useState } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 
@@ -6,7 +7,7 @@ import { PinModal } from "@/components/PinModal";
 import { api } from "@/lib/api";
 import { getApiUrl, setApiUrl } from "@/lib/settings";
 import { useAuthStore } from "@/stores/auth";
-import type { ParentalSettings } from "@/types";
+import type { ParentalSettings, ScrobblerConnectionStatus, ScrobblerProviderInfo } from "@/types";
 
 export default function SettingsScreen() {
   const user = useAuthStore((state) => state.user);
@@ -20,6 +21,10 @@ export default function SettingsScreen() {
   const [pinAction, setPinAction] = useState<"logout" | "switch" | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [scrobblerProviders, setScrobblerProviders] = useState<ScrobblerProviderInfo[]>([]);
+  const [scrobblerStatuses, setScrobblerStatuses] = useState<Record<string, ScrobblerConnectionStatus>>({});
+  const [pendingLinkTokens, setPendingLinkTokens] = useState<Record<string, string>>({});
+  const [scrobblerError, setScrobblerError] = useState<string | null>(null);
 
   const isChild = user?.role === "child";
   const isParent = user?.role === "parent";
@@ -44,6 +49,78 @@ export default function SettingsScreen() {
       }
     })();
   }, [isChild, isParent]);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const providers = await api.listScrobblerProviders();
+        setScrobblerProviders(providers);
+        const statuses = await Promise.all(providers.map((provider) => api.getScrobblerStatus(provider.id)));
+        setScrobblerStatuses(Object.fromEntries(statuses.map((status) => [status.provider, status])));
+      } catch {
+        // scrobbling not configured
+      }
+    })();
+  }, []);
+
+  const refreshScrobblerStatus = async (providerId: string) => {
+    const status = await api.getScrobblerStatus(providerId);
+    setScrobblerStatuses((current) => ({ ...current, [providerId]: status }));
+  };
+
+  const startScrobblerLink = async (providerId: string) => {
+    setScrobblerError(null);
+    try {
+      const link = await api.startScrobblerLink(providerId);
+      setPendingLinkTokens((current) => ({ ...current, [providerId]: link.token }));
+      await Linking.openURL(link.authorize_url);
+      setMessage(`Authorize ${providerId}, then tap Complete link below.`);
+    } catch (err) {
+      setScrobblerError(err instanceof Error ? err.message : "Could not start scrobbler link");
+    }
+  };
+
+  const completeScrobblerLink = async (providerId: string) => {
+    const token = pendingLinkTokens[providerId];
+    if (!token) {
+      setScrobblerError("Start linking first so Tuneflow can finish the connection.");
+      return;
+    }
+    setScrobblerError(null);
+    try {
+      await api.completeScrobblerLink(providerId, token);
+      setPendingLinkTokens((current) => {
+        const next = { ...current };
+        delete next[providerId];
+        return next;
+      });
+      await refreshScrobblerStatus(providerId);
+      setMessage("Scrobbler account linked for this profile.");
+    } catch (err) {
+      setScrobblerError(err instanceof Error ? err.message : "Could not complete scrobbler link");
+    }
+  };
+
+  const toggleScrobbling = async (providerId: string, enabled: boolean) => {
+    setScrobblerError(null);
+    try {
+      await api.updateScrobblerSettings(providerId, enabled);
+      await refreshScrobblerStatus(providerId);
+    } catch (err) {
+      setScrobblerError(err instanceof Error ? err.message : "Could not update scrobbling settings");
+    }
+  };
+
+  const unlinkScrobbler = async (providerId: string) => {
+    setScrobblerError(null);
+    try {
+      await api.unlinkScrobbler(providerId);
+      await refreshScrobblerStatus(providerId);
+      setMessage("Scrobbler account unlinked.");
+    } catch (err) {
+      setScrobblerError(err instanceof Error ? err.message : "Could not unlink scrobbler account");
+    }
+  };
 
   const saveServer = async () => {
     await setApiUrl(apiUrl);
@@ -169,6 +246,53 @@ export default function SettingsScreen() {
               {hasParentPin ? "Update parent PIN" : "Set parent PIN"}
             </Text>
           </Pressable>
+        </>
+      ) : null}
+
+      {scrobblerProviders.length > 0 ? (
+        <>
+          <Text style={[styles.heading, { marginTop: 20, fontSize: 22 }]}>Scrobbling</Text>
+          <Text style={styles.help}>
+            Link a scrobbler account for {user?.display_name}. Each family member links their own account.
+          </Text>
+          {scrobblerProviders.map((provider) => {
+            const status = scrobblerStatuses[provider.id];
+            const pendingToken = pendingLinkTokens[provider.id];
+            return (
+              <View style={styles.card} key={provider.id}>
+                <Text style={styles.label}>{provider.name}</Text>
+                {status?.linked ? (
+                  <>
+                    <Text style={styles.value}>Linked as {status.username}</Text>
+                    <Pressable
+                      style={styles.secondaryButton}
+                      onPress={() => void toggleScrobbling(provider.id, !status.scrobbling_enabled)}
+                    >
+                      <Text style={styles.secondaryButtonText}>
+                        {status.scrobbling_enabled ? "Scrobbling on" : "Scrobbling off"}
+                      </Text>
+                    </Pressable>
+                    <Pressable style={styles.secondaryButton} onPress={() => void unlinkScrobbler(provider.id)}>
+                      <Text style={styles.secondaryButtonText}>Unlink {provider.name}</Text>
+                    </Pressable>
+                  </>
+                ) : (
+                  <>
+                    <Text style={styles.help}>Not linked for this profile.</Text>
+                    <Pressable style={styles.button} onPress={() => void startScrobblerLink(provider.id)}>
+                      <Text style={styles.buttonText}>Connect {provider.name}</Text>
+                    </Pressable>
+                    {pendingToken ? (
+                      <Pressable style={styles.secondaryButton} onPress={() => void completeScrobblerLink(provider.id)}>
+                        <Text style={styles.secondaryButtonText}>Complete link</Text>
+                      </Pressable>
+                    ) : null}
+                  </>
+                )}
+              </View>
+            );
+          })}
+          {scrobblerError ? <Text style={styles.error}>{scrobblerError}</Text> : null}
         </>
       ) : null}
 
