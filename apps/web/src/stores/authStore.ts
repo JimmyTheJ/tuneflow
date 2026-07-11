@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { api } from "@/lib/api";
 import { clearAccessToken, setAccessToken } from "@/lib/settings";
+import { usePlayerStore } from "@/stores/playerStore";
 import type { User } from "@/types";
 
 type AuthState = {
@@ -43,6 +44,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   logout: () => {
+    usePlayerStore.getState().stop();
     clearAccessToken();
     set({ user: null });
   },

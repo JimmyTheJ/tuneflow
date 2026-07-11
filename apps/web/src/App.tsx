@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { Layout } from "@/components/Layout";
+import { MiniPlayer } from "@/components/MiniPlayer";
 import { api } from "@/lib/api";
 import { useAuthStore } from "@/stores/authStore";
 import { LoginPage, SetupPage } from "@/pages/AuthPages";
@@ -67,6 +68,7 @@ export function App() {
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+      <MiniPlayer />
     </BrowserRouter>
   );
 }

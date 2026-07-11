@@ -4,17 +4,40 @@ import { PlayerVideo } from "@/components/PlayerVideo";
 import { PlayerVolume } from "@/components/PlayerVolume";
 import { StreamModeToggle } from "@/components/StreamModeToggle";
 import { TrackThumb } from "@/components/TrackThumb";
-import { usePlayerStore } from "@/stores/playerStore";
+import { hasActivePlayback, usePlayerStore } from "@/stores/playerStore";
 
 export function PlayerPage() {
   const current = usePlayerStore((s) => s.current);
+  const media = usePlayerStore((s) => s.media);
+  const isLoading = usePlayerStore((s) => s.isLoading);
   const streamSelection = usePlayerStore((s) => s.streamSelection);
   const stop = usePlayerStore((s) => s.stop);
 
-  if (!current) {
+  const active = hasActivePlayback({
+    current,
+    media,
+    isLoading,
+  });
+
+  if (!active) {
     return (
       <div className="page">
         <p className="muted">Nothing playing</p>
+      </div>
+    );
+  }
+
+  if (!current) {
+    return (
+      <div className="page player-page">
+        <h1>Playback active</h1>
+        <p className="muted">Controls for audio that is still playing in this tab.</p>
+        <div className="player-page-controls">
+          <PlayerTransport size="large" />
+          <button type="button" className="btn-secondary player-stop-btn" onClick={() => stop()}>
+            Stop
+          </button>
+        </div>
       </div>
     );
   }

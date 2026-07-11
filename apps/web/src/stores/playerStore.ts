@@ -606,6 +606,12 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   },
 }));
 
+export function hasActivePlayback(
+  state: Pick<PlayerState, "current" | "media" | "isLoading">,
+): boolean {
+  return state.current != null || state.media != null || state.isLoading;
+}
+
 export function canPlayNext(state: Pick<PlayerState, "current" | "queue" | "repeatMode" | "shuffle" | "shuffleOrder" | "shuffleStep">): boolean {
   return resolveNextAction(state as PlayerState).type !== "stop";
 }

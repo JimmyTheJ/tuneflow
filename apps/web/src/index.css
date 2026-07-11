@@ -324,6 +324,7 @@ textarea {
   left: 220px;
   right: 0;
   bottom: 108px;
+  z-index: 50;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -342,17 +343,54 @@ textarea {
   cursor: pointer;
 }
 
+.nav-link-live::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 8px;
+  border-radius: 50%;
+  background: #22c55e;
+  vertical-align: middle;
+}
+
 .mini-player {
   position: fixed;
   left: 220px;
   right: 0;
   bottom: 0;
+  z-index: 50;
   display: flex;
   flex-direction: column;
   gap: 10px;
   padding: 10px 24px 14px;
   background: #171717;
   border-top: 1px solid #2f2f2f;
+}
+
+.mini-player-fullwidth {
+  left: 0;
+}
+
+.mini-player-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.mini-player-stop {
+  background: none;
+  border: none;
+  color: #a3a3a3;
+  font-size: 1rem;
+  cursor: pointer;
+  padding: 4px;
+  line-height: 1;
+}
+
+.mini-player-stop:hover {
+  color: #fff;
 }
 
 .mini-player-top {
