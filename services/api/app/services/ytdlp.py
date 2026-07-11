@@ -10,6 +10,7 @@ import yt_dlp
 
 from app.schemas import StreamInfo
 from app.services.piped import parse_artist_title
+from app.services.thumbnails import youtube_thumbnail_url
 
 _YT_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{6,20}$")
 _SENTINEL = object()
@@ -41,7 +42,7 @@ async def get_stream_via_ytdlp(video_id: str) -> StreamInfo:
         video_id=video_id,
         title=title,
         artist=artist or info.get("uploader") or info.get("channel"),
-        thumbnail_url=info.get("thumbnail"),
+        thumbnail_url=youtube_thumbnail_url(video_id),
         duration_sec=info.get("duration"),
         audio_url=direct_url,
     )

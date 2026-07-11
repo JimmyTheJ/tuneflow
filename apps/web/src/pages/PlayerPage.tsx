@@ -1,5 +1,6 @@
 import { PlayerProgress } from "@/components/PlayerProgress";
 import { PlayerTransport } from "@/components/PlayerTransport";
+import { TrackThumb } from "@/components/TrackThumb";
 import { usePlayerStore } from "@/stores/playerStore";
 
 export function PlayerPage() {
@@ -16,11 +17,11 @@ export function PlayerPage() {
 
   return (
     <div className="page player-page">
-      {current.thumbnail_url ? (
-        <img src={current.thumbnail_url} alt="" className="player-art" />
-      ) : (
-        <div className="player-art player-art-fallback" />
-      )}
+      <TrackThumb
+        videoId={current.video_id}
+        className="player-art"
+        fallbackClassName="player-art player-art-fallback"
+      />
       <h1>{current.title}</h1>
       <p className="muted">{current.artist ?? "Unknown artist"}</p>
       <div className="player-page-controls">

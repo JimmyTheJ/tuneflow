@@ -1,5 +1,7 @@
+import { useState } from "react";
 import { Image, Pressable, StyleSheet, Text, View } from "react-native";
 
+import { trackThumbnailUrl } from "@/lib/thumbnails";
 import type { Track } from "@/types";
 
 type Props = {
@@ -10,12 +12,18 @@ type Props = {
 };
 
 export function TrackRow({ track, onPress, subtitle, trailing }: Props) {
+  const [failed, setFailed] = useState(false);
+
   return (
     <Pressable style={styles.row} onPress={onPress}>
-      {track.thumbnail_url ? (
-        <Image source={{ uri: track.thumbnail_url }} style={styles.thumbnail} />
-      ) : (
+      {failed ? (
         <View style={[styles.thumbnail, styles.thumbnailFallback]} />
+      ) : (
+        <Image
+          source={{ uri: trackThumbnailUrl(track.video_id) }}
+          style={styles.thumbnail}
+          onError={() => setFailed(true)}
+        />
       )}
       <View style={styles.meta}>
         <Text style={styles.title} numberOfLines={1}>

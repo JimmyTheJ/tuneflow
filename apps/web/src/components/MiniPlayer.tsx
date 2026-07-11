@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { PlayerProgress } from "@/components/PlayerProgress";
 import { PlayerTransport } from "@/components/PlayerTransport";
+import { TrackThumb } from "@/components/TrackThumb";
 import { usePlayerStore } from "@/stores/playerStore";
 
 export function MiniPlayer() {
@@ -23,11 +24,11 @@ export function MiniPlayer() {
       <div className="mini-player">
         <div className="mini-player-top">
           <Link to="/player" className="mini-player-meta">
-            {current.thumbnail_url ? (
-              <img src={current.thumbnail_url} alt="" className="mini-player-thumb" />
-            ) : (
-              <div className="mini-player-thumb mini-player-thumb-fallback" />
-            )}
+            <TrackThumb
+              videoId={current.video_id}
+              className="mini-player-thumb"
+              fallbackClassName="mini-player-thumb mini-player-thumb-fallback"
+            />
             <div className="mini-player-text">
               <div className="track-title">{current.title}</div>
               <div className="track-subtitle">{current.artist ?? "Unknown artist"}</div>

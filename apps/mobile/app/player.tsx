@@ -1,6 +1,8 @@
+import { useState } from "react";
 import { Image, Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
+import { trackThumbnailUrl } from "@/lib/thumbnails";
 import { usePlayerStore } from "@/stores/player";
 
 export default function PlayerScreen() {
@@ -10,6 +12,7 @@ export default function PlayerScreen() {
   const togglePlayback = usePlayerStore((state) => state.togglePlayback);
   const playNext = usePlayerStore((state) => state.playNext);
   const stop = usePlayerStore((state) => state.stop);
+  const [artFailed, setArtFailed] = useState(false);
 
   if (!current) {
     return (
@@ -21,10 +24,14 @@ export default function PlayerScreen() {
 
   return (
     <View style={styles.container}>
-      {current.thumbnail_url ? (
-        <Image source={{ uri: current.thumbnail_url }} style={styles.artwork} />
-      ) : (
+      {artFailed ? (
         <View style={[styles.artwork, styles.artworkFallback]} />
+      ) : (
+        <Image
+          source={{ uri: trackThumbnailUrl(current.video_id) }}
+          style={styles.artwork}
+          onError={() => setArtFailed(true)}
+        />
       )}
 
       <Text style={styles.title}>{current.title}</Text>

@@ -4,6 +4,7 @@ import httpx
 
 from app.config import settings
 from app.schemas import SearchResult, StreamInfo
+from app.services.thumbnails import youtube_thumbnail_url
 
 _ARTIST_TITLE_RE = re.compile(
     r"^(?P<artist>.+?)\s*[-–—|:]\s*(?P<title>.+?)(?:\s*[\(\[].*[\)\]])?$"
@@ -62,12 +63,13 @@ class PipedClient:
             if item.get("type") != "stream":
                 continue
             artist, title = parse_artist_title(item.get("title", "Unknown"))
+            video_id = item["url"].split("=")[-1]
             results.append(
                 SearchResult(
-                    video_id=item["url"].split("=")[-1],
+                    video_id=video_id,
                     title=title,
                     artist=artist or item.get("uploaderName"),
-                    thumbnail_url=item.get("thumbnail"),
+                    thumbnail_url=youtube_thumbnail_url(video_id),
                     duration_sec=item.get("duration"),
                 )
             )
@@ -91,7 +93,7 @@ class PipedClient:
             video_id=video_id,
             title=title,
             artist=artist or payload.get("uploader"),
-            thumbnail_url=payload.get("thumbnailUrl"),
+            thumbnail_url=youtube_thumbnail_url(video_id),
             duration_sec=payload.get("duration"),
             audio_url=best["url"],
         )
