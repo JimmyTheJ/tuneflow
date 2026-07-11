@@ -1,10 +1,13 @@
 import { PlayerProgress } from "@/components/PlayerProgress";
 import { PlayerTransport } from "@/components/PlayerTransport";
+import { PlayerVideo } from "@/components/PlayerVideo";
+import { StreamModeToggle } from "@/components/StreamModeToggle";
 import { TrackThumb } from "@/components/TrackThumb";
 import { usePlayerStore } from "@/stores/playerStore";
 
 export function PlayerPage() {
   const current = usePlayerStore((s) => s.current);
+  const streamSelection = usePlayerStore((s) => s.streamSelection);
   const stop = usePlayerStore((s) => s.stop);
 
   if (!current) {
@@ -17,14 +20,19 @@ export function PlayerPage() {
 
   return (
     <div className="page player-page">
-      <TrackThumb
-        videoId={current.video_id}
-        className="player-art"
-        fallbackClassName="player-art player-art-fallback"
-      />
+      {streamSelection.video ? (
+        <PlayerVideo className="player-video" />
+      ) : (
+        <TrackThumb
+          videoId={current.video_id}
+          className="player-art"
+          fallbackClassName="player-art player-art-fallback"
+        />
+      )}
       <h1>{current.title}</h1>
       <p className="muted">{current.artist ?? "Unknown artist"}</p>
       <div className="player-page-controls">
+        <StreamModeToggle />
         <PlayerTransport size="large" />
         <PlayerProgress className="player-page-progress" />
         <button type="button" className="btn-secondary player-stop-btn" onClick={() => stop()}>

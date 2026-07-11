@@ -13,7 +13,7 @@ from app.database import get_db
 from app.models import User
 from app.schemas import SearchResult, StreamInfo
 from app.services.piped import piped_client
-from app.services.stream_resolver import resolve_stream, stream_audio_chunks
+from app.services.stream_resolver import resolve_stream, stream_audio_chunks, stream_video_chunks
 
 router = APIRouter(prefix="/music", tags=["music"])
 
@@ -122,3 +122,41 @@ async def stream_audio(
             yield chunk
 
     return StreamingResponse(iter_bytes(), media_type=stream.mime_type)
+
+
+@router.get("/video/{video_id}")
+async def stream_video(
+    video_id: str,
+    video_only: bool = Query(default=False),
+    current_user: User = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+) -> StreamingResponse:
+    child_settings = await enforce_child_access(db, current_user)
+
+    try:
+        stream = await resolve_stream(video_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except httpx.HTTPError as exc:
+        raise _piped_unavailable(exc) from exc
+
+    if not stream.has_video:
+        raise HTTPException(status_code=404, detail="No video stream available for this track")
+
+    reason = check_content_allowed(
+        settings=child_settings,
+        video_id=stream.video_id,
+        title=stream.title,
+        artist=stream.artist,
+    )
+    if reason:
+        raise HTTPException(status_code=403, detail=f"Content blocked: {reason}")
+
+    playable_id = stream.video_id
+
+    async def iter_bytes():
+        async for chunk in stream_video_chunks(playable_id, video_only=video_only):
+            yield chunk
+
+    media_type = stream.video_mime_type or "video/mp4"
+    return StreamingResponse(iter_bytes(), media_type=media_type)

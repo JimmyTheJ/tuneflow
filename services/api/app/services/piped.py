@@ -89,6 +89,19 @@ def collect_playable_audio_streams(payload: dict) -> list[dict]:
     ]
 
 
+def collect_video_playback_streams(payload: dict) -> list[dict]:
+    """Return streams suitable for video playback (combined A/V preferred)."""
+    combined = [
+        stream
+        for stream in payload.get("videoStreams", [])
+        if stream.get("url") and not stream.get("videoOnly")
+    ]
+    if combined:
+        return combined
+
+    return [stream for stream in payload.get("videoStreams", []) if stream.get("url")]
+
+
 def piped_instance_urls() -> list[str]:
     urls = [settings.piped_base_url, *settings.piped_fallback_urls.split(",")]
     seen: set[str] = set()
@@ -197,6 +210,12 @@ class PipedClient:
 
         best = max(audio_streams, key=lambda s: s.get("bitrate", 0) or 0)
         artist, title = parse_artist_title(payload.get("title", "Unknown"))
+        video_streams = collect_video_playback_streams(payload)
+        has_video = bool(video_streams)
+        video_mime_type = None
+        if video_streams:
+            video_best = max(video_streams, key=lambda s: s.get("bitrate", 0) or 0)
+            video_mime_type = video_best.get("mimeType") or "video/mp4"
 
         return StreamInfo(
             video_id=video_id,
@@ -206,6 +225,8 @@ class PipedClient:
             duration_sec=payload.get("duration"),
             audio_url=best["url"],
             mime_type=best.get("mimeType") or "audio/webm",
+            has_video=has_video,
+            video_mime_type=video_mime_type,
         )
 
 

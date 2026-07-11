@@ -5,16 +5,36 @@ import httpx
 from app.schemas import StreamInfo
 from app.services.piped import (
     artist_matches,
+    collect_video_playback_streams,
     is_topic_upload,
     matches_requested_track,
     piped_client,
     title_matches,
 )
-from app.services.ytdlp import get_stream_via_ytdlp, search_video_ids, stream_audio_via_ytdlp
+from app.services.ytdlp import (
+    get_stream_via_ytdlp,
+    search_video_ids,
+    stream_audio_via_ytdlp,
+    stream_video_via_ytdlp,
+)
 
 
 def _proxy_audio_url(video_id: str) -> str:
     return f"/api/music/audio/{video_id}"
+
+
+def _proxy_video_url(video_id: str) -> str:
+    return f"/api/music/video/{video_id}"
+
+
+def _apply_proxy_urls(stream: StreamInfo) -> StreamInfo:
+    playable_id = stream.video_id
+    stream.audio_url = _proxy_audio_url(playable_id)
+    if stream.has_video:
+        stream.video_url = _proxy_video_url(playable_id)
+    else:
+        stream.video_url = None
+    return stream
 
 
 async def _probe_fetchable(url: str) -> bool:
@@ -91,16 +111,14 @@ async def resolve_stream(video_id: str) -> StreamInfo:
 
     try:
         stream = await get_stream_via_ytdlp(video_id)
-        stream.audio_url = _proxy_audio_url(video_id)
-        return stream
+        return _apply_proxy_urls(stream)
     except Exception as exc:
         errors.append(f"yt-dlp: {exc}")
 
     try:
         piped_meta = await piped_client.get_stream(video_id)
         if await _probe_fetchable(piped_meta.audio_url):
-            piped_meta.audio_url = _proxy_audio_url(video_id)
-            return piped_meta
+            return _apply_proxy_urls(piped_meta)
         errors.append("piped: stream URL is not fetchable")
     except (httpx.HTTPError, ValueError) as exc:
         errors.append(f"piped: {exc}")
@@ -108,8 +126,7 @@ async def resolve_stream(video_id: str) -> StreamInfo:
     if piped_meta is not None:
         alternate = await _find_playable_alternate(video_id, piped_meta.title, piped_meta.artist)
         if alternate is not None:
-            alternate.audio_url = _proxy_audio_url(alternate.video_id)
-            return alternate
+            return _apply_proxy_urls(alternate)
 
     raise httpx.HTTPError("Could not resolve audio stream. " + "; ".join(errors))
 
@@ -144,3 +161,43 @@ async def stream_audio_chunks(video_id: str) -> AsyncIterator[bytes]:
         errors.append(f"piped: {exc}")
 
     raise httpx.HTTPError("Could not stream audio. " + "; ".join(errors))
+
+
+async def stream_video_chunks(video_id: str, *, video_only: bool = False) -> AsyncIterator[bytes]:
+    errors: list[str] = []
+
+    try:
+        got_bytes = False
+        async for chunk in stream_video_via_ytdlp(video_id, video_only=video_only):
+            got_bytes = True
+            yield chunk
+        if got_bytes:
+            return
+        errors.append("yt-dlp: no video data returned")
+    except Exception as exc:
+        message = str(exc).strip() or repr(exc)
+        errors.append(f"yt-dlp: {message}")
+
+    if video_only:
+        raise httpx.HTTPError("Could not stream video-only. " + "; ".join(errors))
+
+    try:
+        payload = await piped_client._request_json(f"/streams/{video_id}")
+        video_streams = collect_video_playback_streams(payload)
+        if not video_streams:
+            raise ValueError("No video stream available for this video")
+        best = max(video_streams, key=lambda s: s.get("bitrate", 0) or 0)
+        video_url = best["url"]
+        if not await _probe_fetchable(video_url):
+            raise ValueError("video stream URL is not fetchable")
+
+        async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
+            async with client.stream("GET", video_url) as response:
+                response.raise_for_status()
+                async for chunk in response.aiter_bytes():
+                    yield chunk
+        return
+    except (httpx.HTTPError, ValueError) as exc:
+        errors.append(f"piped: {exc}")
+
+    raise httpx.HTTPError("Could not stream video. " + "; ".join(errors))

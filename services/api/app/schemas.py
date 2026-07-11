@@ -193,7 +193,10 @@ class StreamInfo(BaseModel):
     thumbnail_url: str | None = None
     duration_sec: int | None = None
     audio_url: str
+    video_url: str | None = None
     mime_type: str = "audio/webm"
+    video_mime_type: str | None = None
+    has_video: bool = False
 
 
 class ReorderTracksRequest(BaseModel):

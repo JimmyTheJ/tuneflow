@@ -37,8 +37,17 @@ export type PlaylistDetail = Playlist & {
   >;
 };
 
+export type StreamSelection = {
+  video: boolean;
+  audio: boolean;
+};
+
 export type StreamInfo = Track & {
   audio_url: string;
+  video_url?: string | null;
+  mime_type?: string;
+  video_mime_type?: string | null;
+  has_video?: boolean;
 };
 
 export type PlayHistoryEntry = Track & {
