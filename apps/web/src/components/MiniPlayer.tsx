@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { PlayerProgress } from "@/components/PlayerProgress";
 import { PlayerTransport } from "@/components/PlayerTransport";
+import { PlayerVolume } from "@/components/PlayerVolume";
 import { TrackThumb } from "@/components/TrackThumb";
 import { usePlayerStore } from "@/stores/playerStore";
 
@@ -34,9 +35,10 @@ export function MiniPlayer() {
               <div className="track-subtitle">{current.artist ?? "Unknown artist"}</div>
             </div>
           </Link>
-          <PlayerTransport />
+          <PlayerTransport showQueueControls />
         </div>
         <PlayerProgress className="mini-player-progress" />
+        <PlayerVolume className="mini-player-volume" compact />
       </div>
     </>
   );

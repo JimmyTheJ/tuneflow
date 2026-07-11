@@ -3,6 +3,8 @@ import { api } from "@/lib/api";
 import { getAccessToken, getApiUrl } from "@/lib/settings";
 import type { StreamInfo, StreamSelection, Track } from "@/types";
 
+export type RepeatMode = "none" | "one" | "all";
+
 type PlayerState = {
   current: Track | null;
   stream: StreamInfo | null;
@@ -12,21 +14,39 @@ type PlayerState = {
   positionSec: number;
   durationSec: number;
   queue: Track[];
+  shuffle: boolean;
+  shuffleOrder: number[];
+  shuffleStep: number;
+  repeatMode: RepeatMode;
+  volume: number;
   media: HTMLMediaElement | null;
   error: string | null;
-  playTrack: (track: Track, queue?: Track[]) => Promise<void>;
+  playTrack: (track: Track, queue?: Track[], options?: { fromNavigation?: boolean }) => Promise<void>;
   togglePlayback: () => void;
   setStreamSelection: (selection: Partial<StreamSelection>) => Promise<void>;
   playPrevious: () => Promise<void>;
-  playNext: () => Promise<void>;
+  playNext: (fromAutoAdvance?: boolean) => Promise<void>;
+  onTrackEnded: () => Promise<void>;
   seek: (seconds: number) => void;
+  setVolume: (volume: number) => void;
+  toggleShuffle: () => void;
+  cycleRepeatMode: () => void;
   stop: () => void;
   clearError: () => void;
 };
 
 const DEFAULT_SELECTION: StreamSelection = { video: false, audio: true };
+const VOLUME_KEY = "tuneflow.volume";
 
 let playGeneration = 0;
+
+function getStoredVolume(): number {
+  const raw = localStorage.getItem(VOLUME_KEY);
+  if (raw == null) return 1;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) return 1;
+  return Math.max(0, Math.min(1, parsed));
+}
 
 function isActiveGeneration(generation: number): boolean {
   return generation === playGeneration;
@@ -67,6 +87,18 @@ function buildMediaUrl(stream: StreamInfo, selection: StreamSelection, track?: T
   return `${base}/api/music/audio/${playableId}?${params.toString()}`;
 }
 
+function applyVolume(
+  media: HTMLMediaElement,
+  volume: number,
+  selection: StreamSelection,
+): void {
+  const clamped = Math.max(0, Math.min(1, volume));
+  media.volume = clamped;
+  if (media instanceof HTMLVideoElement) {
+    media.muted = selection.video && !selection.audio ? true : clamped === 0;
+  }
+}
+
 function disposeMedia(media: HTMLMediaElement | null): void {
   if (!media) return;
   media.pause();
@@ -88,6 +120,117 @@ function syncProgress(media: HTMLMediaElement, track: Track) {
   };
 }
 
+function currentQueueIndex(state: Pick<PlayerState, "current" | "queue">): number {
+  if (!state.current) return -1;
+  return state.queue.findIndex((track) => track.video_id === state.current!.video_id);
+}
+
+function buildShuffleOrder(length: number, currentIndex: number): number[] {
+  if (length <= 0) return [];
+  if (length === 1) return [0];
+
+  const order = Array.from({ length }, (_, index) => index);
+  for (let index = order.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [order[index], order[swapIndex]] = [order[swapIndex], order[index]];
+  }
+
+  const currentPosition = order.indexOf(currentIndex);
+  if (currentPosition > 0) {
+    order.splice(currentPosition, 1);
+    order.unshift(currentIndex);
+  }
+
+  return order;
+}
+
+type NextAction =
+  | { type: "track"; queueIndex: number; shuffleStep: number }
+  | { type: "repeat-one" }
+  | { type: "stop" };
+
+function resolveNextAction(state: PlayerState): NextAction {
+  const queueIndex = currentQueueIndex(state);
+  if (queueIndex < 0) return { type: "stop" };
+
+  if (state.queue.length <= 1) {
+    if (state.repeatMode === "one") return { type: "repeat-one" };
+    if (state.repeatMode === "all") {
+      return { type: "track", queueIndex: 0, shuffleStep: 0 };
+    }
+    return { type: "stop" };
+  }
+
+  if (state.shuffle && state.shuffleOrder.length > 1) {
+    const step = state.shuffleOrder.indexOf(queueIndex);
+    const activeStep = step >= 0 ? step : state.shuffleStep;
+
+    if (activeStep < state.shuffleOrder.length - 1) {
+      const nextIndex = state.shuffleOrder[activeStep + 1];
+      return { type: "track", queueIndex: nextIndex, shuffleStep: activeStep + 1 };
+    }
+    if (state.repeatMode === "all") {
+      return { type: "track", queueIndex: state.shuffleOrder[0], shuffleStep: 0 };
+    }
+    if (state.repeatMode === "one") return { type: "repeat-one" };
+    return { type: "stop" };
+  }
+
+  if (queueIndex < state.queue.length - 1) {
+    return { type: "track", queueIndex: queueIndex + 1, shuffleStep: queueIndex + 1 };
+  }
+  if (state.repeatMode === "all") {
+    return { type: "track", queueIndex: 0, shuffleStep: 0 };
+  }
+  if (state.repeatMode === "one") return { type: "repeat-one" };
+  return { type: "stop" };
+}
+
+type PreviousAction =
+  | { type: "track"; queueIndex: number; shuffleStep: number }
+  | { type: "restart" };
+
+function resolvePreviousAction(state: PlayerState): PreviousAction {
+  const queueIndex = currentQueueIndex(state);
+  if (queueIndex < 0) return { type: "restart" };
+
+  if (state.media && state.positionSec > 3) {
+    return { type: "restart" };
+  }
+
+  if (state.queue.length <= 1) {
+    return { type: "restart" };
+  }
+
+  if (state.shuffle && state.shuffleOrder.length > 1) {
+    const step = state.shuffleOrder.indexOf(queueIndex);
+    const activeStep = step >= 0 ? step : state.shuffleStep;
+
+    if (activeStep > 0) {
+      const previousIndex = state.shuffleOrder[activeStep - 1];
+      return { type: "track", queueIndex: previousIndex, shuffleStep: activeStep - 1 };
+    }
+    if (state.repeatMode === "all") {
+      const lastStep = state.shuffleOrder.length - 1;
+      return {
+        type: "track",
+        queueIndex: state.shuffleOrder[lastStep],
+        shuffleStep: lastStep,
+      };
+    }
+    return { type: "restart" };
+  }
+
+  if (queueIndex > 0) {
+    return { type: "track", queueIndex: queueIndex - 1, shuffleStep: queueIndex - 1 };
+  }
+  if (state.repeatMode === "all") {
+    const lastIndex = state.queue.length - 1;
+    return { type: "track", queueIndex: lastIndex, shuffleStep: lastIndex };
+  }
+  return { type: "restart" };
+}
+
 function attachMediaListeners(
   media: HTMLMediaElement,
   track: Track,
@@ -107,7 +250,7 @@ function attachMediaListeners(
   media.addEventListener("timeupdate", updateProgress);
   media.addEventListener("ended", () => {
     if (!shouldHandle()) return;
-    void get().playNext();
+    void get().onTrackEnded();
   });
   media.addEventListener("play", () => {
     if (!shouldHandle()) return;
@@ -161,9 +304,6 @@ function createMediaElement(url: string, selection: StreamSelection): HTMLMediaE
     video.playsInline = true;
     video.controls = false;
     video.preload = "auto";
-    if (!selection.audio) {
-      video.muted = true;
-    }
     return video;
   }
   return new Audio(url);
@@ -181,6 +321,7 @@ async function loadMediaAt(
 ): Promise<HTMLMediaElement | null> {
   const mediaUrl = buildMediaUrl(stream, selection, track);
   const media = createMediaElement(mediaUrl, selection);
+  applyVolume(media, get().volume, selection);
   attachMediaListeners(media, track, generation, set, get);
 
   await waitForMediaReady(media);
@@ -213,17 +354,70 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   positionSec: 0,
   durationSec: 0,
   queue: [],
+  shuffle: false,
+  shuffleOrder: [],
+  shuffleStep: 0,
+  repeatMode: "none",
+  volume: getStoredVolume(),
   media: null,
   error: null,
 
   clearError: () => set({ error: null }),
 
-  playTrack: async (track, queue = []) => {
+  setVolume: (volume) => {
+    const clamped = Math.max(0, Math.min(1, volume));
+    localStorage.setItem(VOLUME_KEY, String(clamped));
+    const { media, streamSelection } = get();
+    if (media) applyVolume(media, clamped, streamSelection);
+    set({ volume: clamped });
+  },
+
+  toggleShuffle: () => {
+    const state = get();
+    if (state.queue.length <= 1) return;
+
+    if (state.shuffle) {
+      set({ shuffle: false, shuffleOrder: [], shuffleStep: currentQueueIndex(state) });
+      return;
+    }
+
+    const queueIndex = currentQueueIndex(state);
+    const shuffleOrder = buildShuffleOrder(state.queue.length, queueIndex >= 0 ? queueIndex : 0);
+    set({ shuffle: true, shuffleOrder, shuffleStep: 0 });
+  },
+
+  cycleRepeatMode: () => {
+    const next: Record<RepeatMode, RepeatMode> = {
+      none: "all",
+      all: "one",
+      one: "none",
+    };
+    set({ repeatMode: next[get().repeatMode] });
+  },
+
+  playTrack: async (track, queue = [], options) => {
     const generation = ++playGeneration;
     disposeMedia(get().media);
 
     const nextQueue = queue.length ? queue : [track];
     const selection = normalizeSelection(get().streamSelection, get().stream);
+    const queueIndex = nextQueue.findIndex((item) => item.video_id === track.video_id);
+    const activeIndex = queueIndex >= 0 ? queueIndex : 0;
+
+    let shuffleOrder = get().shuffleOrder;
+    let shuffleStep = get().shuffleStep;
+    if (get().shuffle && nextQueue.length > 1) {
+      if (options?.fromNavigation && shuffleOrder.length === nextQueue.length) {
+        shuffleStep = shuffleOrder.indexOf(activeIndex);
+        if (shuffleStep < 0) shuffleStep = 0;
+      } else {
+        shuffleOrder = buildShuffleOrder(nextQueue.length, activeIndex);
+        shuffleStep = 0;
+      }
+    } else {
+      shuffleOrder = [];
+      shuffleStep = activeIndex;
+    }
 
     set({
       media: null,
@@ -232,6 +426,8 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       isPlaying: false,
       current: track,
       queue: nextQueue,
+      shuffleOrder,
+      shuffleStep,
       streamSelection: selection,
       error: null,
       positionSec: 0,
@@ -276,7 +472,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   },
 
   setStreamSelection: async (patch) => {
-    const { current, stream, media, streamSelection, positionSec, isPlaying } = get();
+    const { current, stream, media, streamSelection, positionSec, isPlaying, volume } = get();
     if (!current || !stream) return;
 
     const nextSelection = normalizeSelection({ ...streamSelection, ...patch }, stream);
@@ -306,6 +502,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       );
       if (!pendingMedia) return;
 
+      applyVolume(pendingMedia, volume, nextSelection);
       set({
         media: pendingMedia,
         isLoading: false,
@@ -337,50 +534,57 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     set({ positionSec: clamped });
   },
 
-  playPrevious: async () => {
-    const { current, queue, media, positionSec } = get();
-    if (!current) return;
+  onTrackEnded: async () => {
+    if (get().repeatMode === "one") {
+      const { media } = get();
+      if (!media) return;
+      media.currentTime = 0;
+      set({ positionSec: 0 });
+      await media.play();
+      return;
+    }
+    await get().playNext(true);
+  },
 
-    if (media && positionSec > 3) {
+  playPrevious: async () => {
+    const action = resolvePreviousAction(get());
+    if (action.type === "restart") {
+      const { media } = get();
+      if (!media) return;
       media.currentTime = 0;
       set({ positionSec: 0 });
       return;
     }
 
-    if (queue.length <= 1) {
-      if (media) {
-        media.currentTime = 0;
-        set({ positionSec: 0 });
-      }
-      return;
-    }
-
-    const index = queue.findIndex((t) => t.video_id === current.video_id);
-    const previous = queue[index - 1];
-    if (!previous) {
-      if (media) {
-        media.currentTime = 0;
-        set({ positionSec: 0 });
-      }
-      return;
-    }
-
-    await get().playTrack(previous, queue);
+    const track = get().queue[action.queueIndex];
+    if (!track) return;
+    set({ shuffleStep: action.shuffleStep });
+    await get().playTrack(track, get().queue, { fromNavigation: true });
   },
 
-  playNext: async () => {
-    const { current, queue } = get();
-    if (!current || queue.length <= 1) {
+  playNext: async (fromAutoAdvance = false) => {
+    const action = resolveNextAction(get());
+    if (action.type === "repeat-one") {
+      const { media } = get();
+      if (!media) return;
+      media.currentTime = 0;
+      set({ positionSec: 0 });
+      if (fromAutoAdvance) await media.play();
+      else void media.play();
+      return;
+    }
+    if (action.type === "stop") {
       set({ isPlaying: false });
       return;
     }
-    const index = queue.findIndex((t) => t.video_id === current.video_id);
-    const next = queue[index + 1];
-    if (!next) {
+
+    const track = get().queue[action.queueIndex];
+    if (!track) {
       set({ isPlaying: false });
       return;
     }
-    await get().playTrack(next, queue);
+    set({ shuffleStep: action.shuffleStep });
+    await get().playTrack(track, get().queue, { fromNavigation: true });
   },
 
   stop: () => {
@@ -395,7 +599,31 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       positionSec: 0,
       durationSec: 0,
       queue: [],
+      shuffleOrder: [],
+      shuffleStep: 0,
       streamSelection: DEFAULT_SELECTION,
     });
   },
 }));
+
+export function canPlayNext(state: Pick<PlayerState, "current" | "queue" | "repeatMode" | "shuffle" | "shuffleOrder" | "shuffleStep">): boolean {
+  return resolveNextAction(state as PlayerState).type !== "stop";
+}
+
+export function canPlayPrevious(state: Pick<PlayerState, "current" | "queue" | "positionSec" | "repeatMode" | "shuffle" | "shuffleOrder" | "shuffleStep">): boolean {
+  if (!state.current) return false;
+  if (state.positionSec > 3) return true;
+  if (state.queue.length <= 1) return false;
+
+  const queueIndex = currentQueueIndex(state);
+  if (queueIndex < 0) return false;
+
+  if (state.shuffle && state.shuffleOrder.length > 1) {
+    const step = state.shuffleOrder.indexOf(queueIndex);
+    if (step > 0) return true;
+    return state.repeatMode === "all";
+  }
+
+  if (queueIndex > 0) return true;
+  return state.repeatMode === "all";
+}

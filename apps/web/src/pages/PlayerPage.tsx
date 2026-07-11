@@ -1,6 +1,7 @@
 import { PlayerProgress } from "@/components/PlayerProgress";
 import { PlayerTransport } from "@/components/PlayerTransport";
 import { PlayerVideo } from "@/components/PlayerVideo";
+import { PlayerVolume } from "@/components/PlayerVolume";
 import { StreamModeToggle } from "@/components/StreamModeToggle";
 import { TrackThumb } from "@/components/TrackThumb";
 import { usePlayerStore } from "@/stores/playerStore";
@@ -33,8 +34,9 @@ export function PlayerPage() {
       <p className="muted">{current.artist ?? "Unknown artist"}</p>
       <div className="player-page-controls">
         <StreamModeToggle />
-        <PlayerTransport size="large" />
+        <PlayerTransport size="large" showQueueControls />
         <PlayerProgress className="player-page-progress" />
+        <PlayerVolume className="player-page-volume" />
         <button type="button" className="btn-secondary player-stop-btn" onClick={() => stop()}>
           Stop
         </button>
