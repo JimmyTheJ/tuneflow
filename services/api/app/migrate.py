@@ -10,6 +10,8 @@ async def run_migrations() -> None:
         columns = {row[1] for row in result.fetchall()}
         if "parent_pin_hash" not in columns:
             await conn.execute(text("ALTER TABLE users ADD COLUMN parent_pin_hash VARCHAR(255)"))
+        if "deleted_at" not in columns:
+            await conn.execute(text("ALTER TABLE users ADD COLUMN deleted_at DATETIME"))
 
         table_result = await conn.execute(
             text("SELECT name FROM sqlite_master WHERE type='table' AND name='scrobbler_connections'")

@@ -88,7 +88,7 @@ async def _user_from_token(raw_token: str, db: AsyncSession) -> User:
 
     result = await db.execute(select(User).where(User.username == username))
     user = result.scalar_one_or_none()
-    if user is None or not user.is_active:
+    if user is None or not user.is_active or user.deleted_at is not None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User inactive or missing")
     return user
 

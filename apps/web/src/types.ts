@@ -6,6 +6,7 @@ export type User = {
   display_name: string;
   role: UserRole;
   is_active: boolean;
+  deleted_at?: string | null;
   created_at: string;
 };
 

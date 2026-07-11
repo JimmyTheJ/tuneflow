@@ -26,7 +26,7 @@ async def list_children(
     result = await db.execute(
         select(User)
         .options(selectinload(User.parental_settings))
-        .where(User.role == UserRole.child)
+        .where(User.role == UserRole.child, User.deleted_at.is_(None))
         .order_by(User.display_name.asc())
     )
     profiles: list[ChildProfile] = []

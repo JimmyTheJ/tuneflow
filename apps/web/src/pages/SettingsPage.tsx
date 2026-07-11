@@ -154,9 +154,14 @@ export function SettingsPage() {
       </button>
 
       {isAdmin ? (
-        <Link to="/admin/cache" className="btn-secondary btn-block link-btn">
-          Audio cache management
-        </Link>
+        <>
+          <Link to="/admin/cache" className="btn-secondary btn-block link-btn">
+            Audio cache management
+          </Link>
+          <Link to="/admin/users/deleted" className="btn-secondary btn-block link-btn">
+            Deleted accounts
+          </Link>
+        </>
       ) : null}
 
       {isParent || isAdmin ? (

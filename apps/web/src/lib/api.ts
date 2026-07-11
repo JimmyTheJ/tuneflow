@@ -95,14 +95,21 @@ export const api = {
   likeTrack: (track: Track) => request<LikeEntry>("/api/likes", { method: "POST", body: track }),
   unlikeTrack: (videoId: string) => request<void>(`/api/likes/${videoId}`, { method: "DELETE" }),
   listUsers: () => request<User[]>("/api/users"),
+  listDeletedUsers: () => request<User[]>("/api/users/deleted"),
   createUser: (payload: {
     username: string;
     password: string;
     display_name: string;
     role: "admin" | "adult" | "child";
   }) => request<User>("/api/users", { method: "POST", body: payload }),
-  updateUser: (userId: number, payload: { is_active?: boolean }) =>
+  updateUser: (userId: number, payload: { display_name?: string; is_active?: boolean }) =>
     request<User>(`/api/users/${userId}`, { method: "PATCH", body: payload }),
+  resetPassword: (userId: number, password: string) =>
+    request<void>(`/api/users/${userId}/reset-password`, { method: "POST", body: { password } }),
+  softDeleteUser: (userId: number) => request<User>(`/api/users/${userId}`, { method: "DELETE" }),
+  restoreUser: (userId: number) => request<User>(`/api/users/${userId}/restore`, { method: "POST" }),
+  permanentlyDeleteUser: (userId: number) =>
+    request<void>(`/api/users/${userId}/permanent`, { method: "DELETE" }),
   parentPinStatus: () => request<ParentPinStatus>("/api/auth/parent-pin/status"),
   parentPinEnforced: () => request<ParentPinEnforced>("/api/auth/parent-pin/enforced"),
   setParentPin: (pin: string) => request<void>("/api/auth/parent-pin", { method: "PUT", body: { pin } }),

@@ -29,6 +29,7 @@ class User(Base):
     role: Mapped[UserRole] = mapped_column(Enum(UserRole), nullable=False, default=UserRole.adult)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     parent_pin_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     parental_settings: Mapped["ParentalSettings | None"] = relationship(

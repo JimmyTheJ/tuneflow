@@ -29,6 +29,7 @@ class UserRead(BaseModel):
     display_name: str
     role: UserRole
     is_active: bool
+    deleted_at: datetime | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
