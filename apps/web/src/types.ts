@@ -1,4 +1,4 @@
-export type UserRole = "parent" | "adult" | "child";
+export type UserRole = "admin" | "parent" | "adult" | "child";
 
 export type User = {
   id: number;
@@ -127,4 +127,45 @@ export type ScrobblerConnection = {
   username: string;
   scrobbling_enabled: boolean;
   linked_at: string;
+};
+
+export type CacheSettings = {
+  cache_enabled: boolean;
+  cache_retention_days: number | null;
+  cache_max_size_mb: number | null;
+  cache_cleanup_interval_hours: number;
+  updated_at: string;
+};
+
+export type CacheStats = {
+  entry_count: number;
+  total_size_bytes: number;
+  oldest_accessed_at: string | null;
+  newest_accessed_at: string | null;
+  unique_users: number;
+};
+
+export type CacheAccessUser = {
+  user_id: number;
+  username: string;
+  display_name: string;
+  first_accessed_at: string;
+  last_accessed_at: string;
+};
+
+export type CacheEntry = {
+  video_id: string;
+  file_size_bytes: number;
+  mime_type: string;
+  cached_at: string;
+  last_accessed_at: string;
+  cached_by_user_id: number | null;
+  cached_by_username: string | null;
+  access_count: number;
+  users: CacheAccessUser[];
+};
+
+export type CachePurgeResult = {
+  deleted_entries: number;
+  freed_bytes: number;
 };

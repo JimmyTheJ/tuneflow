@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import require_parent
+from app.auth import require_parent_or_admin
 from app.database import get_db
 from app.models import User, UserRole
 from app.schemas import ResetPasswordRequest, UserCreate, UserRead, UserUpdate
@@ -14,7 +14,7 @@ router = APIRouter(prefix="/users", tags=["users"])
 
 @router.get("", response_model=list[UserRead])
 async def list_users(
-    _: User = Depends(require_parent),
+    _: User = Depends(require_parent_or_admin),
     db: AsyncSession = Depends(get_db),
 ) -> list[UserRead]:
     result = await db.execute(select(User).order_by(User.created_at.asc()))
@@ -24,7 +24,7 @@ async def list_users(
 @router.post("", response_model=UserRead, status_code=status.HTTP_201_CREATED)
 async def create_user(
     payload: UserCreate,
-    _: User = Depends(require_parent),
+    current_user: User = Depends(require_parent_or_admin),
     db: AsyncSession = Depends(get_db),
 ) -> UserRead:
     username = payload.username.strip().lower()
@@ -32,8 +32,8 @@ async def create_user(
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Username already exists")
 
-    if payload.role == UserRole.parent:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot create another parent account")
+    if current_user.role == UserRole.parent and payload.role in {UserRole.parent, UserRole.admin}:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot create that account type")
 
     user = User(
         username=username,
@@ -55,15 +55,18 @@ async def create_user(
 async def update_user(
     user_id: int,
     payload: UserUpdate,
-    current_user: User = Depends(require_parent),
+    current_user: User = Depends(require_parent_or_admin),
     db: AsyncSession = Depends(get_db),
 ) -> UserRead:
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-    if user.role == UserRole.parent and user.id != current_user.id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot modify another parent account")
+    if current_user.role == UserRole.parent:
+        if user.role in {UserRole.parent, UserRole.admin} and user.id != current_user.id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot modify that account")
+    elif user.role == UserRole.admin and user.id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot modify another admin account")
 
     if payload.display_name is not None:
         user.display_name = payload.display_name.strip()
@@ -79,12 +82,14 @@ async def update_user(
 async def reset_password(
     user_id: int,
     payload: ResetPasswordRequest,
-    _: User = Depends(require_parent),
+    current_user: User = Depends(require_parent_or_admin),
     db: AsyncSession = Depends(get_db),
 ) -> None:
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    if current_user.role == UserRole.parent and user.role in {UserRole.parent, UserRole.admin}:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot reset password for that account")
     user.password_hash = hash_password(payload.password)
     await db.commit()

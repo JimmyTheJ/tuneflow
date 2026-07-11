@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 
 
 class UserRole(str, Enum):
+    admin = "admin"
     parent = "parent"
     adult = "adult"
     child = "child"
@@ -265,3 +266,53 @@ class ScrobblerLinkComplete(BaseModel):
 
 class ScrobblerSettingsUpdate(BaseModel):
     scrobbling_enabled: bool
+
+
+class CacheSettingsRead(BaseModel):
+    cache_enabled: bool
+    cache_retention_days: int | None = Field(default=None, ge=0)
+    cache_max_size_mb: int | None = Field(default=None, ge=1)
+    cache_cleanup_interval_hours: int = Field(ge=1, le=24 * 7)
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class CacheSettingsUpdate(BaseModel):
+    cache_enabled: bool | None = None
+    cache_retention_days: int | None = Field(default=None, ge=0)
+    cache_max_size_mb: int | None = Field(default=None, ge=1)
+    cache_cleanup_interval_hours: int | None = Field(default=None, ge=1, le=24 * 7)
+
+
+class CacheStats(BaseModel):
+    entry_count: int
+    total_size_bytes: int
+    oldest_accessed_at: datetime | None
+    newest_accessed_at: datetime | None
+    unique_users: int
+
+
+class CacheAccessUser(BaseModel):
+    user_id: int
+    username: str
+    display_name: str
+    first_accessed_at: datetime
+    last_accessed_at: datetime
+
+
+class CacheEntryRead(BaseModel):
+    video_id: str
+    file_size_bytes: int
+    mime_type: str
+    cached_at: datetime
+    last_accessed_at: datetime
+    cached_by_user_id: int | None
+    cached_by_username: str | None
+    access_count: int
+    users: list[CacheAccessUser]
+
+
+class CachePurgeResult(BaseModel):
+    deleted_entries: int
+    freed_bytes: int

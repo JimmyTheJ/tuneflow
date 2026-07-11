@@ -40,7 +40,7 @@ async def setup_first_parent(payload: SetupRequest, db: AsyncSession = Depends(g
         username=payload.username.strip().lower(),
         display_name=payload.display_name.strip(),
         password_hash=hash_password(payload.password),
-        role=UserRole.parent,
+        role=UserRole.admin,
     )
     db.add(user)
     await db.commit()

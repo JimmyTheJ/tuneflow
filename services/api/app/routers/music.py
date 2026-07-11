@@ -12,9 +12,10 @@ from app.auth import (
 from app.database import get_db
 from app.models import User
 from app.schemas import SearchResult, StreamInfo
-from app.services.audio_cache import get_cached_audio_file
+from app.services.cache_manager import resolve_audio
 from app.services.piped import piped_client
 from app.services.stream_resolver import resolve_stream, stream_video_chunks
+from app.services.ytdlp import stream_audio_via_ytdlp
 
 router = APIRouter(prefix="/music", tags=["music"])
 
@@ -123,16 +124,27 @@ async def stream_audio(
         raise HTTPException(status_code=403, detail=f"Content blocked: {reason}")
 
     try:
-        audio_path, mime_type = await get_cached_audio_file(stream.video_id)
+        resolution = await resolve_audio(db, video_id=stream.video_id, user_id=current_user.id)
     except (FileNotFoundError, ValueError) as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
         raise _piped_unavailable(exc) from exc
 
+    if resolution.stream:
+        async def iter_bytes():
+            async for chunk in stream_audio_via_ytdlp(stream.video_id):
+                yield chunk
+
+        return StreamingResponse(
+            iter_bytes(),
+            media_type=resolution.mime_type,
+            headers={"Cache-Control": "no-store"},
+        )
+
     return FileResponse(
-        audio_path,
-        media_type=mime_type,
-        filename=f"{stream.video_id}{audio_path.suffix}",
+        resolution.path,
+        media_type=resolution.mime_type,
+        filename=f"{stream.video_id}{resolution.path.suffix}",
         headers={"Cache-Control": "private, max-age=3600"},
     )
 

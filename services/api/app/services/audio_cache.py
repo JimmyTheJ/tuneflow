@@ -59,10 +59,15 @@ def _download_sync(video_id: str, cache_dir: Path) -> Path:
     return downloaded
 
 
-async def get_cached_audio_file(video_id: str) -> tuple[Path, str]:
+async def download_audio_to_cache(video_id: str) -> Path:
     if not _YT_ID_RE.match(video_id):
         raise ValueError("Invalid video id")
 
     cache_dir = _cache_dir()
-    path = await asyncio.to_thread(_download_sync, video_id, cache_dir)
+    return await asyncio.to_thread(_download_sync, video_id, cache_dir)
+
+
+async def get_cached_audio_file(video_id: str) -> tuple[Path, str]:
+    """Legacy helper for callers that do not track cache metadata."""
+    path = await download_audio_to_cache(video_id)
     return path, _guess_mime(path)

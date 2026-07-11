@@ -22,7 +22,7 @@ export function FamilyPage() {
     void load().catch((err) => setError(err instanceof Error ? err.message : "Failed to load"));
   }, [load]);
 
-  if (user?.role !== "parent") return <Navigate to="/settings" replace />;
+  if (user?.role !== "parent" && user?.role !== "admin") return <Navigate to="/settings" replace />;
 
   const create = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -78,7 +78,7 @@ export function FamilyPage() {
               {!m.is_active ? " · disabled" : ""}
             </div>
           </div>
-          {m.role !== "parent" ? (
+          {m.role !== "parent" && m.role !== "admin" ? (
             <button
               type="button"
               className="btn-secondary"

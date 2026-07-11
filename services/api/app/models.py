@@ -8,6 +8,7 @@ from app.database import Base
 
 
 class UserRole(str, enum.Enum):
+    admin = "admin"
     parent = "parent"
     adult = "adult"
     child = "child"
@@ -143,3 +144,49 @@ class Like(Base):
     liked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     user: Mapped[User] = relationship(back_populates="likes")
+
+
+class SystemSettings(Base):
+    __tablename__ = "system_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    cache_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    cache_retention_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cache_max_size_mb: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cache_cleanup_interval_hours: Mapped[int] = mapped_column(Integer, nullable=False, default=24)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class AudioCacheEntry(Base):
+    __tablename__ = "audio_cache_entries"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    video_id: Mapped[str] = mapped_column(String(20), unique=True, nullable=False, index=True)
+    file_path: Mapped[str] = mapped_column(String(500), nullable=False)
+    file_size_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    mime_type: Mapped[str] = mapped_column(String(80), nullable=False, default="application/octet-stream")
+    cached_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_accessed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+    cached_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+    cached_by_user: Mapped[User | None] = relationship()
+    access_records: Mapped[list["AudioCacheAccess"]] = relationship(
+        back_populates="cache_entry", cascade="all, delete-orphan"
+    )
+
+
+class AudioCacheAccess(Base):
+    __tablename__ = "audio_cache_access"
+    __table_args__ = (UniqueConstraint("user_id", "video_id", name="uq_cache_access_user_video"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    video_id: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    cache_entry_id: Mapped[int] = mapped_column(ForeignKey("audio_cache_entries.id", ondelete="CASCADE"), index=True)
+    first_accessed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_accessed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    user: Mapped[User] = relationship()
+    cache_entry: Mapped[AudioCacheEntry] = relationship(back_populates="access_records")

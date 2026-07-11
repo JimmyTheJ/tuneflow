@@ -1,4 +1,4 @@
-export type UserRole = "parent" | "adult" | "child";
+export type UserRole = "admin" | "parent" | "adult" | "child";
 
 export type User = {
   id: number;

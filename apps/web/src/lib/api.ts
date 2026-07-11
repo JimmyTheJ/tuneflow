@@ -1,6 +1,10 @@
 import type {
   AiInsights,
   AiRecommendations,
+  CacheEntry,
+  CachePurgeResult,
+  CacheSettings,
+  CacheStats,
   ChildProfile,
   ChildUsageToday,
   LikeEntry,
@@ -95,7 +99,7 @@ export const api = {
     username: string;
     password: string;
     display_name: string;
-    role: "adult" | "child";
+    role: "admin" | "adult" | "child";
   }) => request<User>("/api/users", { method: "POST", body: payload }),
   updateUser: (userId: number, payload: { is_active?: boolean }) =>
     request<User>(`/api/users/${userId}`, { method: "PATCH", body: payload }),
@@ -130,4 +134,22 @@ export const api = {
     }),
   unlinkScrobbler: (provider: string) =>
     request<void>(`/api/scrobbler/${provider}`, { method: "DELETE" }),
+  cacheStats: () => request<CacheStats>("/api/admin/cache/stats"),
+  getCacheSettings: () => request<CacheSettings>("/api/admin/cache/settings"),
+  updateCacheSettings: (settings: Partial<CacheSettings>) =>
+    request<CacheSettings>("/api/admin/cache/settings", { method: "PUT", body: settings }),
+  listCacheEntries: (userId?: number) => {
+    const params = userId != null ? `?user_id=${userId}` : "";
+    return request<CacheEntry[]>(`/api/admin/cache/entries${params}`);
+  },
+  runCacheCleanup: () => request<CachePurgeResult>("/api/admin/cache/cleanup", { method: "POST" }),
+  clearCache: (options?: { olderThanDays?: number; userId?: number }) => {
+    const params = new URLSearchParams();
+    if (options?.olderThanDays != null) params.set("older_than_days", String(options.olderThanDays));
+    if (options?.userId != null) params.set("user_id", String(options.userId));
+    const query = params.toString();
+    return request<CachePurgeResult>(`/api/admin/cache${query ? `?${query}` : ""}`, { method: "DELETE" });
+  },
+  clearCacheEntry: (videoId: string) =>
+    request<CachePurgeResult>(`/api/admin/cache/${videoId}`, { method: "DELETE" }),
 };

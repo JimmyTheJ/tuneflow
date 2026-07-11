@@ -12,6 +12,7 @@ export function SettingsPage() {
   const navigate = useNavigate();
   const isChild = user?.role === "child";
   const isParent = user?.role === "parent";
+  const isAdmin = user?.role === "admin";
 
   const [apiUrl, setApiUrlState] = useState(getApiUrl());
   const [parentPin, setParentPin] = useState("");
@@ -152,7 +153,13 @@ export function SettingsPage() {
         Sign out
       </button>
 
-      {isParent ? (
+      {isAdmin ? (
+        <Link to="/admin/cache" className="btn-secondary btn-block link-btn">
+          Audio cache management
+        </Link>
+      ) : null}
+
+      {isParent || isAdmin ? (
         <>
           <Link to="/family" className="btn-secondary btn-block link-btn">
             Family members
@@ -160,6 +167,11 @@ export function SettingsPage() {
           <Link to="/parental" className="btn-secondary btn-block link-btn">
             Parental controls
           </Link>
+        </>
+      ) : null}
+
+      {isParent ? (
+        <>
           <h2>Parent PIN</h2>
           <p className="muted">
             Required for children to switch accounts on a shared device.

@@ -1,17 +1,42 @@
-from contextlib import asynccontextmanager
+import asyncio
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.database import init_db
-from app.routers import ai, auth, history, likes, music, parental, playlists, scrobbler, users
+from app.database import SessionLocal, init_db
+from app.routers import admin, ai, auth, history, likes, music, parental, playlists, scrobbler, users
+
+
+async def _cache_cleanup_worker() -> None:
+    from app.services.cache_manager import backfill_orphaned_files, get_system_settings, run_retention_cleanup
+
+    while True:
+        interval_hours = 24
+        try:
+            async with SessionLocal() as db:
+                await backfill_orphaned_files(db)
+                await run_retention_cleanup(db)
+                system_settings = await get_system_settings(db)
+                interval_hours = system_settings.cache_cleanup_interval_hours
+        except Exception:
+            pass
+        await asyncio.sleep(interval_hours * 3600)
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     await init_db()
+    async with SessionLocal() as db:
+        from app.services.cache_manager import backfill_orphaned_files
+
+        await backfill_orphaned_files(db)
+    task = asyncio.create_task(_cache_cleanup_worker())
     yield
+    task.cancel()
+    with suppress(asyncio.CancelledError):
+        await task
 
 
 app = FastAPI(title="Tuneflow API", version="0.2.0", lifespan=lifespan)
@@ -26,6 +51,7 @@ app.add_middleware(
 )
 
 app.include_router(auth.router, prefix="/api")
+app.include_router(admin.router, prefix="/api")
 app.include_router(users.router, prefix="/api")
 app.include_router(parental.router, prefix="/api")
 app.include_router(ai.router, prefix="/api")
