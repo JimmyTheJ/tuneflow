@@ -155,6 +155,9 @@ export function SettingsPage() {
 
       {isAdmin ? (
         <>
+          <Link to="/admin/integrations" className="btn-secondary btn-block link-btn">
+            Integrations &amp; health
+          </Link>
           <Link to="/admin/cache" className="btn-secondary btn-block link-btn">
             Audio cache management
           </Link>

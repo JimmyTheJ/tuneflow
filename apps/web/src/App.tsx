@@ -15,6 +15,7 @@ import { PlayerPage } from "@/pages/PlayerPage";
 import { PlaylistPage } from "@/pages/PlaylistPage";
 import { SearchPage } from "@/pages/SearchPage";
 import { AdminCachePage } from "@/pages/AdminCachePage";
+import { AdminIntegrationsPage } from "@/pages/AdminIntegrationsPage";
 import { DeletedUsersPage } from "@/pages/DeletedUsersPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 
@@ -67,6 +68,7 @@ export function App() {
           <Route path="library" element={<LibraryPage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="admin/cache" element={<AdminCachePage />} />
+          <Route path="admin/integrations" element={<AdminIntegrationsPage />} />
           <Route path="admin/users/deleted" element={<DeletedUsersPage />} />
           <Route path="family" element={<FamilyPage />} />
           <Route path="parental" element={<ParentalPage />} />
