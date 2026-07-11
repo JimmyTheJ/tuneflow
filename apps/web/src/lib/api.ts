@@ -27,6 +27,7 @@ import type {
   User,
 } from "@/types";
 import { getAccessToken, getApiUrl } from "./settings";
+import { ApiError, withRetry } from "./retry";
 
 type RequestOptions = {
   method?: "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
@@ -34,7 +35,7 @@ type RequestOptions = {
   auth?: boolean;
 };
 
-async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+async function executeRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const baseUrl = getApiUrl();
   const headers: Record<string, string> = { "Content-Type": "application/json" };
 
@@ -57,11 +58,15 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     } catch {
       /* keep */
     }
-    throw new Error(detail || `Request failed (${response.status})`);
+    throw new ApiError(detail || `Request failed (${response.status})`, response.status);
   }
 
   if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
+}
+
+async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  return withRetry(() => executeRequest<T>(path, options));
 }
 
 export const api = {

@@ -3,6 +3,7 @@ import { create } from "zustand";
 
 import { api } from "@/lib/api";
 import { getAccessToken, getApiUrl } from "@/lib/settings";
+import { withRetry } from "@/lib/retry";
 import type { StreamInfo, StreamSelection, Track } from "@/types";
 
 type VideoControls = {
@@ -102,7 +103,13 @@ async function loadAudioPlayback(
   get: () => PlayerState,
   autoplay: boolean,
 ): Promise<Audio.Sound | null> {
-  const { sound } = await Audio.Sound.createAsync({ uri: mediaUrl }, { shouldPlay: autoplay });
+  const { sound } = await withRetry(
+    () => Audio.Sound.createAsync({ uri: mediaUrl }, { shouldPlay: autoplay }),
+    {
+      maxAttempts: 2,
+      shouldRetry: (error) => error instanceof Error,
+    },
+  );
   if (!isActiveGeneration(generation)) {
     await disposeSound(sound);
     return null;
@@ -154,7 +161,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     await configureAudio();
 
     try {
-      const stream = await api.getStream(track.video_id);
+      const stream = await api.getStream(track.video_id, track);
       if (!isActiveGeneration(generation)) return;
 
       const resolvedSelection = normalizeSelection(selection, stream);

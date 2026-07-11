@@ -3,6 +3,7 @@ import re
 import httpx
 
 from app.config import settings
+from app.retry import is_transient_http_error, with_retry
 from app.schemas import SearchResult, StreamInfo
 from app.services.thumbnails import youtube_thumbnail_url
 
@@ -165,11 +166,20 @@ class PipedClient:
         errors: list[str] = []
         for base_url in piped_instance_urls():
             try:
-                async with httpx.AsyncClient(timeout=20.0) as client:
-                    response = await client.get(f"{base_url}{path}", params=params)
-                    response.raise_for_status()
-                    self._active_base_url = base_url
-                    return response.json()
+
+                async def fetch_from_instance() -> dict:
+                    async with httpx.AsyncClient(timeout=20.0) as client:
+                        response = await client.get(f"{base_url}{path}", params=params)
+                        response.raise_for_status()
+                        return response.json()
+
+                payload = await with_retry(
+                    fetch_from_instance,
+                    max_attempts=2,
+                    should_retry=is_transient_http_error,
+                )
+                self._active_base_url = base_url
+                return payload
             except httpx.HTTPError as exc:
                 errors.append(f"{base_url}: {exc}")
         detail = "; ".join(errors[:3])

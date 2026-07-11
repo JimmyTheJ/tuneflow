@@ -1,7 +1,9 @@
+import asyncio
 from collections.abc import AsyncIterator
 
 import httpx
 
+from app.retry import is_transient_ytdlp_failure, with_retry
 from app.schemas import StreamInfo
 from app.services.piped import (
     artist_matches,
@@ -38,21 +40,30 @@ def _apply_proxy_urls(stream: StreamInfo) -> StreamInfo:
     return stream
 
 
+async def _probe_fetchable_once(url: str) -> bool:
+    async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+        response = await client.get(url, headers={"Range": "bytes=0-4095"})
+        if response.status_code not in (200, 206):
+            return False
+        body = response.content
+        if not body:
+            return False
+        content_type = response.headers.get("content-type", "")
+        if "text/html" in content_type or body.startswith(b"<"):
+            return False
+        return True
+
+
 async def _probe_fetchable(url: str) -> bool:
-    try:
-        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
-            response = await client.get(url, headers={"Range": "bytes=0-4095"})
-            if response.status_code not in (200, 206):
-                return False
-            body = response.content
-            if not body:
-                return False
-            content_type = response.headers.get("content-type", "")
-            if "text/html" in content_type or body.startswith(b"<"):
-                return False
-            return True
-    except httpx.HTTPError:
-        return False
+    for attempt in range(2):
+        try:
+            if await _probe_fetchable_once(url):
+                return True
+        except httpx.HTTPError:
+            pass
+        if attempt == 0:
+            await asyncio.sleep(0.5)
+    return False
 
 
 async def _find_playable_alternate(
@@ -141,7 +152,11 @@ async def resolve_stream(
     errors: list[str] = []
 
     try:
-        stream = await get_stream_via_ytdlp(video_id)
+        stream = await with_retry(
+            lambda: get_stream_via_ytdlp(video_id),
+            max_attempts=2,
+            should_retry=is_transient_ytdlp_failure,
+        )
         return _apply_proxy_urls(stream)
     except Exception as exc:
         errors.append(f"yt-dlp: {exc}")

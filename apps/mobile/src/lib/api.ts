@@ -23,6 +23,7 @@ import type {
   User,
 } from "@/types";
 import { getAccessToken, getApiUrl } from "./settings";
+import { ApiError, withRetry } from "./retry";
 
 type RequestOptions = {
   method?: "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
@@ -30,7 +31,7 @@ type RequestOptions = {
   auth?: boolean;
 };
 
-async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+async function executeRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const baseUrl = await getApiUrl();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -57,7 +58,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     } catch {
       // keep raw text
     }
-    throw new Error(detail || `Request failed (${response.status})`);
+    throw new ApiError(detail || `Request failed (${response.status})`, response.status);
   }
 
   if (response.status === 204) {
@@ -65,6 +66,10 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   }
 
   return (await response.json()) as T;
+}
+
+async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  return withRetry(() => executeRequest<T>(path, options));
 }
 
 export const api = {
@@ -89,7 +94,13 @@ export const api = {
     if (options?.nextPage) params.set("next_page", options.nextPage);
     return request<SearchResultsPage>(`/api/music/search?${params.toString()}`);
   },
-  getStream: (videoId: string) => request<StreamInfo>(`/api/music/stream/${videoId}`),
+  getStream: (videoId: string, track?: Pick<Track, "title" | "artist">) => {
+    const params = new URLSearchParams();
+    if (track?.title) params.set("title", track.title);
+    if (track?.artist) params.set("artist", track.artist);
+    const query = params.toString();
+    return request<StreamInfo>(`/api/music/stream/${videoId}${query ? `?${query}` : ""}`);
+  },
   listPlaylists: () => request<Playlist[]>("/api/playlists"),
   getPlaylist: (id: number) => request<PlaylistDetail>(`/api/playlists/${id}`),
   createPlaylist: (name: string, description?: string) =>
