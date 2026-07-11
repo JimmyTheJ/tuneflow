@@ -1,8 +1,26 @@
+from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_API_DIR = Path(__file__).resolve().parents[1]
+_REPO_ROOT = _API_DIR.parent.parent
+
+
+def _env_files() -> tuple[str, ...]:
+    candidates = (_REPO_ROOT / ".env", _API_DIR / ".env", Path(".env"))
+    seen: set[Path] = set()
+    files: list[str] = []
+    for candidate in candidates:
+        resolved = candidate.resolve()
+        if resolved in seen or not resolved.is_file():
+            continue
+        seen.add(resolved)
+        files.append(str(resolved))
+    return tuple(files)
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=_env_files(), extra="ignore")
 
     database_url: str = "sqlite+aiosqlite:///./data/tuneflow.db"
     piped_base_url: str = "https://api.piped.private.coffee"
