@@ -111,7 +111,7 @@ export const api = {
     username: string;
     password: string;
     display_name: string;
-    role: "admin" | "adult" | "child";
+    role: "adult" | "child";
   }) => request<User>("/api/users", { method: "POST", body: payload }),
   updateUser: (userId: number, payload: { display_name?: string; is_active?: boolean }) =>
     request<User>(`/api/users/${userId}`, { method: "PATCH", body: payload }),
@@ -121,6 +121,10 @@ export const api = {
   restoreUser: (userId: number) => request<User>(`/api/users/${userId}/restore`, { method: "POST" }),
   permanentlyDeleteUser: (userId: number) =>
     request<void>(`/api/users/${userId}/permanent`, { method: "DELETE" }),
+  grantAdmin: (userId: number) => request<User>(`/api/users/${userId}/grant-admin`, { method: "POST" }),
+  transferAdmin: (userId: number) =>
+    request<User>(`/api/users/${userId}/transfer-admin`, { method: "POST" }),
+  relinquishAdmin: () => request<User>("/api/users/relinquish-admin", { method: "POST" }),
   parentPinStatus: () => request<ParentPinStatus>("/api/auth/parent-pin/status"),
   parentPinEnforced: () => request<ParentPinEnforced>("/api/auth/parent-pin/enforced"),
   setParentPin: (pin: string) => request<void>("/api/auth/parent-pin", { method: "PUT", body: { pin } }),

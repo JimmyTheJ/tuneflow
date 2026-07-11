@@ -16,7 +16,8 @@ async def bootstrap_parent_if_needed(db: AsyncSession) -> None:
         username=settings.bootstrap_username,
         display_name=settings.bootstrap_display_name,
         password_hash=hash_password(settings.bootstrap_password),
-        role=UserRole.admin,
+        role=UserRole.parent,
+        is_admin=settings.bootstrap_is_admin,
     )
     db.add(user)
     await db.commit()

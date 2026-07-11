@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     bootstrap_username: str = "admin"
     bootstrap_password: str = "changeme"
     bootstrap_display_name: str = "Admin"
+    bootstrap_is_admin: bool = True
 
     llm_enabled: bool = True
     llm_base_url: str = "http://127.0.0.1:11434/v1"

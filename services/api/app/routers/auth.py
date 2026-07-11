@@ -34,13 +34,11 @@ async def setup_first_parent(payload: SetupRequest, db: AsyncSession = Depends(g
     if count and count > 0:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Server already set up")
 
-    from app.models import UserRole
-
     user = User(
         username=payload.username.strip().lower(),
         display_name=payload.display_name.strip(),
         password_hash=hash_password(payload.password),
-        role=UserRole.admin,
+        role=UserRole.parent,
     )
     db.add(user)
     await db.commit()

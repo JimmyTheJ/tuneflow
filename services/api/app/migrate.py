@@ -12,6 +12,10 @@ async def run_migrations() -> None:
             await conn.execute(text("ALTER TABLE users ADD COLUMN parent_pin_hash VARCHAR(255)"))
         if "deleted_at" not in columns:
             await conn.execute(text("ALTER TABLE users ADD COLUMN deleted_at DATETIME"))
+        if "is_admin" not in columns:
+            await conn.execute(text("ALTER TABLE users ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT 0"))
+            await conn.execute(text("UPDATE users SET is_admin = 1 WHERE role = 'admin'"))
+            await conn.execute(text("UPDATE users SET role = 'parent' WHERE role = 'admin'"))
 
         table_result = await conn.execute(
             text("SELECT name FROM sqlite_master WHERE type='table' AND name='scrobbler_connections'")
@@ -132,14 +136,3 @@ async def run_migrations() -> None:
             await conn.execute(text("ALTER TABLE audio_cache_entries ADD COLUMN title VARCHAR(500)"))
         if "artist" not in cache_entry_cols:
             await conn.execute(text("ALTER TABLE audio_cache_entries ADD COLUMN artist VARCHAR(300)"))
-
-        admin_result = await conn.execute(
-            text("SELECT id FROM users WHERE role = 'admin' LIMIT 1")
-        )
-        if admin_result.fetchone() is None:
-            await conn.execute(
-                text(
-                    "UPDATE users SET role = 'admin' WHERE username = :username AND role = 'parent'"
-                ),
-                {"username": settings.bootstrap_username.strip().lower()},
-            )

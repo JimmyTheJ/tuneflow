@@ -31,7 +31,7 @@ export function DeletedUsersPage() {
     void load().catch((err) => setError(err instanceof Error ? err.message : "Failed to load"));
   }, [load]);
 
-  if (user?.role !== "admin") return <Navigate to="/settings" replace />;
+  if (user?.is_admin !== true) return <Navigate to="/settings" replace />;
 
   const runAction = async () => {
     if (!pending) return;

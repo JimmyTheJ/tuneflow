@@ -7,7 +7,7 @@ from sqlalchemy.orm import selectinload
 
 from app.auth import (
     get_current_user,
-    require_parent_or_admin,
+    require_parent,
     serialize_json_list,
     settings_to_read,
 )
@@ -20,7 +20,7 @@ router = APIRouter(prefix="/parental", tags=["parental"])
 
 @router.get("/children", response_model=list[ChildProfile])
 async def list_children(
-    _: User = Depends(require_parent_or_admin),
+    _: User = Depends(require_parent),
     db: AsyncSession = Depends(get_db),
 ) -> list[ChildProfile]:
     result = await db.execute(
@@ -45,7 +45,7 @@ async def list_children(
 @router.get("/{child_id}/settings", response_model=ParentalSettingsRead)
 async def get_child_settings(
     child_id: int,
-    _: User = Depends(require_parent_or_admin),
+    _: User = Depends(require_parent),
     db: AsyncSession = Depends(get_db),
 ) -> ParentalSettingsRead:
     settings = await _get_child_settings_row(db, child_id)
@@ -56,7 +56,7 @@ async def get_child_settings(
 async def update_child_settings(
     child_id: int,
     payload: ParentalSettingsUpdate,
-    _: User = Depends(require_parent_or_admin),
+    _: User = Depends(require_parent),
     db: AsyncSession = Depends(get_db),
 ) -> ParentalSettingsRead:
     settings = await _get_child_settings_row(db, child_id)
@@ -77,7 +77,7 @@ async def update_child_settings(
 @router.get("/{child_id}/usage", response_model=ChildUsageToday)
 async def get_child_usage_today(
     child_id: int,
-    _: User = Depends(require_parent_or_admin),
+    _: User = Depends(require_parent),
     db: AsyncSession = Depends(get_db),
 ) -> ChildUsageToday:
     settings = await _get_child_settings_row(db, child_id)
@@ -104,7 +104,7 @@ async def get_child_usage_today(
 async def get_child_history(
     child_id: int,
     limit: int = Query(default=50, ge=1, le=200),
-    _: User = Depends(require_parent_or_admin),
+    _: User = Depends(require_parent),
     db: AsyncSession = Depends(get_db),
 ) -> list[PlayHistoryRead]:
     await _get_child_user(db, child_id)

@@ -7,25 +7,25 @@ import type { User } from "@/types";
 
 function canEditUser(current: User, target: User) {
   if (target.deleted_at) return false;
-  if (current.role === "admin") return true;
+  if (current.is_admin) return true;
   if (current.role === "parent") {
-    return target.id === current.id || (target.role !== "parent" && target.role !== "admin");
+    return target.id === current.id || (target.role !== "parent" && !target.is_admin);
   }
   return false;
 }
 
 function canToggleActive(current: User, target: User) {
-  if (!canEditUser(current, target) || target.id === current.id || target.role === "admin") {
+  if (!canEditUser(current, target) || target.id === current.id || target.is_admin) {
     return false;
   }
-  if (current.role === "parent" && target.role === "parent") {
+  if (current.role === "parent" && !current.is_admin && target.role === "parent") {
     return false;
   }
   return true;
 }
 
 function canSoftDelete(current: User, target: User) {
-  return current.role === "admin" && target.id !== current.id && !target.deleted_at;
+  return current.is_admin && target.id !== current.id && !target.deleted_at;
 }
 
 export function FamilyPage() {
@@ -53,7 +53,7 @@ export function FamilyPage() {
     void load().catch((err) => setError(err instanceof Error ? err.message : "Failed to load"));
   }, [load]);
 
-  if (!user || (user.role !== "parent" && user.role !== "admin")) {
+  if (!user || user.role !== "parent") {
     return <Navigate to="/settings" replace />;
   }
 
@@ -159,7 +159,7 @@ export function FamilyPage() {
         <strong>Disable</strong> to block sign-in while keeping the account visible. Use <strong>Delete</strong>{" "}
         (admin only) to hide a removed account.
       </p>
-      {user.role === "admin" ? (
+      {user.is_admin ? (
         <Link to="/admin/users/deleted" className="accent">
           View deleted accounts →
         </Link>
@@ -191,6 +191,7 @@ export function FamilyPage() {
             <div className="track-title">
               {m.display_name}
               {!m.is_active ? <span className="status-badge status-disabled">Disabled</span> : null}
+              {m.is_admin ? <span className="status-badge">Admin</span> : null}
             </div>
             <div className="track-subtitle">
               @{m.username} · {m.role}

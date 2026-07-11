@@ -70,7 +70,7 @@ export function ParentalPage() {
     await load();
   };
 
-  if (user?.role !== "parent" && user?.role !== "admin") return <Navigate to="/settings" replace />;
+  if (user?.role !== "parent") return <Navigate to="/settings" replace />;
 
   return (
     <div className="page">

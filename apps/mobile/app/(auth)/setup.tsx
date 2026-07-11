@@ -6,7 +6,7 @@ import { useAuthStore } from "@/stores/auth";
 export default function SetupScreen() {
   const setup = useAuthStore((state) => state.setup);
   const [displayName, setDisplayName] = useState("Parent");
-  const [username, setUsername] = useState("admin");
+  const [username, setUsername] = useState("parent");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);

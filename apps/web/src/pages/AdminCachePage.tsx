@@ -47,11 +47,11 @@ export function AdminCachePage() {
   }, [filterUserId]);
 
   useEffect(() => {
-    if (user?.role !== "admin") return;
+    if (user?.is_admin !== true) return;
     void load().catch((err) => setError(err instanceof Error ? err.message : "Failed to load cache"));
-  }, [load, user?.role]);
+  }, [load, user?.is_admin]);
 
-  if (user?.role !== "admin") {
+  if (user?.is_admin !== true) {
     return (
       <div className="page">
         <h1>Cache management</h1>

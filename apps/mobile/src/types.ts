@@ -5,6 +5,7 @@ export type User = {
   username: string;
   display_name: string;
   role: UserRole;
+  is_admin: boolean;
   is_active: boolean;
   created_at: string;
 };

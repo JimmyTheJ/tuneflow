@@ -57,7 +57,7 @@ export function SetupPage() {
   const setup = useAuthStore((s) => s.setup);
   const navigate = useNavigate();
   const [displayName, setDisplayName] = useState("Parent");
-  const [username, setUsername] = useState("admin");
+  const [username, setUsername] = useState("parent");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
 

@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import require_admin, require_parent_or_admin
+from app.auth import require_admin, require_parent, require_parent_or_admin
 from app.database import get_db
 from app.models import User, UserRole
 from app.schemas import ResetPasswordRequest, UserCreate, UserRead, UserUpdate
@@ -17,12 +17,23 @@ router = APIRouter(prefix="/users", tags=["users"])
 def _can_modify_user(current_user: User, target: User) -> None:
     if target.deleted_at is not None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-    if current_user.role == UserRole.parent:
-        if target.role in {UserRole.parent, UserRole.admin} and target.id != current_user.id:
+    if current_user.role == UserRole.parent and not current_user.is_admin:
+        if target.role == UserRole.parent and target.id != current_user.id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot modify that account")
-    elif target.role == UserRole.admin and target.id != current_user.id:
-        if current_user.role != UserRole.admin:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot modify another admin account")
+        if target.is_admin and target.id != current_user.id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot modify that account")
+    elif target.is_admin and target.id != current_user.id and not current_user.is_admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot modify another admin account")
+
+
+async def _active_admin_count(db: AsyncSession, exclude_user_id: int | None = None) -> int:
+    query = select(func.count()).select_from(User).where(
+        User.is_admin.is_(True),
+        User.deleted_at.is_(None),
+    )
+    if exclude_user_id is not None:
+        query = query.where(User.id != exclude_user_id)
+    return int(await db.scalar(query) or 0)
 
 
 @router.get("", response_model=list[UserRead])
@@ -50,7 +61,7 @@ async def list_deleted_users(
 @router.post("", response_model=UserRead, status_code=status.HTTP_201_CREATED)
 async def create_user(
     payload: UserCreate,
-    current_user: User = Depends(require_parent_or_admin),
+    current_user: User = Depends(require_parent),
     db: AsyncSession = Depends(get_db),
 ) -> UserRead:
     username = payload.username.strip().lower()
@@ -58,7 +69,7 @@ async def create_user(
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Username already exists")
 
-    if current_user.role == UserRole.parent and payload.role in {UserRole.parent, UserRole.admin}:
+    if payload.role in {UserRole.parent, UserRole.admin}:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot create that account type")
 
     user = User(
@@ -81,9 +92,9 @@ def _can_toggle_active(current_user: User, target: User) -> None:
     _can_modify_user(current_user, target)
     if target.id == current_user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot disable your own account")
-    if target.role == UserRole.admin:
+    if target.is_admin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot disable an admin account")
-    if current_user.role == UserRole.parent and target.role == UserRole.parent:
+    if current_user.role == UserRole.parent and not current_user.is_admin and target.role == UserRole.parent:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot disable that account")
 
 
@@ -91,7 +102,7 @@ def _can_toggle_active(current_user: User, target: User) -> None:
 async def update_user(
     user_id: int,
     payload: UserUpdate,
-    current_user: User = Depends(require_parent_or_admin),
+    current_user: User = Depends(require_parent),
     db: AsyncSession = Depends(get_db),
 ) -> UserRead:
     result = await db.execute(select(User).where(User.id == user_id))
@@ -116,7 +127,7 @@ async def update_user(
 async def reset_password(
     user_id: int,
     payload: ResetPasswordRequest,
-    current_user: User = Depends(require_parent_or_admin),
+    current_user: User = Depends(require_parent),
     db: AsyncSession = Depends(get_db),
 ) -> None:
     result = await db.execute(select(User).where(User.id == user_id))
@@ -124,10 +135,92 @@ async def reset_password(
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     _can_modify_user(current_user, user)
-    if current_user.role == UserRole.parent and user.role in {UserRole.parent, UserRole.admin}:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot reset password for that account")
+    if current_user.role == UserRole.parent and not current_user.is_admin:
+        if user.role == UserRole.parent or user.is_admin:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot reset password for that account")
     user.password_hash = hash_password(payload.password)
     await db.commit()
+
+
+@router.post("/{user_id}/grant-admin", response_model=UserRead)
+async def grant_admin(
+    user_id: int,
+    current_user: User = Depends(require_parent),
+    db: AsyncSession = Depends(get_db),
+) -> UserRead:
+    if await _active_admin_count(db) > 0:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="An admin account already exists. Use transfer instead.",
+        )
+
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if user is None or user.deleted_at is not None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    if user.role not in {UserRole.parent, UserRole.adult}:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access can only be granted to a parent or adult account",
+        )
+    if not user.is_active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot grant admin to a disabled account")
+
+    user.is_admin = True
+    await db.commit()
+    await db.refresh(user)
+    return UserRead.model_validate(user, from_attributes=True)
+
+
+@router.post("/{user_id}/transfer-admin", response_model=UserRead)
+async def transfer_admin(
+    user_id: int,
+    current_user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> UserRead:
+    if user_id == current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cannot transfer admin to yourself. Use relinquish instead.",
+        )
+
+    result = await db.execute(select(User).where(User.id == user_id))
+    target = result.scalar_one_or_none()
+    if target is None or target.deleted_at is not None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    if target.role not in {UserRole.parent, UserRole.adult}:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access can only be transferred to a parent or adult account",
+        )
+    if not target.is_active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot transfer admin to a disabled account")
+
+    current_user.is_admin = False
+    target.is_admin = True
+    await db.commit()
+    await db.refresh(target)
+    return UserRead.model_validate(target, from_attributes=True)
+
+
+@router.post("/relinquish-admin", response_model=UserRead)
+async def relinquish_admin(
+    current_user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> UserRead:
+    if not current_user.is_admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+
+    if await _active_admin_count(db, exclude_user_id=current_user.id) == 0:
+        current_user.is_admin = False
+        await db.commit()
+        await db.refresh(current_user)
+        return UserRead.model_validate(current_user, from_attributes=True)
+
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail="Another admin account exists. Transfer admin access instead of relinquishing.",
+    )
 
 
 @router.delete("/{user_id}", response_model=UserRead)
@@ -184,13 +277,8 @@ async def permanently_delete_user(
     if user.id == current_user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot permanently delete your own account")
 
-    if user.role == UserRole.admin:
-        active_admin_count = await db.scalar(
-            select(func.count())
-            .select_from(User)
-            .where(User.role == UserRole.admin, User.deleted_at.is_(None), User.id != user.id)
-        )
-        if not active_admin_count:
+    if user.is_admin:
+        if await _active_admin_count(db, exclude_user_id=user.id) == 0:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Cannot permanently delete the last active admin account",

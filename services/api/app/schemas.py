@@ -28,6 +28,7 @@ class UserRead(BaseModel):
     username: str
     display_name: str
     role: UserRole
+    is_admin: bool
     is_active: bool
     deleted_at: datetime | None = None
     created_at: datetime
