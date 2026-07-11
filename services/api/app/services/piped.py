@@ -18,6 +18,27 @@ def parse_artist_title(raw_title: str) -> tuple[str | None, str]:
     return match.group("artist").strip(), match.group("title").strip()
 
 
+def collect_playable_audio_streams(payload: dict) -> list[dict]:
+    """Return audio-capable streams from a Piped /streams payload.
+
+    YouTube Topic uploads often expose a single combined A/V stream under
+    videoStreams (videoOnly=false) with an empty audioStreams list.
+    """
+    audio_streams = [
+        stream
+        for stream in payload.get("audioStreams", [])
+        if stream.get("url") and not stream.get("videoOnly")
+    ]
+    if audio_streams:
+        return audio_streams
+
+    return [
+        stream
+        for stream in payload.get("videoStreams", [])
+        if stream.get("url") and not stream.get("videoOnly")
+    ]
+
+
 def piped_instance_urls() -> list[str]:
     urls = [settings.piped_base_url, *settings.piped_fallback_urls.split(",")]
     seen: set[str] = set()
@@ -78,11 +99,7 @@ class PipedClient:
     async def get_stream(self, video_id: str) -> StreamInfo:
         payload = await self._request_json(f"/streams/{video_id}")
 
-        audio_streams = [
-            stream
-            for stream in payload.get("audioStreams", [])
-            if stream.get("url") and not stream.get("videoOnly")
-        ]
+        audio_streams = collect_playable_audio_streams(payload)
         if not audio_streams:
             raise ValueError("No audio stream available for this video")
 
@@ -96,6 +113,7 @@ class PipedClient:
             thumbnail_url=youtube_thumbnail_url(video_id),
             duration_sec=payload.get("duration"),
             audio_url=best["url"],
+            mime_type=best.get("mimeType") or "audio/webm",
         )
 
 

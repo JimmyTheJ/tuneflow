@@ -38,6 +38,11 @@ async def get_stream_via_ytdlp(video_id: str) -> StreamInfo:
         raise ValueError("No audio stream available for this video")
 
     artist, title = parse_artist_title(info.get("title", "Unknown"))
+    mime_type = info.get("mime_type")
+    if not mime_type:
+        ext = info.get("ext") or info.get("audio_ext") or "webm"
+        mime_type = f"audio/{ext}"
+
     return StreamInfo(
         video_id=video_id,
         title=title,
@@ -45,6 +50,7 @@ async def get_stream_via_ytdlp(video_id: str) -> StreamInfo:
         thumbnail_url=youtube_thumbnail_url(video_id),
         duration_sec=info.get("duration"),
         audio_url=direct_url,
+        mime_type=mime_type,
     )
 
 

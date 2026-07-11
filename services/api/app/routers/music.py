@@ -121,4 +121,4 @@ async def stream_audio(
         async for chunk in stream_audio_chunks(video_id):
             yield chunk
 
-    return StreamingResponse(iter_bytes(), media_type="audio/webm")
+    return StreamingResponse(iter_bytes(), media_type=stream.mime_type)
