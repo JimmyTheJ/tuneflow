@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { TrackRow } from "@/components/TrackRow";
+import { useSearchHistory } from "@/hooks/useSearchHistory";
 import { api } from "@/lib/api";
 import { usePlayerStore } from "@/stores/playerStore";
 import type { Track } from "@/types";
@@ -26,9 +27,11 @@ export function SearchPage() {
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [lastQuery, setLastQuery] = useState<string | null>(null);
+  const [inputFocused, setInputFocused] = useState(false);
   const loadMoreRef = useRef<HTMLDivElement>(null);
   const loadingMoreRef = useRef(false);
   const playTrack = usePlayerStore((s) => s.playTrack);
+  const { suggestions, recordQuery, removeQuery, clearHistory } = useSearchHistory(query);
 
   useEffect(() => {
     setQuery(urlQuery);
@@ -60,6 +63,7 @@ export function SearchPage() {
         if (!cancelled) {
           setResults(page.results);
           setNextPage(page.next_page);
+          recordQuery(trimmed);
         }
       } catch (err) {
         if (!cancelled) {
@@ -73,7 +77,7 @@ export function SearchPage() {
     return () => {
       cancelled = true;
     };
-  }, [urlQuery]);
+  }, [urlQuery, recordQuery]);
 
   const loadMore = useCallback(async () => {
     const trimmed = urlQuery.trim();
@@ -116,25 +120,80 @@ export function SearchPage() {
     e.preventDefault();
     const trimmed = query.trim();
     if (!trimmed) return;
+    setInputFocused(false);
     if (trimmed !== urlQuery.trim()) {
       setSearchParams({ q: trimmed });
     }
   };
 
+  const selectSuggestion = (text: string) => {
+    setQuery(text);
+    setInputFocused(false);
+    setSearchParams({ q: text });
+  };
+
+  const showSuggestions = inputFocused && suggestions.length > 0 && !loading;
   const playable = results.filter((t) => !t.blocked_reason);
 
   return (
     <div className="page">
       <h1>Search</h1>
       <form className="search-row" onSubmit={runSearch}>
-        <input
-          className="input"
-          placeholder="Search songs, artists…"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          disabled={loading}
-          aria-busy={loading}
-        />
+        <div className="search-field">
+          <input
+            className="input"
+            placeholder="Search songs, artists…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onFocus={() => setInputFocused(true)}
+            onBlur={() => {
+              window.setTimeout(() => setInputFocused(false), 150);
+            }}
+            disabled={loading}
+            aria-busy={loading}
+            aria-autocomplete="list"
+            aria-expanded={showSuggestions}
+            aria-controls="search-suggestions"
+            role="combobox"
+          />
+          {showSuggestions ? (
+            <div id="search-suggestions" className="search-suggestions" role="listbox">
+              {!query.trim() ? (
+                <div className="search-suggestions-header">
+                  <span>Recent searches</span>
+                  <button className="search-suggestions-clear" type="button" onMouseDown={(e) => e.preventDefault()} onClick={clearHistory}>
+                    Clear
+                  </button>
+                </div>
+              ) : null}
+              <ul className="search-suggestions-list">
+                {suggestions.map((suggestion) => (
+                  <li key={suggestion.text} className="search-suggestion-item" role="option">
+                    <button
+                      className="search-suggestion"
+                      type="button"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => selectSuggestion(suggestion.text)}
+                    >
+                      {suggestion.text}
+                    </button>
+                    {!query.trim() ? (
+                      <button
+                        className="search-suggestion-remove"
+                        type="button"
+                        aria-label={`Remove ${suggestion.text}`}
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => removeQuery(suggestion.text)}
+                      >
+                        ×
+                      </button>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </div>
         <button className="btn-primary" type="submit" disabled={loading || !query.trim()}>
           {loading ? "Searching…" : "Go"}
         </button>
