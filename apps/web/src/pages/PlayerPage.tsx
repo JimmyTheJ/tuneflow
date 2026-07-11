@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { PlayerProgress } from "@/components/PlayerProgress";
+import { PlayerQueuePanel } from "@/components/PlayerQueuePanel";
 import { PlayerTransport } from "@/components/PlayerTransport";
 import { PlayerVideo } from "@/components/PlayerVideo";
 import { PlayerVolume } from "@/components/PlayerVolume";
@@ -16,6 +17,7 @@ export function PlayerPage() {
   const media = usePlayerStore((s) => s.media);
   const isLoading = usePlayerStore((s) => s.isLoading);
   const streamSelection = usePlayerStore((s) => s.streamSelection);
+  const queue = usePlayerStore((s) => s.queue);
   const stop = usePlayerStore((s) => s.stop);
   const recoverSession = usePlayerStore((s) => s.recoverSession);
   const stopOrphanedPlayback = usePlayerStore((s) => s.stopOrphanedPlayback);
@@ -116,6 +118,7 @@ export function PlayerPage() {
           Stop
         </button>
       </div>
+      {queue.length > 0 ? <PlayerQueuePanel className="player-page-queue" /> : null}
     </div>
   );
 }

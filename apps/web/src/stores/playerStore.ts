@@ -14,6 +14,7 @@ import {
   type PlayerSessionSnapshot,
 } from "@/lib/playerRuntime";
 import { getAccessToken, getApiUrl } from "@/lib/settings";
+import { isRetryablePlaybackFailure, withRetry } from "@/lib/retry";
 import type { StreamInfo, StreamSelection, Track } from "@/types";
 
 export type RepeatMode = "none" | "one" | "all";
@@ -47,6 +48,7 @@ type PlayerState = {
   stop: () => void;
   recoverSession: () => boolean;
   stopOrphanedPlayback: () => void;
+  playQueueIndex: (queueIndex: number) => Promise<void>;
   clearError: () => void;
 };
 
@@ -386,7 +388,10 @@ async function loadMediaAt(
   applyVolume(media, get().volume, selection);
   attachMediaListeners(media, track, generation, set, get);
 
-  await waitForMediaReady(media);
+  await withRetry(() => waitForMediaReady(media), {
+    maxAttempts: 2,
+    shouldRetry: isRetryablePlaybackFailure,
+  });
   if (!isActiveGeneration(generation)) {
     disposeMedia(media);
     return null;
@@ -702,6 +707,21 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     clearPlayerSession();
   },
 
+  playQueueIndex: async (queueIndex: number) => {
+    const state = get();
+    const track = state.queue[queueIndex];
+    if (!track) return;
+
+    if (state.shuffle && state.shuffleOrder.length > 1) {
+      const step = state.shuffleOrder.indexOf(queueIndex);
+      if (step >= 0) {
+        set({ shuffleStep: step });
+      }
+    }
+
+    await get().playTrack(track, state.queue, { fromNavigation: true });
+  },
+
   stop: () => {
     nextPlayGeneration();
     disposeMedia(get().media);
@@ -726,6 +746,46 @@ if (import.meta.hot) {
   import.meta.hot.accept(() => {
     usePlayerStore.getState().recoverSession();
   });
+}
+
+export type QueueViewItem = {
+  track: Track;
+  queueIndex: number;
+  status: "playing" | "upcoming";
+};
+
+export function getQueueView(
+  state: Pick<PlayerState, "current" | "queue" | "shuffle" | "shuffleOrder" | "shuffleStep">,
+): QueueViewItem[] {
+  if (!state.current || state.queue.length === 0) return [];
+
+  const currentIndex = currentQueueIndex(state);
+  if (currentIndex < 0) {
+    return [{ track: state.current, queueIndex: 0, status: "playing" }];
+  }
+
+  const items: QueueViewItem[] = [];
+
+  if (state.shuffle && state.shuffleOrder.length > 1) {
+    const step = state.shuffleOrder.indexOf(currentIndex);
+    const activeStep = step >= 0 ? step : state.shuffleStep;
+
+    items.push({ track: state.queue[currentIndex], queueIndex: currentIndex, status: "playing" });
+    for (let index = activeStep + 1; index < state.shuffleOrder.length; index += 1) {
+      const queueIndex = state.shuffleOrder[index];
+      items.push({ track: state.queue[queueIndex], queueIndex, status: "upcoming" });
+    }
+    return items;
+  }
+
+  for (let index = currentIndex; index < state.queue.length; index += 1) {
+    items.push({
+      track: state.queue[index],
+      queueIndex: index,
+      status: index === currentIndex ? "playing" : "upcoming",
+    });
+  }
+  return items;
 }
 
 export function hasActivePlayback(
