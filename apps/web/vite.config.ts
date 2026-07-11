@@ -12,6 +12,12 @@ export default defineConfig({
   server: {
     port: Number(process.env.WEB_PORT) || 5190,
     strictPort: false,
+    proxy: {
+      "/api": {
+        target: "http://127.0.0.1:8010",
+        changeOrigin: true,
+      },
+    },
   },
   preview: {
     port: Number(process.env.WEB_PORT) || 5190,

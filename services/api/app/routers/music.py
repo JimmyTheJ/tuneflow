@@ -1,6 +1,6 @@
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import (
@@ -12,8 +12,9 @@ from app.auth import (
 from app.database import get_db
 from app.models import User
 from app.schemas import SearchResult, StreamInfo
+from app.services.audio_cache import get_cached_audio_file
 from app.services.piped import piped_client
-from app.services.stream_resolver import resolve_stream, stream_audio_chunks, stream_video_chunks
+from app.services.stream_resolver import resolve_stream, stream_video_chunks
 
 router = APIRouter(prefix="/music", tags=["music"])
 
@@ -98,7 +99,7 @@ async def stream_audio(
     video_id: str,
     current_user: User = Depends(get_current_user_from_token),
     db: AsyncSession = Depends(get_db),
-) -> StreamingResponse:
+) -> FileResponse:
     child_settings = await enforce_child_access(db, current_user)
 
     try:
@@ -117,17 +118,18 @@ async def stream_audio(
     if reason:
         raise HTTPException(status_code=403, detail=f"Content blocked: {reason}")
 
-    async def iter_bytes():
-        async for chunk in stream_audio_chunks(stream.video_id):
-            yield chunk
+    try:
+        audio_path, mime_type = await get_cached_audio_file(stream.video_id)
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise _piped_unavailable(exc) from exc
 
-    return StreamingResponse(
-        iter_bytes(),
-        media_type=stream.mime_type,
-        headers={
-            "Accept-Ranges": "bytes",
-            "Cache-Control": "no-store",
-        },
+    return FileResponse(
+        audio_path,
+        media_type=mime_type,
+        filename=f"{stream.video_id}{audio_path.suffix}",
+        headers={"Cache-Control": "private, max-age=3600"},
     )
 
 

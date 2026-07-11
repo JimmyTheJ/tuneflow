@@ -121,6 +121,37 @@ function attachMediaListeners(
   });
 }
 
+function waitForMediaReady(media: HTMLMediaElement, timeoutMs = 120000): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (media.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) {
+      resolve();
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      cleanup();
+      reject(new Error("Preparing audio is taking longer than expected — please wait and try again"));
+    }, timeoutMs);
+
+    const onCanPlay = () => {
+      cleanup();
+      resolve();
+    };
+    const onError = () => {
+      cleanup();
+      reject(new Error("Failed to load audio — the server may still be preparing this track"));
+    };
+    const cleanup = () => {
+      window.clearTimeout(timer);
+      media.removeEventListener("canplay", onCanPlay);
+      media.removeEventListener("error", onError);
+    };
+
+    media.addEventListener("canplay", onCanPlay, { once: true });
+    media.addEventListener("error", onError, { once: true });
+  });
+}
+
 function createMediaElement(url: string, selection: StreamSelection): HTMLMediaElement {
   if (selection.video) {
     const video = document.createElement("video");
@@ -149,6 +180,12 @@ async function loadMediaAt(
   const mediaUrl = buildMediaUrl(stream, selection);
   const media = createMediaElement(mediaUrl, selection);
   attachMediaListeners(media, track, generation, set, get);
+
+  await waitForMediaReady(media);
+  if (!isActiveGeneration(generation)) {
+    disposeMedia(media);
+    return null;
+  }
 
   if (autoplay) {
     await media.play();

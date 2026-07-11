@@ -15,7 +15,7 @@ from app.services.thumbnails import youtube_thumbnail_url
 _YT_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{6,20}$")
 _SENTINEL = object()
 
-_AUDIO_FORMAT = "bestaudio/best"
+_AUDIO_FORMAT = "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best"
 _VIDEO_AV_FORMAT = "best[height<=720][ext=mp4]/best[ext=mp4]/best"
 _VIDEO_ONLY_FORMAT = "bestvideo[height<=720][ext=mp4]/bestvideo/bestvideo"
 

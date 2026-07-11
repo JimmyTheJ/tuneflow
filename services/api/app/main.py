@@ -37,4 +37,4 @@ app.include_router(likes.router, prefix="/api")
 
 @app.get("/health")
 async def health() -> dict[str, str]:
-    return {"status": "ok", "service": "tuneflow-api"}
+    return {"status": "ok", "service": "tuneflow-api", "version": "0.3.0"}

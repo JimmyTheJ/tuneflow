@@ -111,18 +111,15 @@ async def resolve_stream(video_id: str) -> StreamInfo:
     piped_meta: StreamInfo | None = None
 
     try:
+        piped_meta = await piped_client.get_stream(video_id)
+    except (httpx.HTTPError, ValueError):
+        piped_meta = None
+
+    try:
         stream = await get_stream_via_ytdlp(video_id)
         return _apply_proxy_urls(stream)
     except Exception as exc:
         errors.append(f"yt-dlp: {exc}")
-
-    try:
-        piped_meta = await piped_client.get_stream(video_id)
-        if await _probe_fetchable(piped_meta.audio_url):
-            return _apply_proxy_urls(piped_meta)
-        errors.append("piped: stream URL is not fetchable")
-    except (httpx.HTTPError, ValueError) as exc:
-        errors.append(f"piped: {exc}")
 
     if piped_meta is not None:
         alternate = await _find_playable_alternate(video_id, piped_meta.title, piped_meta.artist)
