@@ -1,10 +1,15 @@
+import { useEffect, useState } from "react";
 import { PlayerProgress } from "@/components/PlayerProgress";
 import { PlayerTransport } from "@/components/PlayerTransport";
 import { PlayerVideo } from "@/components/PlayerVideo";
 import { PlayerVolume } from "@/components/PlayerVolume";
 import { StreamModeToggle } from "@/components/StreamModeToggle";
 import { TrackThumb } from "@/components/TrackThumb";
-import { hasActivePlayback, usePlayerStore } from "@/stores/playerStore";
+import {
+  hasActivePlayback,
+  hasOrphanedPlayback,
+  usePlayerStore,
+} from "@/stores/playerStore";
 
 export function PlayerPage() {
   const current = usePlayerStore((s) => s.current);
@@ -12,6 +17,16 @@ export function PlayerPage() {
   const isLoading = usePlayerStore((s) => s.isLoading);
   const streamSelection = usePlayerStore((s) => s.streamSelection);
   const stop = usePlayerStore((s) => s.stop);
+  const recoverSession = usePlayerStore((s) => s.recoverSession);
+  const stopOrphanedPlayback = usePlayerStore((s) => s.stopOrphanedPlayback);
+  const [orphaned, setOrphaned] = useState(false);
+
+  useEffect(() => {
+    const recovered = recoverSession();
+    if (!recovered) {
+      setOrphaned(hasOrphanedPlayback(usePlayerStore.getState()));
+    }
+  }, [recoverSession]);
 
   const active = hasActivePlayback({
     current,
@@ -20,6 +35,43 @@ export function PlayerPage() {
   });
 
   if (!active) {
+    if (orphaned) {
+      return (
+        <div className="page">
+          <h1>Playback disconnected</h1>
+          <p className="muted">
+            Audio is still playing in this tab, but the player state was lost — often after a dev hot reload.
+          </p>
+          <div className="player-page-controls">
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={() => {
+                const recovered = recoverSession();
+                if (recovered) {
+                  setOrphaned(false);
+                  return;
+                }
+                setOrphaned(hasOrphanedPlayback(usePlayerStore.getState()));
+              }}
+            >
+              Reconnect playback
+            </button>
+            <button
+              type="button"
+              className="btn-secondary player-stop-btn"
+              onClick={() => {
+                stopOrphanedPlayback();
+                setOrphaned(false);
+              }}
+            >
+              Stop audio
+            </button>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="page">
         <p className="muted">Nothing playing</p>

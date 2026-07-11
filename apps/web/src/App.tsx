@@ -4,6 +4,7 @@ import { Layout } from "@/components/Layout";
 import { MiniPlayer } from "@/components/MiniPlayer";
 import { api } from "@/lib/api";
 import { useAuthStore } from "@/stores/authStore";
+import { usePlayerStore } from "@/stores/playerStore";
 import { LoginPage, SetupPage } from "@/pages/AuthPages";
 import { DiscoverPage } from "@/pages/DiscoverPage";
 import { FamilyPage } from "@/pages/FamilyPage";
@@ -41,6 +42,10 @@ export function App() {
   useEffect(() => {
     void hydrate();
   }, [hydrate]);
+
+  useEffect(() => {
+    usePlayerStore.getState().recoverSession();
+  }, []);
 
   if (!isReady) return <div className="loading-screen">Loading…</div>;
 

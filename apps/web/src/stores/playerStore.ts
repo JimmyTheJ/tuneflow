@@ -1,5 +1,18 @@
 import { create } from "zustand";
 import { api } from "@/lib/api";
+import {
+  clearPlayerSession,
+  findDetachedTuneflowMedia,
+  getPlayerRuntime,
+  getPlayGeneration,
+  isPlayGenerationActive,
+  loadPlayerSession,
+  nextPlayGeneration,
+  parseTrackFromMediaUrl,
+  savePlayerSession,
+  setRuntimeMedia,
+  type PlayerSessionSnapshot,
+} from "@/lib/playerRuntime";
 import { getAccessToken, getApiUrl } from "@/lib/settings";
 import type { StreamInfo, StreamSelection, Track } from "@/types";
 
@@ -32,24 +45,25 @@ type PlayerState = {
   toggleShuffle: () => void;
   cycleRepeatMode: () => void;
   stop: () => void;
+  recoverSession: () => boolean;
+  stopOrphanedPlayback: () => void;
   clearError: () => void;
 };
 
 const DEFAULT_SELECTION: StreamSelection = { video: false, audio: true };
 const VOLUME_KEY = "tuneflow.volume";
 
-let playGeneration = 0;
+type MediaWithListeners = HTMLMediaElement & { __tuneflowListeners?: AbortController };
 
+function isActiveGeneration(generation: number): boolean {
+  return isPlayGenerationActive(generation);
+}
 function getStoredVolume(): number {
   const raw = localStorage.getItem(VOLUME_KEY);
   if (raw == null) return 1;
   const parsed = Number(raw);
   if (!Number.isFinite(parsed)) return 1;
   return Math.max(0, Math.min(1, parsed));
-}
-
-function isActiveGeneration(generation: number): boolean {
-  return generation === playGeneration;
 }
 
 function normalizeSelection(
@@ -101,6 +115,12 @@ function applyVolume(
 
 function disposeMedia(media: HTMLMediaElement | null): void {
   if (!media) return;
+  const tagged = media as MediaWithListeners;
+  tagged.__tuneflowListeners?.abort();
+  tagged.__tuneflowListeners = undefined;
+  if (getPlayerRuntime().media === media) {
+    setRuntimeMedia(null);
+  }
   media.pause();
   if (media instanceof HTMLVideoElement) {
     media.removeAttribute("src");
@@ -110,6 +130,26 @@ function disposeMedia(media: HTMLMediaElement | null): void {
   }
   media.removeAttribute("src");
   media.load();
+}
+
+function snapshotFromState(state: PlayerState): PlayerSessionSnapshot | null {
+  if (!state.current) return null;
+  return {
+    current: state.current,
+    queue: state.queue,
+    stream: state.stream,
+    streamSelection: state.streamSelection,
+    shuffle: state.shuffle,
+    shuffleOrder: state.shuffleOrder,
+    shuffleStep: state.shuffleStep,
+    repeatMode: state.repeatMode,
+  };
+}
+
+function persistSnapshot(state: PlayerState): void {
+  const snapshot = snapshotFromState(state);
+  if (snapshot) savePlayerSession(snapshot);
+  else clearPlayerSession();
 }
 
 function syncProgress(media: HTMLMediaElement, track: Track) {
@@ -238,6 +278,12 @@ function attachMediaListeners(
   set: (partial: Partial<PlayerState>) => void,
   get: () => PlayerState,
 ) {
+  const tagged = media as MediaWithListeners;
+  tagged.__tuneflowListeners?.abort();
+  const abort = new AbortController();
+  tagged.__tuneflowListeners = abort;
+  const { signal } = abort;
+
   const shouldHandle = () => isActiveGeneration(generation);
 
   const updateProgress = () => {
@@ -245,25 +291,41 @@ function attachMediaListeners(
     set(syncProgress(media, track));
   };
 
-  media.addEventListener("loadedmetadata", updateProgress);
-  media.addEventListener("durationchange", updateProgress);
-  media.addEventListener("timeupdate", updateProgress);
-  media.addEventListener("ended", () => {
-    if (!shouldHandle()) return;
-    void get().onTrackEnded();
-  });
-  media.addEventListener("play", () => {
-    if (!shouldHandle()) return;
-    set({ isPlaying: true });
-  });
-  media.addEventListener("pause", () => {
-    if (!shouldHandle()) return;
-    set({ isPlaying: false });
-  });
-  media.addEventListener("error", () => {
-    if (!shouldHandle()) return;
-    set({ isLoading: false, isPlaying: false, error: "Playback failed — try another track" });
-  });
+  media.addEventListener("loadedmetadata", updateProgress, { signal });
+  media.addEventListener("durationchange", updateProgress, { signal });
+  media.addEventListener("timeupdate", updateProgress, { signal });
+  media.addEventListener(
+    "ended",
+    () => {
+      if (!shouldHandle()) return;
+      void get().onTrackEnded();
+    },
+    { signal },
+  );
+  media.addEventListener(
+    "play",
+    () => {
+      if (!shouldHandle()) return;
+      set({ isPlaying: true });
+    },
+    { signal },
+  );
+  media.addEventListener(
+    "pause",
+    () => {
+      if (!shouldHandle()) return;
+      set({ isPlaying: false });
+    },
+    { signal },
+  );
+  media.addEventListener(
+    "error",
+    () => {
+      if (!shouldHandle()) return;
+      set({ isLoading: false, isPlaying: false, error: "Playback failed — try another track" });
+    },
+    { signal },
+  );
 }
 
 function waitForMediaReady(media: HTMLMediaElement, timeoutMs = 120000): Promise<void> {
@@ -342,6 +404,7 @@ async function loadMediaAt(
     media.currentTime = startSec;
   }
 
+  setRuntimeMedia(media);
   return media;
 }
 
@@ -396,7 +459,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   },
 
   playTrack: async (track, queue = [], options) => {
-    const generation = ++playGeneration;
+    const generation = nextPlayGeneration();
     disposeMedia(get().media);
 
     const nextQueue = queue.length ? queue : [track];
@@ -460,6 +523,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
         isLoading: false,
         ...syncProgress(pendingMedia, track),
       });
+      persistSnapshot(get());
       pendingMedia = null;
       void api.recordPlay(track).catch(() => undefined);
     } catch (error) {
@@ -483,7 +547,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       return;
     }
 
-    const generation = ++playGeneration;
+    const generation = nextPlayGeneration();
     const resumeSec = media?.currentTime ?? positionSec;
     disposeMedia(media);
     set({ media: null, isLoading: true, streamSelection: nextSelection, error: null });
@@ -509,6 +573,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
         isPlaying,
         ...syncProgress(pendingMedia, current),
       });
+      persistSnapshot(get());
     } catch (error) {
       if (pendingMedia) disposeMedia(pendingMedia);
       if (!isActiveGeneration(generation)) return;
@@ -587,9 +652,60 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     await get().playTrack(track, get().queue, { fromNavigation: true });
   },
 
+  recoverSession: () => {
+    const state = get();
+    if (state.media) {
+      setRuntimeMedia(state.media);
+      persistSnapshot(state);
+      return true;
+    }
+
+    const orphan = findDetachedTuneflowMedia();
+    if (!orphan?.src) return false;
+
+    const snapshot = loadPlayerSession();
+    const parsed = parseTrackFromMediaUrl(orphan.src);
+    const track = snapshot?.current ?? parsed?.track;
+    if (!track) return false;
+
+    const streamSelection = snapshot?.streamSelection ?? parsed?.streamSelection ?? DEFAULT_SELECTION;
+    const generation = getPlayGeneration();
+
+    attachMediaListeners(orphan, track, generation, set, get);
+    applyVolume(orphan, state.volume, streamSelection);
+    setRuntimeMedia(orphan);
+
+    const nextState: Partial<PlayerState> = {
+      media: orphan,
+      current: track,
+      queue: snapshot?.queue ?? [track],
+      stream: snapshot?.stream ?? null,
+      streamSelection,
+      shuffle: snapshot?.shuffle ?? false,
+      shuffleOrder: snapshot?.shuffleOrder ?? [],
+      shuffleStep: snapshot?.shuffleStep ?? 0,
+      repeatMode: snapshot?.repeatMode ?? "none",
+      isPlaying: !orphan.paused,
+      isLoading: false,
+      error: null,
+      ...syncProgress(orphan, track),
+    };
+    set(nextState);
+    persistSnapshot({ ...get(), ...nextState } as PlayerState);
+    return true;
+  },
+
+  stopOrphanedPlayback: () => {
+    nextPlayGeneration();
+    const orphan = findDetachedTuneflowMedia();
+    if (orphan) disposeMedia(orphan);
+    clearPlayerSession();
+  },
+
   stop: () => {
-    playGeneration += 1;
+    nextPlayGeneration();
     disposeMedia(get().media);
+    clearPlayerSession();
     set({
       media: null,
       stream: null,
@@ -606,10 +722,21 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   },
 }));
 
+if (import.meta.hot) {
+  import.meta.hot.accept(() => {
+    usePlayerStore.getState().recoverSession();
+  });
+}
+
 export function hasActivePlayback(
   state: Pick<PlayerState, "current" | "media" | "isLoading">,
 ): boolean {
   return state.current != null || state.media != null || state.isLoading;
+}
+
+export function hasOrphanedPlayback(state: Pick<PlayerState, "media">): boolean {
+  if (state.media) return false;
+  return findDetachedTuneflowMedia() != null;
 }
 
 export function canPlayNext(state: Pick<PlayerState, "current" | "queue" | "repeatMode" | "shuffle" | "shuffleOrder" | "shuffleStep">): boolean {
