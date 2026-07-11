@@ -147,9 +147,15 @@ class PipedClient:
         for item in payload.get("items", []):
             if item.get("type") != "stream":
                 continue
-            artist, title = parse_artist_title(item.get("title", "Unknown"))
+            raw_title = (item.get("title") or "Unknown").strip()
+            artist, title = parse_artist_title(raw_title)
             video_id = item["url"].split("=")[-1]
             uploader = item.get("uploaderName") or artist
+            short_description = item.get("shortDescription")
+            if isinstance(short_description, str):
+                short_description = short_description.strip() or None
+            else:
+                short_description = None
             results.append(
                 SearchResult(
                     video_id=video_id,
@@ -157,6 +163,8 @@ class PipedClient:
                     artist=uploader,
                     thumbnail_url=youtube_thumbnail_url(video_id),
                     duration_sec=item.get("duration"),
+                    source_title=raw_title,
+                    short_description=short_description,
                 )
             )
         results.sort(key=_search_rank_key)

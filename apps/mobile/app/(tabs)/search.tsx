@@ -65,6 +65,8 @@ export default function SearchScreen() {
         renderItem={({ item }) => (
           <TrackRow
             track={item}
+            displayTitle={item.source_title ?? item.title}
+            showBadges
             subtitle={item.blocked_reason ? `Blocked: ${item.blocked_reason}` : item.artist ?? "Unknown artist"}
             onPress={
               item.blocked_reason ? undefined : () => void playTrack(item, playable)

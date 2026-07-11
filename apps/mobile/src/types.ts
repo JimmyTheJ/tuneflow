@@ -16,6 +16,8 @@ export type Track = {
   thumbnail_url?: string | null;
   duration_sec?: number | null;
   blocked_reason?: string | null;
+  source_title?: string | null;
+  short_description?: string | null;
 };
 
 export type Playlist = {

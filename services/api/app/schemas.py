@@ -185,6 +185,8 @@ class LikeRead(TrackBase):
 
 class SearchResult(TrackRead):
     blocked_reason: str | None = None
+    source_title: str | None = None
+    short_description: str | None = None
 
 
 class StreamInfo(BaseModel):

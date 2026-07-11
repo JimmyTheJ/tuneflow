@@ -62,6 +62,8 @@ async def search_music(
                 artist=track.artist,
                 thumbnail_url=track.thumbnail_url,
                 duration_sec=track.duration_sec,
+                source_title=track.source_title,
+                short_description=track.short_description,
                 blocked_reason=reason,
             )
         )

@@ -94,6 +94,8 @@ export function SearchPage() {
         <TrackRow
           key={track.video_id}
           track={track}
+          displayTitle={track.source_title ?? track.title}
+          showBadges
           subtitle={track.blocked_reason ? `Blocked: ${track.blocked_reason}` : undefined}
           disabled={!!track.blocked_reason}
           onClick={() => void playTrack(track, playable)}
