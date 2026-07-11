@@ -77,6 +77,16 @@ async def create_user(
     return UserRead.model_validate(user, from_attributes=True)
 
 
+def _can_toggle_active(current_user: User, target: User) -> None:
+    _can_modify_user(current_user, target)
+    if target.id == current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot disable your own account")
+    if target.role == UserRole.admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot disable an admin account")
+    if current_user.role == UserRole.parent and target.role == UserRole.parent:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot disable that account")
+
+
 @router.patch("/{user_id}", response_model=UserRead)
 async def update_user(
     user_id: int,
@@ -89,6 +99,8 @@ async def update_user(
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     _can_modify_user(current_user, user)
+    if payload.is_active is not None:
+        _can_toggle_active(current_user, user)
 
     if payload.display_name is not None:
         user.display_name = payload.display_name.strip()

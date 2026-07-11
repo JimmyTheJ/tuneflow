@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_current_user, require_parent
+from app.auth import ACCOUNT_DISABLED_MESSAGE, ACCOUNT_REMOVED_MESSAGE, get_current_user, require_parent
 from app.database import get_db
 from app.models import User, UserRole
 from app.schemas import (
@@ -57,9 +57,9 @@ async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)) -> To
     if user is None or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid username or password")
     if user.deleted_at is not None:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account has been removed")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ACCOUNT_REMOVED_MESSAGE)
     if not user.is_active:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account disabled")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ACCOUNT_DISABLED_MESSAGE)
 
     token = create_access_token(user.username)
     return TokenResponse(access_token=token, user=UserRead.model_validate(user, from_attributes=True))

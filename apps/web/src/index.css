@@ -777,6 +777,25 @@ textarea {
   justify-content: flex-end;
 }
 
+.member-row-disabled .track-title {
+  color: #9a9a9a;
+}
+
+.status-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  vertical-align: middle;
+}
+
+.status-disabled {
+  background: #3a2a10;
+  color: #f0c674;
+}
+
 .dialog-message {
   white-space: pre-wrap;
   line-height: 1.5;

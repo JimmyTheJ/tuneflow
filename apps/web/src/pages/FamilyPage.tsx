@@ -15,7 +15,13 @@ function canEditUser(current: User, target: User) {
 }
 
 function canToggleActive(current: User, target: User) {
-  return canEditUser(current, target) && target.role !== "parent" && target.role !== "admin";
+  if (!canEditUser(current, target) || target.id === current.id || target.role === "admin") {
+    return false;
+  }
+  if (current.role === "parent" && target.role === "parent") {
+    return false;
+  }
+  return true;
 }
 
 function canSoftDelete(current: User, target: User) {
@@ -36,6 +42,7 @@ export function FamilyPage() {
   const [editDisplayName, setEditDisplayName] = useState("");
   const [editPassword, setEditPassword] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<User | null>(null);
+  const [toggleTarget, setToggleTarget] = useState<{ user: User; enable: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
@@ -106,6 +113,26 @@ export function FamilyPage() {
     }
   };
 
+  const confirmToggleActive = async () => {
+    if (!toggleTarget) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api.updateUser(toggleTarget.user.id, { is_active: toggleTarget.enable });
+      setMessage(
+        toggleTarget.enable
+          ? `${toggleTarget.user.display_name} can sign in again.`
+          : `${toggleTarget.user.display_name} has been disabled. They remain visible here but cannot sign in.`,
+      );
+      setToggleTarget(null);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not update account");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const confirmSoftDelete = async () => {
     if (!deleteTarget) return;
     setBusy(true);
@@ -127,7 +154,11 @@ export function FamilyPage() {
   return (
     <div className="page">
       <h1>Family members</h1>
-      <p className="muted">Add accounts for your household. Child accounts get parental controls automatically.</p>
+      <p className="muted">
+        Add accounts for your household. Child accounts get parental controls automatically. Use{" "}
+        <strong>Disable</strong> to block sign-in while keeping the account visible. Use <strong>Delete</strong>{" "}
+        (admin only) to hide a removed account.
+      </p>
       {user.role === "admin" ? (
         <Link to="/admin/users/deleted" className="accent">
           View deleted accounts →
@@ -155,12 +186,14 @@ export function FamilyPage() {
 
       <h2 className="section-label">Household</h2>
       {members.map((m) => (
-        <div key={m.id} className="member-row">
+        <div key={m.id} className={m.is_active ? "member-row" : "member-row member-row-disabled"}>
           <div>
-            <div className="track-title">{m.display_name}</div>
+            <div className="track-title">
+              {m.display_name}
+              {!m.is_active ? <span className="status-badge status-disabled">Disabled</span> : null}
+            </div>
             <div className="track-subtitle">
               @{m.username} · {m.role}
-              {!m.is_active ? " · disabled" : ""}
             </div>
           </div>
           <div className="member-actions">
@@ -173,9 +206,7 @@ export function FamilyPage() {
               <button
                 type="button"
                 className="btn-secondary"
-                onClick={() =>
-                  void api.updateUser(m.id, { is_active: !m.is_active }).then(() => load())
-                }
+                onClick={() => setToggleTarget({ user: m, enable: !m.is_active })}
               >
                 {m.is_active ? "Disable" : "Enable"}
               </button>
@@ -229,6 +260,35 @@ export function FamilyPage() {
           </form>
         </div>
       ) : null}
+
+      <ConfirmDialog
+        visible={toggleTarget !== null && !toggleTarget.enable}
+        title="Disable account?"
+        message={
+          toggleTarget && !toggleTarget.enable
+            ? `Disable "${toggleTarget.user.display_name}" (@${toggleTarget.user.username})? They will not be able to sign in and will be told to contact an administrator. The account stays visible in the family list and is not deleted. Playlists and history are kept.`
+            : ""
+        }
+        confirmLabel="Disable account"
+        danger
+        busy={busy}
+        onConfirm={confirmToggleActive}
+        onCancel={() => setToggleTarget(null)}
+      />
+
+      <ConfirmDialog
+        visible={toggleTarget !== null && toggleTarget.enable}
+        title="Enable account?"
+        message={
+          toggleTarget?.enable
+            ? `Re-enable "${toggleTarget.user.display_name}" (@${toggleTarget.user.username})? They will be able to sign in again immediately.`
+            : ""
+        }
+        confirmLabel="Enable account"
+        busy={busy}
+        onConfirm={confirmToggleActive}
+        onCancel={() => setToggleTarget(null)}
+      />
 
       <ConfirmDialog
         visible={deleteTarget !== null}

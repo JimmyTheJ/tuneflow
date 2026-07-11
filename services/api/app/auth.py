@@ -15,6 +15,11 @@ from app.security import decode_access_token
 
 security = HTTPBearer(auto_error=False)
 
+ACCOUNT_DISABLED_MESSAGE = (
+    "Your account has been disabled. Please contact your administrator."
+)
+ACCOUNT_REMOVED_MESSAGE = "This account has been removed."
+
 EXPLICIT_KEYWORDS = (
     "explicit",
     "uncensored",
@@ -88,8 +93,12 @@ async def _user_from_token(raw_token: str, db: AsyncSession) -> User:
 
     result = await db.execute(select(User).where(User.username == username))
     user = result.scalar_one_or_none()
-    if user is None or not user.is_active or user.deleted_at is not None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User inactive or missing")
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    if user.deleted_at is not None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=ACCOUNT_REMOVED_MESSAGE)
+    if not user.is_active:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=ACCOUNT_DISABLED_MESSAGE)
     return user
 
 
