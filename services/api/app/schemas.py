@@ -320,3 +320,7 @@ class CacheEntryRead(BaseModel):
 class CachePurgeResult(BaseModel):
     deleted_entries: int
     freed_bytes: int
+
+
+class CacheBulkDelete(BaseModel):
+    video_ids: list[str] = Field(min_length=1, max_length=200)

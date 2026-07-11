@@ -25,6 +25,7 @@ export function AdminCachePage() {
   const [purgeOlderDays, setPurgeOlderDays] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [selectedVideoIds, setSelectedVideoIds] = useState<Set<string>>(new Set());
 
   const load = useCallback(async () => {
     const [nextStats, nextSettings, nextEntries, nextUsers] = await Promise.all([
@@ -37,6 +38,7 @@ export function AdminCachePage() {
     setSettings(nextSettings);
     setEntries(nextEntries);
     setUsers(nextUsers);
+    setSelectedVideoIds(new Set());
     setRetentionDays(
       nextSettings.cache_retention_days == null ? "" : String(nextSettings.cache_retention_days),
     );
@@ -140,6 +142,54 @@ export function AdminCachePage() {
     }
   };
 
+  const visibleVideoIds = entries.map((entry) => entry.video_id);
+  const allVisibleSelected =
+    visibleVideoIds.length > 0 && visibleVideoIds.every((videoId) => selectedVideoIds.has(videoId));
+  const someVisibleSelected = visibleVideoIds.some((videoId) => selectedVideoIds.has(videoId));
+
+  const toggleSelected = (videoId: string) => {
+    setSelectedVideoIds((current) => {
+      const next = new Set(current);
+      if (next.has(videoId)) next.delete(videoId);
+      else next.add(videoId);
+      return next;
+    });
+  };
+
+  const toggleSelectAllVisible = () => {
+    setSelectedVideoIds((current) => {
+      const next = new Set(current);
+      if (allVisibleSelected) {
+        for (const videoId of visibleVideoIds) next.delete(videoId);
+      } else {
+        for (const videoId of visibleVideoIds) next.add(videoId);
+      }
+      return next;
+    });
+  };
+
+  const deleteSelected = async () => {
+    const videoIds = [...selectedVideoIds];
+    if (videoIds.length === 0) return;
+    if (
+      !window.confirm(
+        `Delete ${videoIds.length} selected cached track${videoIds.length === 1 ? "" : "s"}? This cannot be undone.`,
+      )
+    ) {
+      return;
+    }
+    setError(null);
+    try {
+      const result = await api.clearCacheEntries(videoIds);
+      setMessage(
+        `Removed ${result.deleted_entries} selected entr${result.deleted_entries === 1 ? "y" : "ies"} (${formatBytes(result.freed_bytes)} freed)`,
+      );
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not delete selected entries");
+    }
+  };
+
   return (
     <div className="page">
       <h1>Audio cache</h1>
@@ -238,9 +288,40 @@ export function AdminCachePage() {
         ))}
       </select>
 
+      {entries.length > 0 ? (
+        <div className="cache-bulk-toolbar">
+          <label className="muted cache-select-all">
+            <input
+              type="checkbox"
+              checked={allVisibleSelected}
+              ref={(input) => {
+                if (input) input.indeterminate = someVisibleSelected && !allVisibleSelected;
+              }}
+              onChange={() => toggleSelectAllVisible()}
+            />{" "}
+            Select all shown
+          </label>
+          <button
+            type="button"
+            className="btn-secondary"
+            disabled={selectedVideoIds.size === 0}
+            onClick={() => void deleteSelected()}
+          >
+            Delete selected ({selectedVideoIds.size})
+          </button>
+        </div>
+      ) : null}
+
       {entries.map((entry) => (
-        <div key={entry.video_id} className="member-row">
-          <div>
+        <div key={entry.video_id} className="member-row cache-entry-row">
+          <label className="cache-entry-select">
+            <input
+              type="checkbox"
+              checked={selectedVideoIds.has(entry.video_id)}
+              onChange={() => toggleSelected(entry.video_id)}
+            />
+          </label>
+          <div className="cache-entry-body">
             <div className="track-title">{entry.title ?? "Unknown track"}</div>
             <div className="track-subtitle">
               {entry.artist ? `${entry.artist} · ` : ""}

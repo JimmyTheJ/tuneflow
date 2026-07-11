@@ -152,4 +152,9 @@ export const api = {
   },
   clearCacheEntry: (videoId: string) =>
     request<CachePurgeResult>(`/api/admin/cache/${videoId}`, { method: "DELETE" }),
+  clearCacheEntries: (videoIds: string[]) =>
+    request<CachePurgeResult>("/api/admin/cache/bulk-delete", {
+      method: "POST",
+      body: { video_ids: videoIds },
+    }),
 };

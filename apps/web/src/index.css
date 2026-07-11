@@ -732,6 +732,36 @@ textarea {
   border-bottom: 1px solid #222;
 }
 
+.cache-bulk-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin: 12px 0;
+}
+
+.cache-select-all {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cache-entry-row {
+  align-items: flex-start;
+}
+
+.cache-entry-select {
+  display: flex;
+  align-items: flex-start;
+  padding-top: 2px;
+  cursor: pointer;
+}
+
+.cache-entry-body {
+  flex: 1;
+  min-width: 0;
+}
+
 .hour-picker {
   margin-bottom: 12px;
 }

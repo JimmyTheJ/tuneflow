@@ -5,6 +5,7 @@ from app.auth import require_admin
 from app.database import get_db
 from app.models import User
 from app.schemas import (
+    CacheBulkDelete,
     CacheEntryRead,
     CachePurgeResult,
     CacheSettingsRead,
@@ -21,6 +22,7 @@ from app.services.cache_manager import (
     purge_older_than,
     purge_user,
     purge_video,
+    purge_videos,
     run_retention_cleanup,
 )
 
@@ -107,6 +109,21 @@ async def clear_cache(
         deleted, freed = await purge_user(db, user_id)
     else:
         deleted, freed = await purge_all(db)
+    return CachePurgeResult(deleted_entries=deleted, freed_bytes=freed)
+
+
+    return CachePurgeResult(deleted_entries=deleted, freed_bytes=freed)
+
+
+@router.post("/bulk-delete", response_model=CachePurgeResult)
+async def bulk_delete_cache_entries(
+    payload: CacheBulkDelete,
+    _: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> CachePurgeResult:
+    deleted, freed = await purge_videos(db, payload.video_ids)
+    if deleted == 0:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No cache entries found")
     return CachePurgeResult(deleted_entries=deleted, freed_bytes=freed)
 
 

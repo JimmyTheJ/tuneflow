@@ -304,6 +304,20 @@ async def purge_video(db: AsyncSession, video_id: str) -> tuple[int, int]:
     return 1, freed
 
 
+async def purge_videos(db: AsyncSession, video_ids: list[str]) -> tuple[int, int]:
+    deleted = 0
+    freed = 0
+    seen: set[str] = set()
+    for video_id in video_ids:
+        if video_id in seen:
+            continue
+        seen.add(video_id)
+        d, f = await purge_video(db, video_id)
+        deleted += d
+        freed += f
+    return deleted, freed
+
+
 async def purge_all(db: AsyncSession) -> tuple[int, int]:
     entries = (await db.execute(select(AudioCacheEntry))).scalars().all()
     freed = 0
