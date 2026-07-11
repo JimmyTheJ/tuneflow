@@ -16,19 +16,31 @@ _YT_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{6,20}$")
 _SENTINEL = object()
 
 
+_YTDL_OPTS = {
+    "quiet": True,
+    "no_warnings": True,
+    "format": "bestaudio/best",
+    "noplaylist": True,
+}
+
+
 def _extract_sync(video_id: str) -> dict:
     if not _YT_ID_RE.match(video_id):
         raise ValueError("Invalid video id")
     url = f"https://www.youtube.com/watch?v={video_id}"
-    with yt_dlp.YoutubeDL(
-        {
-            "quiet": True,
-            "no_warnings": True,
-            "format": "bestaudio/best",
-            "noplaylist": True,
-        }
-    ) as ydl:
+    with yt_dlp.YoutubeDL(_YTDL_OPTS) as ydl:
         return ydl.extract_info(url, download=False)
+
+
+def _search_sync(query: str, limit: int) -> list[str]:
+    with yt_dlp.YoutubeDL({**_YTDL_OPTS, "extract_flat": True}) as ydl:
+        info = ydl.extract_info(f"ytsearch{limit}:{query}", download=False)
+    entries = info.get("entries") or []
+    return [entry["id"] for entry in entries if entry.get("id")]
+
+
+async def search_video_ids(query: str, limit: int = 8) -> list[str]:
+    return await asyncio.to_thread(_search_sync, query, limit)
 
 
 async def get_stream_via_ytdlp(video_id: str) -> StreamInfo:

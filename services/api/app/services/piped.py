@@ -18,6 +18,56 @@ def parse_artist_title(raw_title: str) -> tuple[str | None, str]:
     return match.group("artist").strip(), match.group("title").strip()
 
 
+def _normalize_text(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", value.lower())
+
+
+def title_matches(wanted: str, candidate: str) -> bool:
+    left = _normalize_text(wanted)
+    right = _normalize_text(candidate)
+    if not left or not right:
+        return False
+    return left in right or right in left
+
+
+def artist_matches(wanted: str | None, candidate: str | None) -> bool:
+    if not wanted:
+        return True
+    if not candidate:
+        return False
+    left = _normalize_text(wanted.replace("- Topic", ""))
+    right = _normalize_text(candidate.replace("- Topic", ""))
+    return bool(left and right and (left in right or right in left))
+
+
+def matches_requested_track(
+    *,
+    wanted_title: str,
+    wanted_artist: str | None,
+    candidate_title: str,
+    candidate_artist: str | None,
+) -> bool:
+    if not title_matches(wanted_title, candidate_title):
+        return False
+    if not wanted_artist:
+        return True
+    if artist_matches(wanted_artist, candidate_artist):
+        return True
+    if is_topic_upload(wanted_artist):
+        topic_artist = wanted_artist.replace("- Topic", "").strip()
+        combined = f"{candidate_title} {candidate_artist or ''}"
+        return _normalize_text(topic_artist) in _normalize_text(combined)
+    return False
+
+
+def is_topic_upload(artist: str | None) -> bool:
+    return bool(artist and artist.rstrip().endswith("- Topic"))
+
+
+def _search_rank_key(result: SearchResult) -> tuple[int, str]:
+    return (1 if is_topic_upload(result.artist) else 0, result.title.lower())
+
+
 def collect_playable_audio_streams(payload: dict) -> list[dict]:
     """Return audio-capable streams from a Piped /streams payload.
 
@@ -76,25 +126,67 @@ class PipedClient:
         detail = "; ".join(errors[:3])
         raise httpx.HTTPError(f"All Piped instances failed. {detail}")
 
-    async def search(self, query: str, limit: int = 20) -> list[SearchResult]:
+    async def search_piped(self, query: str, limit: int = 20) -> list[SearchResult]:
         payload = await self._request_json("/search", params={"q": query, "filter": "music_songs"})
 
         results: list[SearchResult] = []
-        for item in payload.get("items", [])[:limit]:
+        for item in payload.get("items", []):
             if item.get("type") != "stream":
                 continue
             artist, title = parse_artist_title(item.get("title", "Unknown"))
             video_id = item["url"].split("=")[-1]
+            uploader = item.get("uploaderName") or artist
             results.append(
                 SearchResult(
                     video_id=video_id,
                     title=title,
-                    artist=artist or item.get("uploaderName"),
+                    artist=uploader,
                     thumbnail_url=youtube_thumbnail_url(video_id),
                     duration_sec=item.get("duration"),
                 )
             )
-        return results
+        results.sort(key=_search_rank_key)
+        return results[:limit]
+
+    async def search(self, query: str, limit: int = 20) -> list[SearchResult]:
+        from app.services.ytdlp import get_stream_via_ytdlp, search_video_ids
+
+        piped_results = await self.search_piped(query, limit=limit)
+
+        merged: list[SearchResult] = []
+        seen: set[str] = set()
+
+        try:
+            for video_id in await search_video_ids(query, limit=limit):
+                if video_id in seen:
+                    continue
+                try:
+                    stream = await get_stream_via_ytdlp(video_id)
+                except Exception:
+                    continue
+                seen.add(video_id)
+                merged.append(
+                    SearchResult(
+                        video_id=stream.video_id,
+                        title=stream.title,
+                        artist=stream.artist,
+                        thumbnail_url=stream.thumbnail_url,
+                        duration_sec=stream.duration_sec,
+                    )
+                )
+                if len(merged) >= limit:
+                    return merged
+        except Exception:
+            pass
+
+        for result in piped_results:
+            if result.video_id in seen:
+                continue
+            seen.add(result.video_id)
+            merged.append(result)
+            if len(merged) >= limit:
+                break
+        return merged
 
     async def get_stream(self, video_id: str) -> StreamInfo:
         payload = await self._request_json(f"/streams/{video_id}")
