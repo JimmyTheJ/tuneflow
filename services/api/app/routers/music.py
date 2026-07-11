@@ -118,10 +118,17 @@ async def stream_audio(
         raise HTTPException(status_code=403, detail=f"Content blocked: {reason}")
 
     async def iter_bytes():
-        async for chunk in stream_audio_chunks(video_id):
+        async for chunk in stream_audio_chunks(stream.video_id):
             yield chunk
 
-    return StreamingResponse(iter_bytes(), media_type=stream.mime_type)
+    return StreamingResponse(
+        iter_bytes(),
+        media_type=stream.mime_type,
+        headers={
+            "Accept-Ranges": "bytes",
+            "Cache-Control": "no-store",
+        },
+    )
 
 
 @router.get("/video/{video_id}")
@@ -159,4 +166,11 @@ async def stream_video(
             yield chunk
 
     media_type = stream.video_mime_type or "video/mp4"
-    return StreamingResponse(iter_bytes(), media_type=media_type)
+    return StreamingResponse(
+        iter_bytes(),
+        media_type=media_type,
+        headers={
+            "Accept-Ranges": "bytes",
+            "Cache-Control": "no-store",
+        },
+    )

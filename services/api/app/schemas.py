@@ -197,6 +197,7 @@ class StreamInfo(BaseModel):
     mime_type: str = "audio/webm"
     video_mime_type: str | None = None
     has_video: bool = False
+    playable_video_id: str | None = None
 
 
 class ReorderTracksRequest(BaseModel):

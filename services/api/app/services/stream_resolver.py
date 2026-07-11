@@ -29,6 +29,7 @@ def _proxy_video_url(video_id: str) -> str:
 
 def _apply_proxy_urls(stream: StreamInfo) -> StreamInfo:
     playable_id = stream.video_id
+    stream.playable_video_id = playable_id
     stream.audio_url = _proxy_audio_url(playable_id)
     if stream.has_video:
         stream.video_url = _proxy_video_url(playable_id)

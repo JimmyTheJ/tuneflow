@@ -47,8 +47,7 @@ function normalizeSelection(
 }
 
 function playableIdFromStream(stream: StreamInfo): string {
-  const match = stream.audio_url.match(/\/audio\/([^/?]+)/);
-  return match?.[1] ?? stream.video_id;
+  return stream.playable_video_id ?? stream.video_id;
 }
 
 function buildMediaUrl(stream: StreamInfo, selection: StreamSelection): string {
@@ -63,7 +62,7 @@ function buildMediaUrl(stream: StreamInfo, selection: StreamSelection): string {
     return `${base}/api/music/video/${playableId}?${query.toString()}`;
   }
 
-  return `${base}${stream.audio_url}?token=${token}`;
+  return `${base}/api/music/audio/${playableId}?token=${token}`;
 }
 
 function disposeMedia(media: HTMLMediaElement | null): void {
@@ -221,6 +220,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
         media: pendingMedia,
         stream,
         streamSelection: resolvedSelection,
+        current: { ...track, video_id: playableIdFromStream(stream) },
         isPlaying: true,
         isLoading: false,
         ...syncProgress(pendingMedia, track),

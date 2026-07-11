@@ -48,6 +48,7 @@ export type StreamInfo = Track & {
   mime_type?: string;
   video_mime_type?: string | null;
   has_video?: boolean;
+  playable_video_id?: string | null;
 };
 
 export type PlayHistoryEntry = Track & {
