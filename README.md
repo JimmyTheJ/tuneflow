@@ -209,6 +209,8 @@ Check connectivity: `GET /api/ai/status`
 .\compose.ps1 --profile piped up --build
 ```
 
+`PIPED_BASE_URL` uses the container port (`8080`) on the Docker network. Override the **host** port with `PIPED_PORT` in `.env` if `8080` clashes on your machine.
+
 ## API overview
 
 Authenticated routes use `Authorization: Bearer <jwt>`.

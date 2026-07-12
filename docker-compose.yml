@@ -38,7 +38,7 @@ services:
       PORT: 8080
       PROXY_PART: ""
     ports:
-      - "8080:8080"
+      - "${PIPED_PORT:-8080}:8080"
     restart: unless-stopped
 
 volumes:
