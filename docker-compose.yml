@@ -1,3 +1,6 @@
+# Optional: join an existing reverse-proxy network by merging docker-compose.shared-network.yml
+# (set COMPOSE_FILE and DOCKER_SHARED_NETWORK in .env — see .env.example).
+
 services:
   api:
     build: ./services/api

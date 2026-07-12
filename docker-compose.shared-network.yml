@@ -1,0 +1,20 @@
+# Optional overlay: attach services to an existing Docker network (e.g. nginx reverse proxy).
+#
+# Enable in .env:
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.shared-network.yml
+#   DOCKER_SHARED_NETWORK=nginx_network
+#
+# The network must already exist (e.g. docker network create nginx_network).
+
+services:
+  api:
+    networks:
+      - shared
+  web:
+    networks:
+      - shared
+
+networks:
+  shared:
+    external: true
+    name: ${DOCKER_SHARED_NETWORK:?Set DOCKER_SHARED_NETWORK to the external network name}
