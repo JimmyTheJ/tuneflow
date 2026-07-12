@@ -94,6 +94,30 @@ Set `VITE_API_URL` in `.env` before building if the browser needs a different AP
 
 To attach API and web to an existing reverse-proxy network (e.g. nginx), set `DOCKER_SHARED_NETWORK=nginx_network` in `.env` and use `compose.ps1` / `compose.sh`. The network must already exist; nginx can then reach `http://web:80` and `http://api:8000`.
 
+### Persistent data (Docker)
+
+The API runs as a non-root user (default uid/gid **10001**). Data lives at `TUNEFLOW_DATA_HOST_PATH` on the host, mounted to `/app/data` in the container.
+
+**Named volume (default)** — no setup needed; Docker manages `tuneflow-data`.
+
+**Bind mount** (e.g. `/home/jamus/tuneflow-data`):
+
+```env
+TUNEFLOW_DATA_HOST_PATH=/home/jamus/tuneflow-data
+```
+
+```bash
+mkdir -p /home/jamus/tuneflow-data
+sudo chown -R 10001:10001 /home/jamus/tuneflow-data
+./compose.sh up --build -d
+```
+
+To have files owned by your login user on the host instead, set `PUID` and `PGID` in `.env` to the output of `id -u` and `id -g`, rebuild, and `chown` the data directory to match.
+
+Avoid NTFS/exFAT mounts (e.g. `/mnt/d/...` from Windows drives) if you hit permission errors — use a native Linux path under `/home` or `/var/lib`.
+
+If you upgraded from an older root-owned data directory: `sudo chown -R 10001:10001 /path/to/data`.
+
 ## Mobile app
 
 ```powershell
