@@ -1,9 +1,6 @@
 # Optional overlay: attach services to an existing Docker network (e.g. nginx reverse proxy).
 #
-# Enable in .env:
-#   COMPOSE_FILE=docker-compose.yml:docker-compose.shared-network.yml
-#   DOCKER_SHARED_NETWORK=nginx_network
-#
+# Set DOCKER_SHARED_NETWORK in .env and run via compose.ps1 / compose.sh.
 # The network must already exist (e.g. docker network create nginx_network).
 
 services:
