@@ -6,11 +6,11 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: sqlite+aiosqlite:///./data/tuneflow.db
+      TUNEFLOW_DATA_DIR: /app/data
       PIPED_BASE_URL: ${PIPED_BASE_URL:-https://api.piped.private.coffee}
       PIPED_FALLBACK_URLS: ${PIPED_FALLBACK_URLS:-https://api.piped.private.coffee,https://pipedapi-libre.kavin.rocks,https://pipedapi.kavin.rocks}
     volumes:
-      - tuneflow-data:/app/data
+      - ${TUNEFLOW_DATA_HOST_PATH:-tuneflow-data}:/app/data
     restart: unless-stopped
 
   web:

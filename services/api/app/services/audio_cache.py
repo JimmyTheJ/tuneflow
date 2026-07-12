@@ -4,13 +4,15 @@ from pathlib import Path
 
 import yt_dlp
 
+from app.config import settings
+
 _YT_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{6,20}$")
 _AUDIO_FORMAT = "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best"
 _AUDIO_SUFFIXES = {".m4a", ".webm", ".opus", ".mp3", ".aac"}
 
 
 def _cache_dir() -> Path:
-    path = Path(__file__).resolve().parents[2] / "data" / "audio_cache"
+    path = settings.tuneflow_data_dir / "audio_cache"
     path.mkdir(parents=True, exist_ok=True)
     return path
 
