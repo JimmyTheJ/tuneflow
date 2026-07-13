@@ -174,6 +174,32 @@ function tryAdoptPrefetch(track: Track, selection: StreamSelection): PrefetchEnt
   return entry;
 }
 
+function prefetchMatchesNext(state: PlayerState): boolean {
+  if (!prefetchEntry) return false;
+  const next = getNextTrack(state);
+  if (!next || next.video_id !== prefetchEntry.track.video_id) return false;
+  const selection = normalizeSelection(state.streamSelection, state.stream);
+  return selectionMatches(prefetchEntry.selection, selection);
+}
+
+function syncPrefetchWithQueue(get: () => PlayerState): void {
+  if (!get().current) {
+    invalidatePrefetch();
+    return;
+  }
+
+  const state = get();
+  if (!getNextTrack(state)) {
+    invalidatePrefetch();
+    return;
+  }
+
+  if (prefetchMatchesNext(state)) return;
+
+  invalidatePrefetch();
+  void prefetchNextTrack(get);
+}
+
 async function prefetchNextTrack(get: () => PlayerState): Promise<void> {
   const token = prefetchToken + 1;
   prefetchToken = token;
@@ -236,8 +262,7 @@ async function prefetchNextTrack(get: () => PlayerState): Promise<void> {
 }
 
 function schedulePrefetchNext(get: () => PlayerState): void {
-  if (!get().current) return;
-  void prefetchNextTrack(get);
+  syncPrefetchWithQueue(get);
 }
 
 export const usePlayerStore = create<PlayerState>((set, get) => ({

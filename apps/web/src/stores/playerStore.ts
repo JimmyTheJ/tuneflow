@@ -458,6 +458,38 @@ function tryAdoptPrefetch(track: Track, selection: StreamSelection): PrefetchEnt
   return entry;
 }
 
+function expectedNextTrack(state: PlayerState): Track | null {
+  const action = resolveNextAction(state);
+  if (action.type !== "track") return null;
+  return state.queue[action.queueIndex] ?? null;
+}
+
+function prefetchMatchesNext(state: PlayerState): boolean {
+  if (!prefetchEntry) return false;
+  const next = expectedNextTrack(state);
+  if (!next || next.video_id !== prefetchEntry.track.video_id) return false;
+  const selection = normalizeSelection(state.streamSelection, state.stream);
+  return selectionMatches(prefetchEntry.selection, selection);
+}
+
+function syncPrefetchWithQueue(get: () => PlayerState): void {
+  if (!get().current) {
+    invalidatePrefetch();
+    return;
+  }
+
+  const state = get();
+  if (!expectedNextTrack(state)) {
+    invalidatePrefetch();
+    return;
+  }
+
+  if (prefetchMatchesNext(state)) return;
+
+  invalidatePrefetch();
+  void prefetchNextTrack(get);
+}
+
 async function preloadMediaElement(
   stream: StreamInfo,
   track: Track,
@@ -533,8 +565,7 @@ async function prefetchNextTrack(get: () => PlayerState): Promise<void> {
 }
 
 function schedulePrefetchNext(get: () => PlayerState): void {
-  if (!get().current) return;
-  void prefetchNextTrack(get);
+  syncPrefetchWithQueue(get);
 }
 
 async function loadMediaAt(
@@ -611,15 +642,14 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     if (state.shuffle) {
       set({ shuffle: false, shuffleOrder: [], shuffleStep: currentQueueIndex(state) });
       invalidatePrefetch();
-      schedulePrefetchNext(get);
+      syncPrefetchWithQueue(get);
       return;
     }
 
     const queueIndex = currentQueueIndex(state);
     const shuffleOrder = buildShuffleOrder(state.queue.length, queueIndex >= 0 ? queueIndex : 0);
     set({ shuffle: true, shuffleOrder, shuffleStep: 0 });
-    invalidatePrefetch();
-    schedulePrefetchNext(get);
+    syncPrefetchWithQueue(get);
   },
 
   cycleRepeatMode: () => {
@@ -629,8 +659,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       one: "none",
     };
     set({ repeatMode: next[get().repeatMode] });
-    invalidatePrefetch();
-    schedulePrefetchNext(get);
+    syncPrefetchWithQueue(get);
   },
 
   playTrack: async (track, queue = [], options) => {
@@ -965,8 +994,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
     set({ queue: nextQueue, shuffleOrder, shuffleStep });
     persistSnapshot(get());
-    invalidatePrefetch();
-    schedulePrefetchNext(get);
+    syncPrefetchWithQueue(get);
   },
 
   clearUpcoming: () => {
@@ -989,7 +1017,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       shuffleStep: 0,
     });
     persistSnapshot(get());
-    invalidatePrefetch();
+    syncPrefetchWithQueue(get);
   },
 
   reorderQueue: (fromQueueIndex: number, toQueueIndex: number) => {
@@ -1005,8 +1033,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       const nextOrder = moveInShuffleOrder(state.shuffleOrder, fromQueueIndex, toQueueIndex);
       set({ shuffleOrder: nextOrder });
       persistSnapshot(get());
-      invalidatePrefetch();
-      schedulePrefetchNext(get);
+      syncPrefetchWithQueue(get);
       return;
     }
 
@@ -1022,8 +1049,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
     set({ queue: nextQueue, shuffleStep });
     persistSnapshot(get());
-    invalidatePrefetch();
-    schedulePrefetchNext(get);
+    syncPrefetchWithQueue(get);
   },
 
   addToQueue: (track: Track) => {
@@ -1039,8 +1065,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     set({ queue: nextQueue, shuffleOrder });
     if (state.current) {
       persistSnapshot(get());
-      invalidatePrefetch();
-      schedulePrefetchNext(get);
+      syncPrefetchWithQueue(get);
     }
   },
 
