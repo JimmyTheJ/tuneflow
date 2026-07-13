@@ -64,11 +64,11 @@ export function AdminIntegrationsPage() {
   }, []);
 
   useEffect(() => {
-    if (user?.is_admin !== true) return;
+    if (user?.is_root_admin !== true) return;
     void load();
-  }, [load, user?.is_admin]);
+  }, [load, user?.is_root_admin]);
 
-  if (user?.is_admin !== true) {
+  if (user?.is_root_admin !== true) {
     return (
       <div className="page">
         <h1>Integrations</h1>

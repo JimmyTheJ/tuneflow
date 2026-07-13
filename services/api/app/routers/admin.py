@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import require_admin
+from app.auth import require_root_admin
 from app.database import get_db
 from app.models import User
 from app.schemas import (
@@ -31,7 +31,7 @@ router = APIRouter(prefix="/admin/cache", tags=["admin"])
 
 @router.get("/stats", response_model=CacheStats)
 async def cache_stats(
-    _: User = Depends(require_admin),
+    _: User = Depends(require_root_admin),
     db: AsyncSession = Depends(get_db),
 ) -> CacheStats:
     return CacheStats(**await get_cache_stats(db))
@@ -39,7 +39,7 @@ async def cache_stats(
 
 @router.get("/settings", response_model=CacheSettingsRead)
 async def get_cache_settings(
-    _: User = Depends(require_admin),
+    _: User = Depends(require_root_admin),
     db: AsyncSession = Depends(get_db),
 ) -> CacheSettingsRead:
     settings = await get_system_settings(db)
@@ -49,7 +49,7 @@ async def get_cache_settings(
 @router.put("/settings", response_model=CacheSettingsRead)
 async def update_cache_settings(
     payload: CacheSettingsUpdate,
-    _: User = Depends(require_admin),
+    _: User = Depends(require_root_admin),
     db: AsyncSession = Depends(get_db),
 ) -> CacheSettingsRead:
     settings = await get_system_settings(db)
@@ -66,7 +66,7 @@ async def cache_entries(
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=50, ge=1, le=200),
     user_id: int | None = Query(default=None),
-    _: User = Depends(require_admin),
+    _: User = Depends(require_root_admin),
     db: AsyncSession = Depends(get_db),
 ) -> list[CacheEntryRead]:
     entries = await list_cache_entries_with_titles(db, offset=offset, limit=limit, user_id=user_id)
@@ -75,7 +75,7 @@ async def cache_entries(
 
 @router.post("/backfill", response_model=CachePurgeResult)
 async def backfill_cache(
-    _: User = Depends(require_admin),
+    _: User = Depends(require_root_admin),
     db: AsyncSession = Depends(get_db),
 ) -> CachePurgeResult:
     created = await backfill_orphaned_files(db)
@@ -84,7 +84,7 @@ async def backfill_cache(
 
 @router.post("/cleanup", response_model=CachePurgeResult)
 async def run_cleanup(
-    _: User = Depends(require_admin),
+    _: User = Depends(require_root_admin),
     db: AsyncSession = Depends(get_db),
 ) -> CachePurgeResult:
     deleted, freed = await run_retention_cleanup(db)
@@ -95,7 +95,7 @@ async def run_cleanup(
 async def clear_cache(
     older_than_days: int | None = Query(default=None, ge=1),
     user_id: int | None = Query(default=None),
-    _: User = Depends(require_admin),
+    _: User = Depends(require_root_admin),
     db: AsyncSession = Depends(get_db),
 ) -> CachePurgeResult:
     if older_than_days is not None and user_id is not None:
@@ -118,7 +118,7 @@ async def clear_cache(
 @router.post("/bulk-delete", response_model=CachePurgeResult)
 async def bulk_delete_cache_entries(
     payload: CacheBulkDelete,
-    _: User = Depends(require_admin),
+    _: User = Depends(require_root_admin),
     db: AsyncSession = Depends(get_db),
 ) -> CachePurgeResult:
     deleted, freed = await purge_videos(db, payload.video_ids)
@@ -130,7 +130,7 @@ async def bulk_delete_cache_entries(
 @router.delete("/{video_id}", response_model=CachePurgeResult)
 async def clear_cache_entry(
     video_id: str,
-    _: User = Depends(require_admin),
+    _: User = Depends(require_root_admin),
     db: AsyncSession = Depends(get_db),
 ) -> CachePurgeResult:
     deleted, freed = await purge_video(db, video_id)

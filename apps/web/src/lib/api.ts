@@ -7,6 +7,7 @@ import type {
   CacheStats,
   ChildProfile,
   ChildUsageToday,
+  Household,
   LikeEntry,
   LlmStatus,
   ParentalSettings,
@@ -15,6 +16,7 @@ import type {
   PlayHistoryEntry,
   Playlist,
   PlaylistDetail,
+  RoleProfile,
   ScrobblerConnection,
   ScrobblerConnectionStatus,
   ScrobblerLinkStart,
@@ -111,9 +113,9 @@ export const api = {
     username: string;
     password: string;
     display_name: string;
-    role: "adult" | "child";
+    role_profile_ids: number[];
   }) => request<User>("/api/users", { method: "POST", body: payload }),
-  updateUser: (userId: number, payload: { display_name?: string; is_active?: boolean }) =>
+  updateUser: (userId: number, payload: { display_name?: string; is_active?: boolean; role_profile_ids?: number[] }) =>
     request<User>(`/api/users/${userId}`, { method: "PATCH", body: payload }),
   resetPassword: (userId: number, password: string) =>
     request<void>(`/api/users/${userId}/reset-password`, { method: "POST", body: { password } }),
@@ -121,10 +123,20 @@ export const api = {
   restoreUser: (userId: number) => request<User>(`/api/users/${userId}/restore`, { method: "POST" }),
   permanentlyDeleteUser: (userId: number) =>
     request<void>(`/api/users/${userId}/permanent`, { method: "DELETE" }),
-  grantAdmin: (userId: number) => request<User>(`/api/users/${userId}/grant-admin`, { method: "POST" }),
-  transferAdmin: (userId: number) =>
-    request<User>(`/api/users/${userId}/transfer-admin`, { method: "POST" }),
-  relinquishAdmin: () => request<User>("/api/users/relinquish-admin", { method: "POST" }),
+  listHouseholds: () => request<Household[]>("/api/households"),
+  createHousehold: (payload: {
+    name: string;
+    admin_username: string;
+    admin_password: string;
+    admin_display_name: string;
+  }) => request<Household>("/api/households", { method: "POST", body: payload }),
+  listRoleProfiles: () => request<RoleProfile[]>("/api/role-profiles"),
+  createRoleProfile: (payload: { name: string; permissions: string[]; is_public?: boolean }) =>
+    request<RoleProfile>("/api/role-profiles", { method: "POST", body: payload }),
+  updateRoleProfile: (
+    profileId: number,
+    payload: { name?: string; permissions?: string[]; is_public?: boolean },
+  ) => request<RoleProfile>(`/api/role-profiles/${profileId}`, { method: "PATCH", body: payload }),
   parentPinStatus: () => request<ParentPinStatus>("/api/auth/parent-pin/status"),
   parentPinEnforced: () => request<ParentPinEnforced>("/api/auth/parent-pin/enforced"),
   setParentPin: (pin: string) => request<void>("/api/auth/parent-pin", { method: "PUT", body: { pin } }),

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { HourPicker } from "@/components/HourPicker";
 import { TrackRow } from "@/components/TrackRow";
+import { canManageParentalControls } from "@/lib/permissions";
 import { api } from "@/lib/api";
 import { useAuthStore } from "@/stores/authStore";
 import type { ChildProfile, ChildUsageToday, PlayHistoryEntry } from "@/types";
@@ -70,7 +71,7 @@ export function ParentalPage() {
     await load();
   };
 
-  if (user?.role !== "parent") return <Navigate to="/settings" replace />;
+  if (!canManageParentalControls(user)) return <Navigate to="/settings" replace />;
 
   return (
     <div className="page">

@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.database import SessionLocal, init_db
 from app.middleware import SecurityHeadersMiddleware
-from app.routers import admin, ai, auth, history, likes, music, parental, playlists, scrobbler, users
+from app.routers import admin, ai, auth, history, households, likes, music, parental, playlists, role_profiles, scrobbler, users
 
 
 async def _cache_cleanup_worker() -> None:
@@ -63,6 +63,8 @@ app.add_middleware(
 
 app.include_router(auth.router, prefix="/api")
 app.include_router(admin.router, prefix="/api")
+app.include_router(households.router, prefix="/api")
+app.include_router(role_profiles.router, prefix="/api")
 app.include_router(users.router, prefix="/api")
 app.include_router(parental.router, prefix="/api")
 app.include_router(ai.router, prefix="/api")

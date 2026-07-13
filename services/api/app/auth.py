@@ -7,11 +7,14 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.database import get_db
-from app.models import ParentalSettings, PlayHistory, User, UserRole
-from app.schemas import ParentalSettingsRead
+from app.models import ParentalSettings, PlayHistory, RoleProfile, User, UserRoleAssignment
+from app.permissions import Permission
+from app.schemas import ParentalSettingsRead, RoleProfileSummary, UserRead
 from app.security import decode_access_token
+from app.services.roles import load_user_permissions, user_has_permission, user_subject_to_parental_controls
 
 security = HTTPBearer(auto_error=False)
 
@@ -62,6 +65,52 @@ def settings_to_read(settings: ParentalSettings) -> ParentalSettingsRead:
     )
 
 
+def role_profile_to_summary(profile: RoleProfile) -> RoleProfileSummary:
+    return RoleProfileSummary(
+        id=profile.id,
+        name=profile.name,
+        slug=profile.slug,
+        is_global=profile.is_global,
+    )
+
+
+async def build_user_read(db: AsyncSession, user: User) -> UserRead:
+    if not user.role_assignments:
+        result = await db.execute(
+            select(User)
+            .options(
+                selectinload(User.role_assignments).selectinload(UserRoleAssignment.role_profile),
+                selectinload(User.household),
+            )
+            .where(User.id == user.id)
+        )
+        loaded = result.scalar_one_or_none()
+        if loaded is not None:
+            user = loaded
+
+    permissions = sorted(await load_user_permissions(db, user))
+    profiles = [
+        role_profile_to_summary(assignment.role_profile)
+        for assignment in user.role_assignments
+        if assignment.role_profile is not None
+    ]
+    profiles.sort(key=lambda profile: (not profile.is_global, profile.name.lower()))
+
+    return UserRead(
+        id=user.id,
+        username=user.username,
+        display_name=user.display_name,
+        household_id=user.household_id,
+        household_name=user.household.name if user.household else None,
+        is_root_admin=user.is_root_admin,
+        is_active=user.is_active,
+        role_profiles=profiles,
+        permissions=permissions,
+        deleted_at=user.deleted_at,
+        created_at=user.created_at,
+    )
+
+
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(security),
     db: AsyncSession = Depends(get_db),
@@ -91,7 +140,14 @@ async def _user_from_token(raw_token: str, db: AsyncSession) -> User:
     except JWTError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token") from exc
 
-    result = await db.execute(select(User).where(User.username == username))
+    result = await db.execute(
+        select(User)
+        .options(
+            selectinload(User.role_assignments).selectinload(UserRoleAssignment.role_profile),
+            selectinload(User.household),
+        )
+        .where(User.username == username)
+    )
     user = result.scalar_one_or_none()
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
@@ -102,26 +158,72 @@ async def _user_from_token(raw_token: str, db: AsyncSession) -> User:
     return user
 
 
-async def require_parent(current_user: User = Depends(get_current_user)) -> User:
-    if current_user.role != UserRole.parent:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Parent access required")
+def require_permission(permission: Permission):
+    async def _dependency(
+        current_user: User = Depends(get_current_user),
+        db: AsyncSession = Depends(get_db),
+    ) -> User:
+        if current_user.is_root_admin:
+            return current_user
+        if not await user_has_permission(db, current_user, permission):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
+        return current_user
+
+    return _dependency
+
+
+async def require_root_admin(current_user: User = Depends(get_current_user)) -> User:
+    if not current_user.is_root_admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Root admin access required")
     return current_user
 
 
-async def require_admin(current_user: User = Depends(get_current_user)) -> User:
-    if not current_user.is_admin:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+async def require_manage_members(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    if current_user.is_root_admin:
+        return current_user
+    if not await user_has_permission(db, current_user, Permission.MANAGE_HOUSEHOLD_MEMBERS):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Household member management required")
     return current_user
 
 
-async def require_parent_or_admin(current_user: User = Depends(get_current_user)) -> User:
-    if current_user.role != UserRole.parent and not current_user.is_admin:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Parent or admin access required")
+async def require_manage_members_or_root(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    if current_user.is_root_admin:
+        return current_user
+    if await user_has_permission(db, current_user, Permission.MANAGE_HOUSEHOLD_MEMBERS):
+        return current_user
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
+
+
+async def require_manage_parental_controls(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    if current_user.is_root_admin:
+        return current_user
+    if not await user_has_permission(db, current_user, Permission.MANAGE_PARENTAL_CONTROLS):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Parental controls access required")
+    return current_user
+
+
+async def require_set_parent_pin(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    if current_user.is_root_admin:
+        return current_user
+    if not await user_has_permission(db, current_user, Permission.SET_PARENT_PIN):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Parent PIN management required")
     return current_user
 
 
 async def get_child_settings(db: AsyncSession, user: User) -> ParentalSettings | None:
-    if user.role != UserRole.child:
+    if not await user_subject_to_parental_controls(db, user):
         return None
     result = await db.execute(select(ParentalSettings).where(ParentalSettings.child_user_id == user.id))
     return result.scalar_one_or_none()
@@ -200,3 +302,10 @@ async def enforce_child_access(db: AsyncSession, user: User) -> ParentalSettings
             )
 
     return settings
+
+
+async def assert_same_household(actor: User, target: User) -> None:
+    if actor.is_root_admin:
+        return
+    if actor.household_id is None or target.household_id is None or actor.household_id != target.household_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cross-household access denied")

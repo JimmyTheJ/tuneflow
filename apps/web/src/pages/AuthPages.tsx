@@ -56,8 +56,8 @@ export function LoginPage() {
 export function SetupPage() {
   const setup = useAuthStore((s) => s.setup);
   const navigate = useNavigate();
-  const [displayName, setDisplayName] = useState("Parent");
-  const [username, setUsername] = useState("parent");
+  const [displayName, setDisplayName] = useState("Administrator");
+  const [username, setUsername] = useState("admin");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
 
@@ -76,7 +76,10 @@ export function SetupPage() {
     <div className="auth-page">
       <form className="auth-card" onSubmit={(e) => void submit(e)}>
         <h1>Welcome to Tuneflow</h1>
-        <p className="muted">Create the local parent account for your household. LDAP can be added later.</p>
+        <p className="muted">
+          Create the root administrator account for this server. Root admins manage households and system settings but
+          are not part of any household.
+        </p>
         <input className="input" placeholder="Display name" value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
         <input className="input" placeholder="Username" value={username} onChange={(e) => setUsername(e.target.value)} />
         <input

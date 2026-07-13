@@ -3,6 +3,7 @@ import { Link, Navigate } from "react-router-dom";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { api } from "@/lib/api";
 import { useAuthStore } from "@/stores/authStore";
+import { formatRoleProfiles } from "@/lib/permissions";
 import type { User } from "@/types";
 
 type PendingAction =
@@ -31,7 +32,7 @@ export function DeletedUsersPage() {
     void load().catch((err) => setError(err instanceof Error ? err.message : "Failed to load"));
   }, [load]);
 
-  if (user?.is_admin !== true) return <Navigate to="/settings" replace />;
+  if (user?.is_root_admin !== true) return <Navigate to="/settings" replace />;
 
   const runAction = async () => {
     if (!pending) return;
@@ -78,7 +79,7 @@ export function DeletedUsersPage() {
             <div>
               <div className="track-title">{m.display_name}</div>
               <div className="track-subtitle">
-                @{m.username} · {m.role} · deleted {formatDeletedAt(m.deleted_at)}
+                @{m.username} · {formatRoleProfiles(m.role_profiles)} · deleted {formatDeletedAt(m.deleted_at)}
               </div>
             </div>
             <div className="member-actions">

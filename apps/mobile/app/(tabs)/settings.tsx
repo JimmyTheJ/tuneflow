@@ -5,6 +5,7 @@ import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 
 import { PinModal } from "@/components/PinModal";
 import { api } from "@/lib/api";
+import { canManageMembers, canManageParentalControls, canSetParentPin, formatRoleProfiles, isChildProfile } from "@/lib/permissions";
 import { getApiUrl, setApiUrl } from "@/lib/settings";
 import { useAuthStore } from "@/stores/auth";
 import type { ParentalSettings, ScrobblerConnectionStatus, ScrobblerProviderInfo } from "@/types";
@@ -26,13 +27,15 @@ export default function SettingsScreen() {
   const [pendingLinkTokens, setPendingLinkTokens] = useState<Record<string, string>>({});
   const [scrobblerError, setScrobblerError] = useState<string | null>(null);
 
-  const isChild = user?.role === "child";
-  const isParent = user?.role === "parent";
+  const isChild = isChildProfile(user);
+  const canManageFamily = canManageMembers(user);
+  const canManageParental = canManageParentalControls(user);
+  const canPin = canSetParentPin(user);
 
   useEffect(() => {
     void (async () => {
       setApiUrlState(await getApiUrl());
-      if (isParent) {
+      if (canPin) {
         try {
           const status = await api.parentPinStatus();
           setHasParentPin(status.has_pin);
@@ -48,7 +51,7 @@ export default function SettingsScreen() {
         }
       }
     })();
-  }, [isChild, isParent]);
+  }, [isChild, canPin]);
 
   useEffect(() => {
     void (async () => {
@@ -192,7 +195,7 @@ export default function SettingsScreen() {
         <View style={styles.card}>
           <Text style={styles.label}>Signed in as</Text>
           <Text style={styles.value}>
-            {user.display_name} ({user.role})
+            {user.display_name} ({formatRoleProfiles(user.role_profiles)})
           </Text>
         </View>
       ) : null}
@@ -218,15 +221,20 @@ export default function SettingsScreen() {
         <Text style={styles.secondaryButtonText}>Sign out</Text>
       </Pressable>
 
-      {isParent ? (
-        <>
-          <Pressable style={styles.secondaryButton} onPress={() => router.push("/family")}>
-            <Text style={styles.secondaryButtonText}>Family members</Text>
-          </Pressable>
-          <Pressable style={styles.secondaryButton} onPress={() => router.push("/parental")}>
-            <Text style={styles.secondaryButtonText}>Parental controls</Text>
-          </Pressable>
+      {canManageFamily ? (
+        <Pressable style={styles.secondaryButton} onPress={() => router.push("/family")}>
+          <Text style={styles.secondaryButtonText}>Household members</Text>
+        </Pressable>
+      ) : null}
 
+      {canManageParental ? (
+        <Pressable style={styles.secondaryButton} onPress={() => router.push("/parental")}>
+          <Text style={styles.secondaryButtonText}>Parental controls</Text>
+        </Pressable>
+      ) : null}
+
+      {canPin ? (
+        <>
           <Text style={[styles.heading, { marginTop: 20, fontSize: 22 }]}>Parent PIN</Text>
           <Text style={styles.help}>
             Required for children to switch accounts or sign out on a shared device.

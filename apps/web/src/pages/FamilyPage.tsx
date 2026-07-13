@@ -2,75 +2,92 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, Navigate } from "react-router-dom";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { api } from "@/lib/api";
+import { canManageMembers, canManageParentalControls, formatRoleProfiles } from "@/lib/permissions";
 import { useAuthStore } from "@/stores/authStore";
-import type { User } from "@/types";
+import type { RoleProfile, User } from "@/types";
 
 function canEditUser(current: User, target: User) {
   if (target.deleted_at) return false;
-  if (current.is_admin) return true;
-  if (current.role === "parent") {
-    return target.id === current.id || (target.role !== "parent" && !target.is_admin);
-  }
-  return false;
+  if (current.is_root_admin) return true;
+  if (!canManageMembers(current)) return false;
+  return target.household_id === current.household_id;
 }
 
 function canToggleActive(current: User, target: User) {
-  if (!canEditUser(current, target) || target.id === current.id || target.is_admin) {
-    return false;
-  }
-  if (current.role === "parent" && !current.is_admin && target.role === "parent") {
-    return false;
-  }
+  if (!canEditUser(current, target) || target.id === current.id) return false;
   return true;
 }
 
 function canSoftDelete(current: User, target: User) {
-  return current.is_admin && target.id !== current.id && !target.deleted_at;
+  return current.is_root_admin && target.id !== current.id && !target.deleted_at;
+}
+
+function assignableProfiles(profiles: RoleProfile[]) {
+  return profiles.filter((profile) => profile.slug !== "household_admin");
 }
 
 export function FamilyPage() {
   const user = useAuthStore((s) => s.user);
   const hydrate = useAuthStore((s) => s.hydrate);
   const [members, setMembers] = useState<User[]>([]);
+  const [roleProfiles, setRoleProfiles] = useState<RoleProfile[]>([]);
   const [displayName, setDisplayName] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [role, setRole] = useState<"child" | "adult">("child");
+  const [selectedProfileIds, setSelectedProfileIds] = useState<number[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [editing, setEditing] = useState<User | null>(null);
   const [editDisplayName, setEditDisplayName] = useState("");
   const [editPassword, setEditPassword] = useState("");
+  const [editProfileIds, setEditProfileIds] = useState<number[]>([]);
   const [deleteTarget, setDeleteTarget] = useState<User | null>(null);
   const [toggleTarget, setToggleTarget] = useState<{ user: User; enable: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
-    setMembers(await api.listUsers());
+    const [users, profiles] = await Promise.all([api.listUsers(), api.listRoleProfiles()]);
+    setMembers(users);
+    setRoleProfiles(assignableProfiles(profiles));
   }, []);
 
   useEffect(() => {
     void load().catch((err) => setError(err instanceof Error ? err.message : "Failed to load"));
   }, [load]);
 
-  if (!user || user.role !== "parent") {
+  useEffect(() => {
+    const childProfile = roleProfiles.find((profile) => profile.slug === "child");
+    if (childProfile && selectedProfileIds.length === 0) {
+      setSelectedProfileIds([childProfile.id]);
+    }
+  }, [roleProfiles, selectedProfileIds.length]);
+
+  if (!user || !canManageMembers(user)) {
     return <Navigate to="/settings" replace />;
   }
+
+  const toggleProfile = (profileId: number, selected: number[], setter: (ids: number[]) => void) => {
+    setter(selected.includes(profileId) ? selected.filter((id) => id !== profileId) : [...selected, profileId]);
+  };
 
   const create = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    if (selectedProfileIds.length === 0) {
+      setError("Select at least one role profile");
+      return;
+    }
     try {
       await api.createUser({
         display_name: displayName.trim(),
         username: username.trim().toLowerCase(),
         password,
-        role,
+        role_profile_ids: selectedProfileIds,
       });
       setDisplayName("");
       setUsername("");
       setPassword("");
-      setMessage("Family member added");
+      setMessage("Household member added");
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not create account");
@@ -81,6 +98,7 @@ export function FamilyPage() {
     setEditing(member);
     setEditDisplayName(member.display_name);
     setEditPassword("");
+    setEditProfileIds(member.role_profiles.map((profile) => profile.id));
     setError(null);
   };
 
@@ -94,8 +112,17 @@ export function FamilyPage() {
         setError("Display name is required");
         return;
       }
-      if (trimmedName !== editing.display_name) {
-        await api.updateUser(editing.id, { display_name: trimmedName });
+      if (editProfileIds.length === 0) {
+        setError("Select at least one role profile");
+        return;
+      }
+      const payload: { display_name?: string; role_profile_ids?: number[] } = {};
+      if (trimmedName !== editing.display_name) payload.display_name = trimmedName;
+      if (editProfileIds.join(",") !== editing.role_profiles.map((profile) => profile.id).join(",")) {
+        payload.role_profile_ids = editProfileIds;
+      }
+      if (Object.keys(payload).length > 0) {
+        await api.updateUser(editing.id, payload);
       }
       if (editPassword.trim()) {
         await api.resetPassword(editing.id, editPassword);
@@ -122,7 +149,7 @@ export function FamilyPage() {
       setMessage(
         toggleTarget.enable
           ? `${toggleTarget.user.display_name} can sign in again.`
-          : `${toggleTarget.user.display_name} has been disabled. They remain visible here but cannot sign in.`,
+          : `${toggleTarget.user.display_name} has been disabled.`,
       );
       setToggleTarget(null);
       await load();
@@ -139,9 +166,7 @@ export function FamilyPage() {
     setError(null);
     try {
       await api.softDeleteUser(deleteTarget.id);
-      setMessage(
-        `${deleteTarget.display_name} has been removed. They cannot sign in and are hidden from the family list.`,
-      );
+      setMessage(`${deleteTarget.display_name} has been removed.`);
       setDeleteTarget(null);
       await load();
     } catch (err) {
@@ -153,13 +178,11 @@ export function FamilyPage() {
 
   return (
     <div className="page">
-      <h1>Family members</h1>
+      <h1>Household members</h1>
       <p className="muted">
-        Add accounts for your household. Child accounts get parental controls automatically. Use{" "}
-        <strong>Disable</strong> to block sign-in while keeping the account visible. Use <strong>Delete</strong>{" "}
-        (admin only) to hide a removed account.
+        Manage accounts in {user.household_name ?? "your household"}. Assign one or more role profiles to each member.
       </p>
-      {user.is_admin ? (
+      {user.is_root_admin ? (
         <Link to="/admin/users/deleted" className="accent">
           View deleted accounts →
         </Link>
@@ -172,10 +195,17 @@ export function FamilyPage() {
         <input className="input" placeholder="Display name" value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
         <input className="input" placeholder="Username" value={username} onChange={(e) => setUsername(e.target.value)} />
         <input className="input" type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} />
+        <p className="label">Role profiles</p>
         <div className="chip-row">
-          {(["child", "adult"] as const).map((r) => (
-            <button key={r} type="button" className={role === r ? "chip active" : "chip"} onClick={() => setRole(r)}>
-              {r}
+          {roleProfiles.map((profile) => (
+            <button
+              key={profile.id}
+              type="button"
+              className={selectedProfileIds.includes(profile.id) ? "chip active" : "chip"}
+              onClick={() => toggleProfile(profile.id, selectedProfileIds, setSelectedProfileIds)}
+            >
+              {profile.name}
+              {profile.is_global ? " · default" : ""}
             </button>
           ))}
         </div>
@@ -184,17 +214,16 @@ export function FamilyPage() {
         </button>
       </form>
 
-      <h2 className="section-label">Household</h2>
+      <h2 className="section-label">Members</h2>
       {members.map((m) => (
         <div key={m.id} className={m.is_active ? "member-row" : "member-row member-row-disabled"}>
           <div>
             <div className="track-title">
               {m.display_name}
               {!m.is_active ? <span className="status-badge status-disabled">Disabled</span> : null}
-              {m.is_admin ? <span className="status-badge">Admin</span> : null}
             </div>
             <div className="track-subtitle">
-              @{m.username} · {m.role}
+              @{m.username} · {formatRoleProfiles(m.role_profiles)}
             </div>
           </div>
           <div className="member-actions">
@@ -221,9 +250,11 @@ export function FamilyPage() {
         </div>
       ))}
 
-      <Link to="/parental" className="accent">
-        Manage parental controls →
-      </Link>
+      {canManageParentalControls(user) ? (
+        <Link to="/parental" className="accent">
+          Manage parental controls →
+        </Link>
+      ) : null}
 
       {editing ? (
         <div className="modal-overlay" onClick={() => !busy && setEditing(null)}>
@@ -236,13 +267,26 @@ export function FamilyPage() {
             }}
           >
             <h3>Edit {editing.display_name}</h3>
-            <p className="muted">@{editing.username} · {editing.role}</p>
+            <p className="muted">@{editing.username}</p>
             <input
               className="input"
               placeholder="Display name"
               value={editDisplayName}
               onChange={(e) => setEditDisplayName(e.target.value)}
             />
+            <p className="label">Role profiles</p>
+            <div className="chip-row">
+              {roleProfiles.map((profile) => (
+                <button
+                  key={profile.id}
+                  type="button"
+                  className={editProfileIds.includes(profile.id) ? "chip active" : "chip"}
+                  onClick={() => toggleProfile(profile.id, editProfileIds, setEditProfileIds)}
+                >
+                  {profile.name}
+                </button>
+              ))}
+            </div>
             <input
               className="input"
               type="password"
@@ -263,29 +307,17 @@ export function FamilyPage() {
       ) : null}
 
       <ConfirmDialog
-        visible={toggleTarget !== null && !toggleTarget.enable}
-        title="Disable account?"
+        visible={toggleTarget !== null}
+        title={toggleTarget?.enable ? "Enable account?" : "Disable account?"}
         message={
-          toggleTarget && !toggleTarget.enable
-            ? `Disable "${toggleTarget.user.display_name}" (@${toggleTarget.user.username})? They will not be able to sign in and will be told to contact an administrator. The account stays visible in the family list and is not deleted. Playlists and history are kept.`
+          toggleTarget
+            ? toggleTarget.enable
+              ? `Re-enable "${toggleTarget.user.display_name}"?`
+              : `Disable "${toggleTarget.user.display_name}"? They will not be able to sign in.`
             : ""
         }
-        confirmLabel="Disable account"
-        danger
-        busy={busy}
-        onConfirm={confirmToggleActive}
-        onCancel={() => setToggleTarget(null)}
-      />
-
-      <ConfirmDialog
-        visible={toggleTarget !== null && toggleTarget.enable}
-        title="Enable account?"
-        message={
-          toggleTarget?.enable
-            ? `Re-enable "${toggleTarget.user.display_name}" (@${toggleTarget.user.username})? They will be able to sign in again immediately.`
-            : ""
-        }
-        confirmLabel="Enable account"
+        confirmLabel={toggleTarget?.enable ? "Enable account" : "Disable account"}
+        danger={!toggleTarget?.enable}
         busy={busy}
         onConfirm={confirmToggleActive}
         onCancel={() => setToggleTarget(null)}
@@ -294,11 +326,7 @@ export function FamilyPage() {
       <ConfirmDialog
         visible={deleteTarget !== null}
         title="Remove account?"
-        message={
-          deleteTarget
-            ? `Remove "${deleteTarget.display_name}" (@${deleteTarget.username})? They will immediately be signed out and unable to log in. Their playlists and history are kept and can be restored later from Deleted accounts. This is not a permanent deletion.`
-            : ""
-        }
+        message={deleteTarget ? `Remove "${deleteTarget.display_name}"? They will be signed out immediately.` : ""}
         confirmLabel="Remove account"
         danger
         busy={busy}

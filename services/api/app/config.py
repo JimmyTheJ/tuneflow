@@ -40,7 +40,7 @@ class Settings(BaseSettings):
     bootstrap_username: str = "admin"
     bootstrap_password: str = "changeme"
     bootstrap_display_name: str = "Admin"
-    bootstrap_is_admin: bool = True
+    bootstrap_is_root_admin: bool = True
 
     setup_min_password_length: int = 8
 

@@ -1,14 +1,57 @@
 from datetime import datetime
-from enum import Enum
 
 from pydantic import BaseModel, Field
 
 
-class UserRole(str, Enum):
-    admin = "admin"
-    parent = "parent"
-    adult = "adult"
-    child = "child"
+class RoleProfileRead(BaseModel):
+    id: int
+    name: str
+    slug: str | None = None
+    owner_household_id: int
+    owner_household_name: str
+    is_global: bool
+    is_public: bool
+    is_editable: bool
+    permissions: list[str]
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class RoleProfileCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    permissions: list[str] = Field(default_factory=list)
+    is_public: bool = False
+
+
+class RoleProfileUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    permissions: list[str] | None = None
+    is_public: bool | None = None
+
+
+class RoleProfileSummary(BaseModel):
+    id: int
+    name: str
+    slug: str | None = None
+    is_global: bool
+
+
+class HouseholdRead(BaseModel):
+    id: int
+    name: str
+    is_system: bool
+    member_count: int = 0
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class HouseholdCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    admin_username: str = Field(min_length=2, max_length=80)
+    admin_password: str = Field(min_length=4, max_length=128)
+    admin_display_name: str = Field(min_length=1, max_length=120)
 
 
 class TrackBase(BaseModel):
@@ -27,9 +70,12 @@ class UserRead(BaseModel):
     id: int
     username: str
     display_name: str
-    role: UserRole
-    is_admin: bool
+    household_id: int | None = None
+    household_name: str | None = None
+    is_root_admin: bool
     is_active: bool
+    role_profiles: list[RoleProfileSummary]
+    permissions: list[str]
     deleted_at: datetime | None = None
     created_at: datetime
 
@@ -61,12 +107,13 @@ class UserCreate(BaseModel):
     username: str = Field(min_length=2, max_length=80)
     password: str = Field(min_length=4, max_length=128)
     display_name: str = Field(min_length=1, max_length=120)
-    role: UserRole = UserRole.adult
+    role_profile_ids: list[int] = Field(min_length=1)
 
 
 class UserUpdate(BaseModel):
     display_name: str | None = Field(default=None, min_length=1, max_length=120)
     is_active: bool | None = None
+    role_profile_ids: list[int] | None = Field(default=None, min_length=1)
 
 
 class ResetPasswordRequest(BaseModel):

@@ -1,13 +1,13 @@
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import serialize_json_list
 from app.config import settings
-from app.models import ParentalSettings, User, UserRole
+from app.models import User
 from app.security import hash_password
+from app.services.roles import assign_role_profile, ensure_default_role_profiles, ensure_system_household
 
 
-async def bootstrap_parent_if_needed(db: AsyncSession) -> None:
+async def bootstrap_root_admin_if_needed(db: AsyncSession) -> None:
     if not settings.bootstrap_enabled:
         return
 
@@ -15,24 +15,21 @@ async def bootstrap_parent_if_needed(db: AsyncSession) -> None:
     if count and count > 0:
         return
 
+    system_household = await ensure_system_household(db)
+    await ensure_default_role_profiles(db, system_household)
+
     user = User(
         username=settings.bootstrap_username,
         display_name=settings.bootstrap_display_name,
         password_hash=hash_password(settings.bootstrap_password),
-        role=UserRole.parent,
-        is_admin=settings.bootstrap_is_admin,
+        household_id=None,
+        is_root_admin=True,
     )
     db.add(user)
     await db.commit()
 
 
-async def create_child_settings(db: AsyncSession, child_user_id: int) -> ParentalSettings:
-    settings_row = ParentalSettings(
-        child_user_id=child_user_id,
-        blocked_keywords=serialize_json_list([]),
-        blocked_video_ids=serialize_json_list([]),
-    )
-    db.add(settings_row)
+async def initialize_system_defaults(db: AsyncSession) -> None:
+    system_household = await ensure_system_household(db)
+    await ensure_default_role_profiles(db, system_household)
     await db.commit()
-    await db.refresh(settings_row)
-    return settings_row

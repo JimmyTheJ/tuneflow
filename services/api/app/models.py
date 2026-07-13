@@ -7,16 +7,49 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
 
 
-class UserRole(str, enum.Enum):
-    admin = "admin"
-    parent = "parent"
-    adult = "adult"
-    child = "child"
-
-
 class ScrobblerProvider(str, enum.Enum):
     lastfm = "lastfm"
     librefm = "librefm"
+
+
+class Household(Base):
+    __tablename__ = "households"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    is_system: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    members: Mapped[list["User"]] = relationship(back_populates="household")
+    role_profiles: Mapped[list["RoleProfile"]] = relationship(back_populates="owner_household")
+
+
+class RoleProfile(Base):
+    __tablename__ = "role_profiles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    slug: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
+    owner_household_id: Mapped[int] = mapped_column(ForeignKey("households.id", ondelete="CASCADE"), index=True)
+    is_global: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    is_public: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    permissions: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    owner_household: Mapped[Household] = relationship(back_populates="role_profiles")
+    assignments: Mapped[list["UserRoleAssignment"]] = relationship(back_populates="role_profile")
+
+
+class UserRoleAssignment(Base):
+    __tablename__ = "user_role_assignments"
+    __table_args__ = (UniqueConstraint("user_id", "role_profile_id", name="uq_user_role_profile"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    role_profile_id: Mapped[int] = mapped_column(ForeignKey("role_profiles.id", ondelete="CASCADE"), index=True)
+
+    user: Mapped["User"] = relationship(back_populates="role_assignments")
+    role_profile: Mapped[RoleProfile] = relationship(back_populates="assignments")
 
 
 class User(Base):
@@ -26,13 +59,17 @@ class User(Base):
     username: Mapped[str] = mapped_column(String(80), unique=True, nullable=False, index=True)
     display_name: Mapped[str] = mapped_column(String(120), nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
-    role: Mapped[UserRole] = mapped_column(Enum(UserRole), nullable=False, default=UserRole.adult)
-    is_admin: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    household_id: Mapped[int | None] = mapped_column(ForeignKey("households.id", ondelete="SET NULL"), nullable=True, index=True)
+    is_root_admin: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     parent_pin_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
+    household: Mapped[Household | None] = relationship(back_populates="members")
+    role_assignments: Mapped[list[UserRoleAssignment]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
     parental_settings: Mapped["ParentalSettings | None"] = relationship(
         back_populates="child_user", uselist=False, cascade="all, delete-orphan"
     )

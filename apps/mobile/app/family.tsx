@@ -12,10 +12,14 @@ import {
 } from "react-native";
 
 import { api } from "@/lib/api";
-import type { User } from "@/types";
+import { canManageMembers, formatRoleProfiles } from "@/lib/permissions";
+import { useAuthStore } from "@/stores/auth";
+import type { RoleProfile, User } from "@/types";
 
 export default function FamilyScreen() {
+  const currentUser = useAuthStore((state) => state.user);
   const [members, setMembers] = useState<User[]>([]);
+  const [roleProfiles, setRoleProfiles] = useState<RoleProfile[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -25,12 +29,17 @@ export default function FamilyScreen() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<"child" | "adult">("child");
+  const selectedProfileIds = roleProfiles
+    .filter((profile) => profile.slug === role)
+    .map((profile) => profile.id);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      setMembers(await api.listUsers());
+      const [users, profiles] = await Promise.all([api.listUsers(), api.listRoleProfiles()]);
+      setMembers(users);
+      setRoleProfiles(profiles.filter((profile) => profile.slug === "child" || profile.slug === "adult"));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load family members");
     } finally {
@@ -55,7 +64,7 @@ export default function FamilyScreen() {
         display_name: displayName.trim(),
         username: username.trim().toLowerCase(),
         password,
-        role,
+        role_profile_ids: selectedProfileIds,
       });
       setDisplayName("");
       setUsername("");
@@ -70,7 +79,7 @@ export default function FamilyScreen() {
   };
 
   const toggleActive = async (member: User) => {
-    if (member.role === "parent") {
+    if (!canManageMembers(currentUser) || member.id === currentUser?.id) {
       return;
     }
     setError(null);
@@ -152,11 +161,11 @@ export default function FamilyScreen() {
           <View style={styles.memberMeta}>
             <Text style={styles.memberName}>{member.display_name}</Text>
             <Text style={styles.memberSub}>
-              @{member.username} · {member.role}
+              @{member.username} · {formatRoleProfiles(member.role_profiles)}
               {!member.is_active ? " · disabled" : ""}
             </Text>
           </View>
-          {member.role !== "parent" ? (
+          {canManageMembers(currentUser) && member.id !== currentUser?.id ? (
             <Switch value={member.is_active} onValueChange={() => void toggleActive(member)} />
           ) : null}
         </View>

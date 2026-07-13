@@ -1,12 +1,46 @@
-export type UserRole = "admin" | "parent" | "adult" | "child";
+export type PermissionName =
+  | "system_admin"
+  | "manage_households"
+  | "manage_household_members"
+  | "manage_parental_controls"
+  | "manage_role_profiles"
+  | "set_parent_pin"
+  | "subject_to_parental_controls";
+
+export type RoleProfileSummary = {
+  id: number;
+  name: string;
+  slug?: string | null;
+  is_global: boolean;
+};
+
+export type RoleProfile = RoleProfileSummary & {
+  owner_household_id: number;
+  owner_household_name: string;
+  is_public: boolean;
+  is_editable: boolean;
+  permissions: PermissionName[];
+  created_at: string;
+};
+
+export type Household = {
+  id: number;
+  name: string;
+  is_system: boolean;
+  member_count: number;
+  created_at: string;
+};
 
 export type User = {
   id: number;
   username: string;
   display_name: string;
-  role: UserRole;
-  is_admin: boolean;
+  household_id?: number | null;
+  household_name?: string | null;
+  is_root_admin: boolean;
   is_active: boolean;
+  role_profiles: RoleProfileSummary[];
+  permissions: PermissionName[];
   deleted_at?: string | null;
   created_at: string;
 };

@@ -1,12 +1,38 @@
-export type UserRole = "admin" | "parent" | "adult" | "child";
+export type PermissionName =
+  | "system_admin"
+  | "manage_households"
+  | "manage_household_members"
+  | "manage_parental_controls"
+  | "manage_role_profiles"
+  | "set_parent_pin"
+  | "subject_to_parental_controls";
+
+export type RoleProfileSummary = {
+  id: number;
+  name: string;
+  slug?: string | null;
+  is_global: boolean;
+};
+
+export type RoleProfile = RoleProfileSummary & {
+  owner_household_id: number;
+  owner_household_name: string;
+  is_public: boolean;
+  is_editable: boolean;
+  permissions: PermissionName[];
+  created_at: string;
+};
 
 export type User = {
   id: number;
   username: string;
   display_name: string;
-  role: UserRole;
-  is_admin: boolean;
+  household_id?: number | null;
+  household_name?: string | null;
+  is_root_admin: boolean;
   is_active: boolean;
+  role_profiles: RoleProfileSummary[];
+  permissions: PermissionName[];
   created_at: string;
 };
 
@@ -36,18 +62,7 @@ export type Playlist = {
 };
 
 export type PlaylistDetail = Playlist & {
-  tracks: Array<
-    Track & {
-      id: number;
-      position: number;
-      added_at: string;
-    }
-  >;
-};
-
-export type StreamSelection = {
-  video: boolean;
-  audio: boolean;
+  tracks: Array<Track & { id: number; position: number; added_at: string }>;
 };
 
 export type StreamInfo = Track & {
@@ -65,10 +80,7 @@ export type PlayHistoryEntry = Track & {
   played_at: string;
 };
 
-export type LikeEntry = Track & {
-  id: number;
-  liked_at: string;
-};
+export type LikeEntry = Track & { id: number; liked_at: string };
 
 export type TokenResponse = {
   access_token: string;
@@ -76,9 +88,7 @@ export type TokenResponse = {
   user: User;
 };
 
-export type SetupStatus = {
-  needs_setup: boolean;
-};
+export type SetupStatus = { needs_setup: boolean };
 
 export type ParentalSettings = {
   child_user_id: number;
@@ -92,6 +102,8 @@ export type ParentalSettings = {
   updated_at: string;
 };
 
+export type ChildProfile = { user: User; settings: ParentalSettings };
+
 export type ChildUsageToday = {
   child_user_id: number;
   listened_minutes_today: number;
@@ -99,18 +111,8 @@ export type ChildUsageToday = {
   remaining_minutes: number | null;
 };
 
-export type ChildProfile = {
-  user: User;
-  settings: ParentalSettings;
-};
-
-export type ParentPinStatus = {
-  has_pin: boolean;
-};
-
-export type ParentPinEnforced = {
-  enforced: boolean;
-};
+export type ParentPinStatus = { has_pin: boolean };
+export type ParentPinEnforced = { enforced: boolean };
 
 export type LlmStatus = {
   enabled: boolean;
@@ -121,17 +123,8 @@ export type LlmStatus = {
   detail?: string | null;
 };
 
-export type AiSuggestion = {
-  query: string;
-  reason: string;
-  tracks: Track[];
-};
-
-export type AiRecommendations = {
-  summary: string;
-  suggestions: AiSuggestion[];
-};
-
+export type AiSuggestion = { query: string; reason: string; tracks: Track[] };
+export type AiRecommendations = { summary: string; suggestions: AiSuggestion[] };
 export type AiInsights = {
   summary: string;
   top_artists: string[];

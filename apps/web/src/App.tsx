@@ -8,6 +8,7 @@ import { usePlayerStore } from "@/stores/playerStore";
 import { LoginPage, SetupPage } from "@/pages/AuthPages";
 import { DiscoverPage } from "@/pages/DiscoverPage";
 import { FamilyPage } from "@/pages/FamilyPage";
+import { HouseholdsPage } from "@/pages/HouseholdsPage";
 import { HomePage } from "@/pages/HomePage";
 import { LibraryPage } from "@/pages/LibraryPage";
 import { ParentalPage } from "@/pages/ParentalPage";
@@ -67,6 +68,7 @@ export function App() {
           <Route path="search" element={<SearchPage />} />
           <Route path="library" element={<LibraryPage />} />
           <Route path="settings" element={<SettingsPage />} />
+          <Route path="admin/households" element={<HouseholdsPage />} />
           <Route path="admin/cache" element={<AdminCachePage />} />
           <Route path="admin/integrations" element={<AdminIntegrationsPage />} />
           <Route path="admin/users/deleted" element={<DeletedUsersPage />} />

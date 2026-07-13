@@ -118,11 +118,12 @@ export const api = {
   unlikeTrack: (videoId: string) => request<void>(`/api/likes/${videoId}`, { method: "DELETE" }),
 
   listUsers: () => request<User[]>("/api/users"),
+  listRoleProfiles: () => request<import("@/types").RoleProfile[]>("/api/role-profiles"),
   createUser: (payload: {
     username: string;
     password: string;
     display_name: string;
-    role: "adult" | "child";
+    role_profile_ids: number[];
   }) => request<User>("/api/users", { method: "POST", body: payload }),
   updateUser: (userId: number, payload: { display_name?: string; is_active?: boolean }) =>
     request<User>(`/api/users/${userId}`, { method: "PATCH", body: payload }),

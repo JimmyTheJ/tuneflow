@@ -22,7 +22,7 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 async def init_db() -> None:
     from app import models  # noqa: F401
     from app.migrate import run_migrations
-    from app.services.bootstrap import bootstrap_parent_if_needed
+    from app.services.bootstrap import bootstrap_root_admin_if_needed, initialize_system_defaults
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -30,4 +30,5 @@ async def init_db() -> None:
     await run_migrations()
 
     async with SessionLocal() as session:
-        await bootstrap_parent_if_needed(session)
+        await initialize_system_defaults(session)
+        await bootstrap_root_admin_if_needed(session)
