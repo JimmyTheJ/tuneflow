@@ -26,7 +26,7 @@ services:
     build:
       context: ./apps/web
       args:
-        VITE_API_URL: ${VITE_API_URL:-http://localhost:8010}
+        VITE_API_URL: ${VITE_API_URL-http://localhost:8010}
     ports:
       - "${WEB_PORT:-3010}:80"
     depends_on:

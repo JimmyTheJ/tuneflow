@@ -90,11 +90,67 @@ On Linux/macOS, use `./compose.sh` instead of `.\compose.ps1`.
 
 Override host ports in `.env`: `API_PORT=8020`, `WEB_PORT=3020`.
 
-Set `VITE_API_URL` in `.env` before building if the browser needs a different API address (e.g. LAN IP).
+Set `VITE_API_URL` in `.env` before building if the browser needs a different API address (e.g. LAN IP). For a single public subdomain behind a reverse proxy, leave it empty so the browser uses same-origin `/api` (the web container proxies those requests to `tuneflow-api`).
 
-To attach API and web to an existing reverse-proxy network (e.g. nginx), set `DOCKER_SHARED_NETWORK=nginx_network` in `.env` and use `compose.ps1` / `compose.sh` (not bare `docker compose` — the wrapper reads `.env` and includes the shared-network overlay). The network must already exist; nginx can then reach `http://tuneflow-web:80` and `http://tuneflow-api:8000`.
+To attach API and web to an existing reverse-proxy network (e.g. nginx), set `DOCKER_SHARED_NETWORK=nginx_network` in `.env` and use `compose.ps1` / `compose.sh` (not bare `docker compose` — the wrapper reads `.env` and includes the shared-network overlay). The network must already exist.
 
 Verify with `./compose.sh config | grep -A2 'networks:'` — you should see both the project default network and `name: nginx_network`.
+
+### Nginx Proxy Manager (or similar)
+
+A **502** here almost always means the proxy cannot reach the upstream container — not a DNS/DDNS issue. Your other subdomains working only proves NPM itself is fine; this proxy host still needs the Tuneflow-specific container name and internal port.
+
+**Proxy Host settings (one host for the UI):**
+
+| Field | Value |
+|-------|-------|
+| Domain | `music.example.com` (your subdomain) |
+| Scheme | `http` |
+| Forward Hostname / IP | `tuneflow-web` |
+| Forward Port | `80` |
+| Block Common Exploits | on (usually fine) |
+| Websockets Support | off (not required) |
+
+Common mistakes that cause 502:
+
+- Forwarding to `web`, `api`, or `localhost` instead of `tuneflow-web`
+- Using host port `3010` instead of container port `80` (`3010` is only for browser → host access)
+- Using `https` to the upstream (the Tuneflow web container only serves plain HTTP on port 80)
+- NPM container not attached to the same Docker network as Tuneflow
+
+**Run these on the server** (replace the NPM container name if yours differs — find it with `docker ps | grep -i proxy`):
+
+```bash
+# Tuneflow containers should appear here
+docker network inspect nginx_network --format '{{range .Containers}}{{.Name}} {{end}}'
+
+# Test from inside NPM — this is the same path NPM uses
+docker exec nginx-proxy-manager curl -sv http://tuneflow-web:80/ 2>&1 | head -20
+docker exec nginx-proxy-manager curl -sv http://tuneflow-web/health 2>&1 | head -20
+
+# Tuneflow container health
+docker ps --filter name=tuneflow-
+docker logs --tail 50 tuneflow-web
+docker logs --tail 50 tuneflow-api
+```
+
+If the `curl` from inside NPM fails, fix Docker networking or container names first. If `curl` works but the browser still shows 502, the NPM proxy host forward settings are wrong (or stale — edit, save, and try again).
+
+NPM error details are often in per-host log files inside the container (`/data/logs/`), not in `docker logs nginx_proxy_manager`.
+
+**After the UI loads**, set production values in `.env` and rebuild:
+
+```env
+VITE_API_URL=
+CORS_ORIGINS=https://music.example.com
+TRUST_PROXY_HEADERS=true
+JWT_SECRET=<long-random-secret>
+DOCS_ENABLED=false
+```
+
+Then `./compose.sh up -d --build tuneflow-web tuneflow-api`.
+
+Optional second proxy host for direct API access (debugging only): forward `tuneflow-api:8000` over `http`.
 
 ### Persistent data (Docker)
 
