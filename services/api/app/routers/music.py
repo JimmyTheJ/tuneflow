@@ -104,7 +104,7 @@ async def get_stream(
     return stream
 
 
-@router.get("/audio/{video_id}")
+@router.get("/audio/{video_id}", response_model=None)
 async def stream_audio(
     video_id: str,
     title: str | None = Query(default=None),
@@ -112,7 +112,7 @@ async def stream_audio(
     download: bool = Query(default=False),
     current_user: User = Depends(get_current_user_from_token),
     db: AsyncSession = Depends(get_db),
-) -> FileResponse | StreamingResponse:
+):
     child_settings = await enforce_child_access(db, current_user)
 
     try:
