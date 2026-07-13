@@ -76,7 +76,7 @@ async def setup_root_admin(
         username=payload.username.strip().lower(),
         display_name=payload.display_name.strip(),
         password_hash=hash_password(payload.password),
-        household_id=None,
+        household_id=system_household.id,
         is_root_admin=True,
     )
     db.add(user)
@@ -139,7 +139,7 @@ async def parent_pin_enforced(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ParentPinEnforced:
-    if current_user.is_root_admin or current_user.household_id is None:
+    if current_user.is_root_admin:
         return ParentPinEnforced(enforced=False)
 
     result = await db.execute(

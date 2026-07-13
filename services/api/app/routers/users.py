@@ -7,12 +7,13 @@ from sqlalchemy.orm import selectinload
 
 from app.auth import assert_same_household, build_user_read, require_manage_members, require_root_admin
 from app.database import get_db
-from app.models import User, UserRoleAssignment
+from app.models import Household, User, UserRoleAssignment
 from app.permissions import Permission
 from app.schemas import ResetPasswordRequest, UserCreate, UserRead, UserUpdate
 from app.security import hash_password
 from app.services.roles import (
     create_child_settings,
+    household_allows_members,
     parse_permissions,
     replace_user_role_profiles,
     user_has_permission,
@@ -105,6 +106,11 @@ async def create_user(
         )
     if current_user.household_id is None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Household membership required")
+    if not await household_allows_members(db, current_user.household_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="The system household cannot have additional members",
+        )
 
     username = payload.username.strip().lower()
     existing = await db.execute(select(User).where(User.username == username))

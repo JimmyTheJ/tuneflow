@@ -22,7 +22,7 @@ async def bootstrap_root_admin_if_needed(db: AsyncSession) -> None:
         username=settings.bootstrap_username,
         display_name=settings.bootstrap_display_name,
         password_hash=hash_password(settings.bootstrap_password),
-        household_id=None,
+        household_id=system_household.id,
         is_root_admin=True,
     )
     db.add(user)

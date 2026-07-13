@@ -77,8 +77,8 @@ export function SetupPage() {
       <form className="auth-card" onSubmit={(e) => void submit(e)}>
         <h1>Welcome to Tuneflow</h1>
         <p className="muted">
-          Create the root administrator account for this server. Root admins manage households and system settings but
-          are not part of any household.
+          Create the root administrator account for this server. Root admins belong to the system household, manage
+          households and system settings, and cannot add members to that household.
         </p>
         <input className="input" placeholder="Display name" value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
         <input className="input" placeholder="Username" value={username} onChange={(e) => setUsername(e.target.value)} />

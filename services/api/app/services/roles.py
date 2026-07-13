@@ -27,6 +27,11 @@ async def get_system_household(db: AsyncSession) -> Household | None:
     return result.scalar_one_or_none()
 
 
+async def household_allows_members(db: AsyncSession, household_id: int) -> bool:
+    household = await db.get(Household, household_id)
+    return household is not None and not household.is_system
+
+
 async def ensure_system_household(db: AsyncSession) -> Household:
     household = await get_system_household(db)
     if household is not None:
