@@ -92,7 +92,9 @@ Override host ports in `.env`: `API_PORT=8020`, `WEB_PORT=3020`.
 
 Set `VITE_API_URL` in `.env` before building if the browser needs a different API address (e.g. LAN IP).
 
-To attach API and web to an existing reverse-proxy network (e.g. nginx), set `DOCKER_SHARED_NETWORK=nginx_network` in `.env` and use `compose.ps1` / `compose.sh`. The network must already exist; nginx can then reach `http://tuneflow-web:80` and `http://tuneflow-api:8000`.
+To attach API and web to an existing reverse-proxy network (e.g. nginx), set `DOCKER_SHARED_NETWORK=nginx_network` in `.env` and use `compose.ps1` / `compose.sh` (not bare `docker compose` — the wrapper reads `.env` and includes the shared-network overlay). The network must already exist; nginx can then reach `http://tuneflow-web:80` and `http://tuneflow-api:8000`.
+
+Verify with `./compose.sh config | grep -A2 'networks:'` — you should see both the project default network and `name: nginx_network`.
 
 ### Persistent data (Docker)
 

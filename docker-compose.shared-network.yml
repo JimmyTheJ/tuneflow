@@ -6,9 +6,11 @@
 services:
   tuneflow-api:
     networks:
+      - default
       - shared
   tuneflow-web:
     networks:
+      - default
       - shared
 
 networks:
