@@ -292,6 +292,58 @@ textarea {
   padding: 8px 12px 6px;
 }
 
+.like-btn {
+  background: none;
+  border: none;
+  color: #a3a3a3;
+  cursor: pointer;
+  line-height: 1;
+  padding: 6px;
+  flex-shrink: 0;
+}
+
+.like-btn:hover:not(:disabled) {
+  color: #fff;
+}
+
+.like-btn-active {
+  color: #22c55e;
+}
+
+.like-btn-active:hover:not(:disabled) {
+  color: #4ade80;
+}
+
+.like-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.like-btn-sm {
+  font-size: 1rem;
+  padding: 4px;
+}
+
+.like-btn-md {
+  font-size: 1.2rem;
+}
+
+.like-btn-lg {
+  font-size: 1.6rem;
+  padding: 4px 8px;
+}
+
+.player-page-title-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.player-page-artist {
+  margin: 0;
+}
+
 .track-thumb {
   width: 52px;
   height: 52px;

@@ -1,5 +1,6 @@
 import { Link, useLocation } from "react-router-dom";
 import { useState } from "react";
+import { LikeButton } from "@/components/LikeButton";
 import { PlayerProgress } from "@/components/PlayerProgress";
 import { PlayerQueueDrawer } from "@/components/PlayerQueueDrawer";
 import { PlayerTransport } from "@/components/PlayerTransport";
@@ -69,6 +70,7 @@ export function MiniPlayer() {
             )}
           </Link>
           <div className="mini-player-actions">
+            {current ? <LikeButton track={current} size="sm" /> : null}
             {current && queue.length > 0 ? (
               <button
                 type="button"

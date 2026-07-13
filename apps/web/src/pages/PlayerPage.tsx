@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { LikeButton } from "@/components/LikeButton";
 import { PlayerProgress } from "@/components/PlayerProgress";
 import { PlayerQueuePanel } from "@/components/PlayerQueuePanel";
 import { PlayerTransport } from "@/components/PlayerTransport";
@@ -108,7 +109,10 @@ export function PlayerPage() {
         />
       )}
       <h1>{current.title}</h1>
-      <p className="muted">{current.artist ?? "Unknown artist"}</p>
+      <div className="player-page-title-row">
+        <p className="muted player-page-artist">{current.artist ?? "Unknown artist"}</p>
+        <LikeButton track={current} size="lg" />
+      </div>
       <div className="player-page-controls">
         <StreamModeToggle />
         <PlayerTransport size="large" showQueueControls />
