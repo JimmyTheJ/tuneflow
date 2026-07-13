@@ -31,7 +31,7 @@ export type TrackDownloadMetadata = {
   youtube_url: string;
   mime_type?: string | null;
   playable_video_id?: string | null;
-  playlist: {
+  playlist?: {
     id: number;
     name: string;
     position: number;
@@ -41,8 +41,7 @@ export type TrackDownloadMetadata = {
 };
 
 type FetchedTrack = {
-  track: Track & { id: number; position: number };
-  position: number;
+  track: Track;
   stream: StreamInfo;
   blob: Blob;
   extension: string;
@@ -71,10 +70,10 @@ async function pickDownloadDirectory(): Promise<FileSystemDirectoryHandle> {
 }
 
 function buildMetadata(
-  track: Track & { id: number; position: number },
   stream: StreamInfo,
-  playlist: PlaylistDetail,
   mimeType: string | null,
+  playlist?: PlaylistDetail,
+  playlistTrack?: Track & { id: number; position: number },
 ): TrackDownloadMetadata {
   return {
     video_id: stream.video_id,
@@ -87,20 +86,26 @@ function buildMetadata(
     youtube_url: `https://www.youtube.com/watch?v=${stream.video_id}`,
     mime_type: mimeType,
     playable_video_id: stream.playable_video_id,
-    playlist: {
-      id: playlist.id,
-      name: playlist.name,
-      position: track.position,
-      track_id: track.id,
-    },
+    playlist:
+      playlist && playlistTrack
+        ? {
+            id: playlist.id,
+            name: playlist.name,
+            position: playlistTrack.position,
+            track_id: playlistTrack.id,
+          }
+        : undefined,
     downloaded_at: new Date().toISOString(),
   };
 }
 
 async function fetchTrackAudio(
   track: Track,
-  position: number,
-  playlist: PlaylistDetail,
+  options?: {
+    position?: number;
+    playlist?: PlaylistDetail;
+    playlistTrack?: Track & { id: number; position: number };
+  },
 ): Promise<FetchedTrack> {
   const stream = await api.getStream(track.video_id, track);
   const token = getAccessToken();
@@ -125,20 +130,22 @@ async function fetchTrackAudio(
   const mimeType = response.headers.get("content-type");
   const blob = await response.blob();
   const extension = extensionFromMime(mimeType ?? stream.mime_type);
-  const baseName = buildTrackBaseName(stream.title, { artist: stream.artist, position });
+  const baseName = buildTrackBaseName(stream.title, {
+    artist: stream.artist,
+    position: options?.position,
+  });
 
   return {
-    track: track as Track & { id: number; position: number },
-    position,
+    track,
     stream,
     blob,
     extension,
     baseName,
     metadata: buildMetadata(
-      track as Track & { id: number; position: number },
       stream,
-      playlist,
       mimeType ?? stream.mime_type ?? null,
+      options?.playlist,
+      options?.playlistTrack,
     ),
   };
 }
@@ -195,7 +202,7 @@ async function writePlaylistManifest(target: WriteTarget, playlist: PlaylistDeta
   target.folder.file("playlist.json", text);
 }
 
-function triggerZipDownload(blob: Blob, filename: string): void {
+function triggerBlobDownload(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
@@ -204,50 +211,23 @@ function triggerZipDownload(blob: Blob, filename: string): void {
   URL.revokeObjectURL(url);
 }
 
-async function downloadToDirectory(
-  playlist: PlaylistDetail,
-  onProgress: (progress: DownloadProgress) => void,
-  signal: AbortSignal,
+async function writeFetchedTrack(
+  fetched: FetchedTrack,
+  target: WriteTarget,
+  usedNames: Set<string>,
 ): Promise<void> {
-  const root = await pickDownloadDirectory();
-  const dir = await root.getDirectoryHandle(sanitizeDirectoryName(playlist.name), { create: true });
-  const target: WriteTarget = { mode: "directory", dir };
-  await writePlaylistManifest(target, playlist);
-  await downloadTracksWithPrefetch(playlist, target, onProgress, signal);
-}
-
-async function downloadAsZip(
-  playlist: PlaylistDetail,
-  onProgress: (progress: DownloadProgress) => void,
-  signal: AbortSignal,
-): Promise<void> {
-  const zip = new JSZip();
-  const folder = zip.folder(sanitizeDirectoryName(playlist.name));
-  if (!folder) throw new Error("Could not create download archive");
-
-  const target: WriteTarget = { mode: "zip", folder };
-  await writePlaylistManifest(target, playlist);
-  await downloadTracksWithPrefetch(playlist, target, onProgress, signal);
-
-  onProgress({
-    phase: "writing",
-    current: playlist.tracks.length,
-    total: playlist.tracks.length,
-    trackTitle: "",
-    message: "Creating zip archive…",
-  });
-
-  const blob = await zip.generateAsync({ type: "blob" });
-  triggerZipDownload(blob, `${sanitizeDirectoryName(playlist.name)}.zip`);
+  const audioName = uniqueFilename(fetched.baseName, fetched.extension, usedNames);
+  const metadataName = `${audioName.slice(0, -fetched.extension.length)}.json`;
+  await writeTrackFiles(target, audioName, metadataName, fetched);
 }
 
 async function downloadTracksWithPrefetch(
-  playlist: PlaylistDetail,
+  tracks: Array<Track & { id?: number; position?: number }>,
   target: WriteTarget,
   onProgress: (progress: DownloadProgress) => void,
   signal: AbortSignal,
+  playlist?: PlaylistDetail,
 ): Promise<void> {
-  const tracks = playlist.tracks;
   const usedNames = new Set<string>();
   let prefetch: Promise<FetchedTrack> | null = null;
 
@@ -263,12 +243,33 @@ async function downloadTracksWithPrefetch(
       trackTitle: track.title,
     });
 
-    const currentFetch = prefetch ?? fetchTrackAudio(track, position, playlist);
-    prefetch = index + 1 < tracks.length ? fetchTrackAudio(tracks[index + 1], index + 2, playlist) : null;
+    const playlistTrack =
+      playlist && track.id != null && track.position != null
+        ? (track as Track & { id: number; position: number })
+        : undefined;
+
+    const currentFetch =
+      prefetch ??
+      fetchTrackAudio(track, {
+        position: tracks.length > 1 ? position : undefined,
+        playlist,
+        playlistTrack,
+      });
+    prefetch =
+      index + 1 < tracks.length
+        ? fetchTrackAudio(tracks[index + 1], {
+            position: index + 2,
+            playlist,
+            playlistTrack:
+              playlist &&
+              tracks[index + 1].id != null &&
+              tracks[index + 1].position != null
+                ? (tracks[index + 1] as Track & { id: number; position: number })
+                : undefined,
+          })
+        : null;
 
     const fetched = await currentFetch;
-    const audioName = uniqueFilename(fetched.baseName, fetched.extension, usedNames);
-    const metadataName = `${audioName.slice(0, -fetched.extension.length)}.json`;
 
     onProgress({
       phase: "writing",
@@ -277,12 +278,105 @@ async function downloadTracksWithPrefetch(
       trackTitle: track.title,
     });
 
-    await writeTrackFiles(target, audioName, metadataName, fetched);
+    await writeFetchedTrack(fetched, target, usedNames);
   }
+}
+
+async function downloadToDirectory(
+  folderName: string,
+  tracks: Array<Track & { id?: number; position?: number }>,
+  onProgress: (progress: DownloadProgress) => void,
+  signal: AbortSignal,
+  playlist?: PlaylistDetail,
+): Promise<void> {
+  const root = await pickDownloadDirectory();
+  const dir = await root.getDirectoryHandle(sanitizeDirectoryName(folderName), { create: true });
+  const target: WriteTarget = { mode: "directory", dir };
+  if (playlist) {
+    await writePlaylistManifest(target, playlist);
+  }
+  await downloadTracksWithPrefetch(tracks, target, onProgress, signal, playlist);
+}
+
+async function downloadAsZip(
+  folderName: string,
+  tracks: Array<Track & { id?: number; position?: number }>,
+  onProgress: (progress: DownloadProgress) => void,
+  signal: AbortSignal,
+  playlist?: PlaylistDetail,
+): Promise<void> {
+  const zip = new JSZip();
+  const folder = zip.folder(sanitizeDirectoryName(folderName));
+  if (!folder) throw new Error("Could not create download archive");
+
+  const target: WriteTarget = { mode: "zip", folder };
+  if (playlist) {
+    await writePlaylistManifest(target, playlist);
+  }
+  await downloadTracksWithPrefetch(tracks, target, onProgress, signal, playlist);
+
+  onProgress({
+    phase: "writing",
+    current: tracks.length,
+    total: tracks.length,
+    trackTitle: "",
+    message: tracks.length === 1 ? "Preparing download…" : "Creating zip archive…",
+  });
+
+  const blob = await zip.generateAsync({ type: "blob" });
+  const archiveName =
+    tracks.length === 1
+      ? `${sanitizeDirectoryName(buildTrackBaseName(tracks[0].title, { artist: tracks[0].artist }))}.zip`
+      : `${sanitizeDirectoryName(folderName)}.zip`;
+  triggerBlobDownload(blob, archiveName);
 }
 
 export function canPickDownloadDirectory(): boolean {
   return supportsDirectoryPicker();
+}
+
+export async function downloadTrack(
+  track: Track,
+  options: {
+    onProgress?: (progress: DownloadProgress) => void;
+    signal?: AbortSignal;
+    preferDirectory?: boolean;
+  } = {},
+): Promise<void> {
+  const onProgress =
+    options.onProgress ??
+    (() => {
+      /* noop */
+    });
+  const signal = options.signal ?? new AbortController().signal;
+
+  onProgress({
+    phase: "preparing",
+    current: 0,
+    total: 1,
+    trackTitle: track.title,
+  });
+
+  const useDirectory = options.preferDirectory !== false && supportsDirectoryPicker();
+  const folderName = buildTrackBaseName(track.title, { artist: track.artist });
+
+  if (useDirectory) {
+    const root = await pickDownloadDirectory();
+    const target: WriteTarget = { mode: "directory", dir: root };
+    onProgress({ phase: "fetching", current: 1, total: 1, trackTitle: track.title });
+    const fetched = await fetchTrackAudio(track);
+    onProgress({ phase: "writing", current: 1, total: 1, trackTitle: track.title });
+    await writeFetchedTrack(fetched, target, new Set());
+  } else {
+    await downloadAsZip(folderName, [track], onProgress, signal);
+  }
+
+  onProgress({
+    phase: "done",
+    current: 1,
+    total: 1,
+    trackTitle: track.title,
+  });
 }
 
 export async function downloadPlaylist(
@@ -313,9 +407,9 @@ export async function downloadPlaylist(
 
   const useDirectory = options.preferDirectory !== false && supportsDirectoryPicker();
   if (useDirectory) {
-    await downloadToDirectory(playlist, onProgress, signal);
+    await downloadToDirectory(playlist.name, playlist.tracks, onProgress, signal, playlist);
   } else {
-    await downloadAsZip(playlist, onProgress, signal);
+    await downloadAsZip(playlist.name, playlist.tracks, onProgress, signal, playlist);
   }
 
   onProgress({

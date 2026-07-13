@@ -1,10 +1,11 @@
 import { Heart, Plus } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { MediaCard } from "@/components/MediaCard";
-import { TrackRow } from "@/components/TrackRow";
+import { TrackRowWithActions } from "@/components/TrackRowWithActions";
 import { Button } from "@/components/ui/Button";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import { MediaCardSkeleton, TrackRowSkeleton } from "@/components/ui/Skeleton";
+import { useLikedTracks } from "@/hooks/useLikedTracks";
 import { api } from "@/lib/api";
 import { usePlayerStore } from "@/stores/playerStore";
 import type { LikeEntry, Playlist } from "@/types";
@@ -15,6 +16,7 @@ export function LibraryPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const playTrack = usePlayerStore((s) => s.playTrack);
+  const { likedVideoIds, refresh: refreshLikedTracks } = useLikedTracks();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -96,12 +98,16 @@ export function LibraryPage() {
               <p className="text-text-secondary">Songs you like will appear here.</p>
             ) : (
               <div className="space-y-0.5">
-                {likes.map((like, i) => (
-                  <TrackRow
+                {likes.map((like) => (
+                  <TrackRowWithActions
                     key={like.id}
                     track={like}
-                    index={i + 1}
-                    onClick={() => void playTrack(like, likes)}
+                    playQueue={likes}
+                    likedVideoIds={likedVideoIds}
+                    playlists={playlists}
+                    onPlay={() => void playTrack(like, likes)}
+                    onLikedChange={() => void refreshLikedTracks()}
+                    onPlaylistsChange={() => void load()}
                   />
                 ))}
               </div>

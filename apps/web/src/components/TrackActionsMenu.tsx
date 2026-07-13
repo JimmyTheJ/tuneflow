@@ -11,6 +11,7 @@ import { IconButton } from "@/components/ui/IconButton";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { ApiError } from "@/lib/retry";
+import { canPickDownloadDirectory, downloadTrack } from "@/lib/playlistDownload";
 import { usePlayerStore } from "@/stores/playerStore";
 import type { Playlist, Track } from "@/types";
 
@@ -187,6 +188,20 @@ export const TrackActionsMenu = forwardRef<TrackActionsMenuHandle, Props>(functi
     }
   };
 
+  const handleDownload = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await downloadTrack(track, { preferDirectory: canPickDownloadDirectory() });
+      showStatus("Download started");
+      close();
+    } catch (err) {
+      showStatus(err instanceof Error ? err.message : "Download failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const itemClass =
     "block w-full cursor-pointer rounded-lg border-0 bg-transparent px-3 py-2.5 text-left text-sm text-text hover:bg-highlight disabled:cursor-not-allowed disabled:opacity-50";
 
@@ -229,6 +244,15 @@ export const TrackActionsMenu = forwardRef<TrackActionsMenuHandle, Props>(functi
             onClick={() => void handleToggleLike()}
           >
             {isLiked ? "Unlike" : "Like"}
+          </button>
+          <button
+            type="button"
+            className={itemClass}
+            role="menuitem"
+            disabled={busy}
+            onClick={() => void handleDownload()}
+          >
+            Download
           </button>
           <div className="my-1.5 border-t border-border" role="separator" />
           <div className="px-3 pb-1 pt-1.5 text-[0.7rem] font-semibold uppercase tracking-wide text-text-muted">

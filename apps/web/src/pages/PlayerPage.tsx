@@ -6,6 +6,7 @@ import { PlayerTransport } from "@/components/PlayerTransport";
 import { PlayerVideo } from "@/components/PlayerVideo";
 import { PlayerVolume } from "@/components/PlayerVolume";
 import { StreamModeToggle } from "@/components/StreamModeToggle";
+import { TrackDownloadButton } from "@/components/TrackDownloadButton";
 import { TrackThumb } from "@/components/TrackThumb";
 import { Button } from "@/components/ui/Button";
 import { usePlayerPageHotkeys } from "@/hooks/usePlayerPageHotkeys";
@@ -132,6 +133,7 @@ export function PlayerPage() {
         <div className="mt-3 flex items-center justify-center gap-3">
           <p className="m-0 text-lg text-text-secondary">{current.artist ?? "Unknown artist"}</p>
           <LikeButton track={current} size="lg" />
+          <TrackDownloadButton track={current} variant="icon" size="lg" />
         </div>
 
         <div className="mt-10 flex w-full max-w-md flex-col items-center gap-5">
