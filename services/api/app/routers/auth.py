@@ -34,6 +34,7 @@ from app.schemas import (
     UserRead,
 )
 from app.security import create_access_token, hash_password, verify_password
+from app.services.households import ensure_unique_username_in_household, get_user_in_household, require_household_by_slug
 from app.services.roles import ensure_default_role_profiles, ensure_system_household, user_has_permission
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -71,9 +72,14 @@ async def setup_root_admin(
 
     system_household = await ensure_system_household(db)
     await ensure_default_role_profiles(db, system_household)
+    username = await ensure_unique_username_in_household(
+        db,
+        household_id=system_household.id,
+        username=payload.username,
+    )
 
     user = User(
-        username=payload.username.strip().lower(),
+        username=username,
         display_name=payload.display_name.strip(),
         password_hash=hash_password(payload.password),
         household_id=system_household.id,
@@ -83,20 +89,34 @@ async def setup_root_admin(
     await db.commit()
     await db.refresh(user)
 
-    token = create_access_token(user.username)
+    token = create_access_token(user.id)
     return TokenResponse(access_token=token, user=await build_user_read(db, user))
 
 
 @router.post("/login", response_model=TokenResponse)
 async def login(payload: LoginRequest, request: Request, db: AsyncSession = Depends(get_db)) -> TokenResponse:
+    household_slug = payload.household_slug.strip().lower()
     username = payload.username.strip().lower()
     client_ip = get_client_ip(request)
-    rate_keys = [f"login:ip:{client_ip}", f"login:user:{username}"]
+    rate_keys = [
+        f"login:ip:{client_ip}",
+        f"login:household:{household_slug}:user:{username}",
+    ]
     await enforce_not_locked(
         rate_keys,
         limit=settings.login_rate_limit_attempts,
         window_sec=settings.login_rate_limit_window_sec,
     )
+
+    household = await require_household_by_slug(db, household_slug)
+    user = await get_user_in_household(db, household_id=household.id, username=username)
+    if user is None or not verify_password(payload.password, user.password_hash):
+        await record_failures(
+            rate_keys,
+            limit=settings.login_rate_limit_attempts,
+            window_sec=settings.login_rate_limit_window_sec,
+        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid household, username, or password")
 
     result = await db.execute(
         select(User)
@@ -104,23 +124,16 @@ async def login(payload: LoginRequest, request: Request, db: AsyncSession = Depe
             selectinload(User.role_assignments).selectinload(UserRoleAssignment.role_profile),
             selectinload(User.household),
         )
-        .where(User.username == username)
+        .where(User.id == user.id)
     )
-    user = result.scalar_one_or_none()
-    if user is None or not verify_password(payload.password, user.password_hash):
-        await record_failures(
-            rate_keys,
-            limit=settings.login_rate_limit_attempts,
-            window_sec=settings.login_rate_limit_window_sec,
-        )
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid username or password")
+    user = result.scalar_one()
     if user.deleted_at is not None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ACCOUNT_REMOVED_MESSAGE)
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ACCOUNT_DISABLED_MESSAGE)
 
-    await limiter.clear(f"login:user:{username}")
-    token = create_access_token(user.username)
+    await limiter.clear(f"login:household:{household_slug}:user:{username}")
+    token = create_access_token(user.id)
     return TokenResponse(access_token=token, user=await build_user_read(db, user))
 
 

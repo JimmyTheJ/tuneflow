@@ -8,7 +8,7 @@ type AuthState = {
   user: User | null;
   isReady: boolean;
   hydrate: () => Promise<void>;
-  login: (username: string, password: string) => Promise<void>;
+  login: (householdSlug: string, username: string, password: string) => Promise<void>;
   setup: (username: string, password: string, displayName: string) => Promise<void>;
   logout: () => void;
 };
@@ -31,8 +31,8 @@ export const useAuthStore = create<AuthState>((set) => ({
     }
   },
 
-  login: async (username, password) => {
-    const res = await api.login(username, password);
+  login: async (householdSlug, username, password) => {
+    const res = await api.login(householdSlug, username, password);
     setAccessToken(res.access_token);
     set({ user: res.user });
   },

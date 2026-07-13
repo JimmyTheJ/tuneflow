@@ -26,9 +26,15 @@ export type RoleProfile = RoleProfileSummary & {
 export type Household = {
   id: number;
   name: string;
+  slug: string;
   is_system: boolean;
   member_count: number;
   created_at: string;
+};
+
+export type HouseholdPublic = {
+  slug: string;
+  name: string;
 };
 
 export type User = {
@@ -37,6 +43,7 @@ export type User = {
   display_name: string;
   household_id?: number | null;
   household_name?: string | null;
+  household_slug?: string | null;
   is_root_admin: boolean;
   is_active: boolean;
   role_profiles: RoleProfileSummary[];

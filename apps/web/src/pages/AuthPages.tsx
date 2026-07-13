@@ -1,15 +1,24 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { api } from "@/lib/api";
 import { useAuthStore } from "@/stores/authStore";
 
-export function LoginPage() {
+type LoginPageProps = {
+  presetHouseholdSlug?: string;
+};
+
+export function LoginPage({ presetHouseholdSlug }: LoginPageProps = {}) {
+  const params = useParams();
+  const householdSlugFromRoute = presetHouseholdSlug ?? params.householdSlug;
   const login = useAuthStore((s) => s.login);
   const navigate = useNavigate();
+  const [householdSlug, setHouseholdSlug] = useState(householdSlugFromRoute ?? "");
+  const [householdName, setHouseholdName] = useState<string | null>(null);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const lockHousehold = Boolean(householdSlugFromRoute);
 
   useEffect(() => {
     void api.setupStatus().then((s) => {
@@ -17,12 +26,21 @@ export function LoginPage() {
     });
   }, [navigate]);
 
+  useEffect(() => {
+    if (!householdSlugFromRoute) return;
+    setHouseholdSlug(householdSlugFromRoute);
+    void api
+      .getHouseholdPublic(householdSlugFromRoute)
+      .then((household) => setHouseholdName(household.name))
+      .catch(() => setHouseholdName(null));
+  }, [householdSlugFromRoute]);
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
     try {
-      await login(username.trim().toLowerCase(), password);
+      await login(householdSlug.trim().toLowerCase(), username.trim().toLowerCase(), password);
       navigate("/", { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed");
@@ -34,8 +52,20 @@ export function LoginPage() {
   return (
     <div className="auth-page">
       <form className="auth-card" onSubmit={(e) => void submit(e)}>
-        <h1>Tuneflow</h1>
-        <p className="muted">Sign in with your family account</p>
+        <h1>{householdName ? householdName : "Tuneflow"}</h1>
+        <p className="muted">
+          {lockHousehold
+            ? `Sign in to ${householdSlugFromRoute}`
+            : "Sign in with your household, username, and password."}
+        </p>
+        {!lockHousehold ? (
+          <input
+            className="input"
+            placeholder="Household (e.g. siglerfive)"
+            value={householdSlug}
+            onChange={(e) => setHouseholdSlug(e.target.value)}
+          />
+        ) : null}
         <input className="input" placeholder="Username" value={username} onChange={(e) => setUsername(e.target.value)} />
         <input
           className="input"
@@ -48,6 +78,9 @@ export function LoginPage() {
         <button className="btn-primary" type="submit" disabled={loading}>
           {loading ? "Signing in…" : "Sign in"}
         </button>
+        {!lockHousehold ? (
+          <p className="muted">Root administrators: use household <code>system</code>.</p>
+        ) : null}
       </form>
     </div>
   );
@@ -95,7 +128,7 @@ export function SetupPage() {
           Create account
         </button>
         <p className="muted">
-          Already set up? <Link to="/login">Sign in</Link>
+          Already set up? <Link to="/login">Sign in</Link> with household <code>system</code>.
         </p>
       </form>
     </div>

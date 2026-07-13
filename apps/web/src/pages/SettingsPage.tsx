@@ -143,6 +143,11 @@ export function SettingsPage() {
             {formatRoleProfiles(user.role_profiles)}
             {isRootAdmin ? " · root administrator" : ""}
           </p>
+          {user.household_slug && !isRootAdmin ? (
+            <p className="muted">
+              Household login URL: <code>/h/{user.household_slug}/login</code>
+            </p>
+          ) : null}
         </div>
       ) : null}
 

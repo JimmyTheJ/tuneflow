@@ -29,6 +29,7 @@ export type User = {
   display_name: string;
   household_id?: number | null;
   household_name?: string | null;
+  household_slug?: string | null;
   is_root_admin: boolean;
   is_active: boolean;
   role_profiles: RoleProfileSummary[];

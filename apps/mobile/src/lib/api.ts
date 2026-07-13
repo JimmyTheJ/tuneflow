@@ -80,12 +80,14 @@ export const api = {
       auth: false,
       body: { username, password, display_name: displayName },
     }),
-  login: (username: string, password: string) =>
+  login: (householdSlug: string, username: string, password: string) =>
     request<TokenResponse>("/api/auth/login", {
       method: "POST",
       auth: false,
-      body: { username, password },
+      body: { household_slug: householdSlug, username, password },
     }),
+  getHouseholdPublic: (slug: string) =>
+    request<{ slug: string; name: string }>(`/api/households/public/${encodeURIComponent(slug)}`, { auth: false }),
   me: () => request<User>("/api/auth/me"),
 
   search: (q: string, options?: { limit?: number; nextPage?: string }) => {

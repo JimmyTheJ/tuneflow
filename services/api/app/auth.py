@@ -101,6 +101,7 @@ async def build_user_read(db: AsyncSession, user: User) -> UserRead:
         display_name=user.display_name,
         household_id=user.household_id,
         household_name=user.household.name if user.household else None,
+        household_slug=user.household.slug if user.household else None,
         is_root_admin=user.is_root_admin,
         is_active=user.is_active,
         role_profiles=profiles,
@@ -133,10 +134,11 @@ async def get_current_user_from_token(
 async def _user_from_token(raw_token: str, db: AsyncSession) -> User:
     try:
         payload = decode_access_token(raw_token)
-        username = payload.get("sub")
-        if not username:
+        subject = payload.get("sub")
+        if not subject:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
-    except JWTError as exc:
+        user_id = int(subject)
+    except (JWTError, ValueError) as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token") from exc
 
     result = await db.execute(
@@ -145,7 +147,7 @@ async def _user_from_token(raw_token: str, db: AsyncSession) -> User:
             selectinload(User.role_assignments).selectinload(UserRoleAssignment.role_profile),
             selectinload(User.household),
         )
-        .where(User.username == username)
+        .where(User.id == user_id)
     )
     user = result.scalar_one_or_none()
     if user is None:

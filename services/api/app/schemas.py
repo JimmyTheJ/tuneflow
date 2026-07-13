@@ -40,6 +40,7 @@ class RoleProfileSummary(BaseModel):
 class HouseholdRead(BaseModel):
     id: int
     name: str
+    slug: str
     is_system: bool
     member_count: int = 0
     created_at: datetime
@@ -47,8 +48,14 @@ class HouseholdRead(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class HouseholdPublicRead(BaseModel):
+    slug: str
+    name: str
+
+
 class HouseholdCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
+    slug: str = Field(min_length=2, max_length=80)
     admin_username: str = Field(min_length=2, max_length=80)
     admin_password: str = Field(min_length=4, max_length=128)
     admin_display_name: str = Field(min_length=1, max_length=120)
@@ -72,6 +79,7 @@ class UserRead(BaseModel):
     display_name: str
     household_id: int | None = None
     household_name: str | None = None
+    household_slug: str | None = None
     is_root_admin: bool
     is_active: bool
     role_profiles: list[RoleProfileSummary]
@@ -83,6 +91,7 @@ class UserRead(BaseModel):
 
 
 class LoginRequest(BaseModel):
+    household_slug: str = Field(min_length=2, max_length=80)
     username: str = Field(min_length=2, max_length=80)
     password: str = Field(min_length=4, max_length=128)
 

@@ -11,6 +11,7 @@ from app.models import Household, User, UserRoleAssignment
 from app.permissions import Permission
 from app.schemas import ResetPasswordRequest, UserCreate, UserRead, UserUpdate
 from app.security import hash_password
+from app.services.households import ensure_unique_username_in_household
 from app.services.roles import (
     create_child_settings,
     household_allows_members,
@@ -112,10 +113,11 @@ async def create_user(
             detail="The system household cannot have additional members",
         )
 
-    username = payload.username.strip().lower()
-    existing = await db.execute(select(User).where(User.username == username))
-    if existing.scalar_one_or_none():
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Username already exists")
+    username = await ensure_unique_username_in_household(
+        db,
+        household_id=current_user.household_id,
+        username=payload.username,
+    )
 
     try:
         profiles = await validate_assignable_profiles(db, current_user.household_id, payload.role_profile_ids)

@@ -55,6 +55,7 @@ export function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/h/:householdSlug/login" element={<LoginPage />} />
         <Route path="/setup" element={<SetupPage />} />
         <Route
           element={

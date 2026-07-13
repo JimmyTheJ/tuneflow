@@ -5,6 +5,7 @@ import { useAuthStore } from "@/stores/auth";
 
 export default function LoginScreen() {
   const login = useAuthStore((state) => state.login);
+  const [householdSlug, setHouseholdSlug] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -14,7 +15,7 @@ export default function LoginScreen() {
     setLoading(true);
     setError(null);
     try {
-      await login(username.trim().toLowerCase(), password);
+      await login(householdSlug.trim().toLowerCase(), username.trim().toLowerCase(), password);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed");
     } finally {
@@ -25,8 +26,17 @@ export default function LoginScreen() {
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Tuneflow</Text>
-      <Text style={styles.subtitle}>Sign in with your family account</Text>
+      <Text style={styles.subtitle}>Sign in with your household, username, and password</Text>
 
+      <TextInput
+        value={householdSlug}
+        onChangeText={setHouseholdSlug}
+        autoCapitalize="none"
+        autoCorrect={false}
+        placeholder="Household (e.g. siglerfive)"
+        placeholderTextColor="#737373"
+        style={styles.input}
+      />
       <TextInput
         value={username}
         onChangeText={setUsername}

@@ -37,7 +37,7 @@ async def ensure_system_household(db: AsyncSession) -> Household:
     if household is not None:
         return household
 
-    household = Household(name="System", is_system=True)
+    household = Household(name="System", slug="system", is_system=True)
     db.add(household)
     await db.flush()
     return household
