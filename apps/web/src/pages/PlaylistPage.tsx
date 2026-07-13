@@ -1,6 +1,7 @@
 import { Play } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
+import { PlaylistDownloadButton } from "@/components/PlaylistDownloadButton";
 import { TrackRow } from "@/components/TrackRow";
 import { TrackThumb } from "@/components/TrackThumb";
 import { Button } from "@/components/ui/Button";
@@ -80,7 +81,7 @@ export function PlaylistPage() {
             <p className="m-0 text-sm text-text-secondary">
               {playlist.tracks.length} {playlist.tracks.length === 1 ? "track" : "tracks"}
             </p>
-            <div className="mt-5">
+            <div className="mt-5 flex flex-wrap items-start gap-3">
               <Button
                 size="lg"
                 disabled={playlist.tracks.length === 0}
@@ -90,6 +91,7 @@ export function PlaylistPage() {
                 <Play className="size-5 fill-current" />
                 Play
               </Button>
+              <PlaylistDownloadButton playlist={playlist} />
             </div>
           </div>
         </div>

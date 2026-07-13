@@ -15,6 +15,39 @@ def slugify_household_name(name: str) -> str:
     return slug or "household"
 
 
+_INVALID_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+_MAX_TRACK_FILENAME_LEN = 180
+
+
+def sanitize_filename_part(value: str) -> str:
+    cleaned = _INVALID_FILENAME_CHARS.sub("", value.strip())
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    return cleaned.strip(". ")
+
+
+def build_track_filename(
+    title: str,
+    *,
+    artist: str | None = None,
+    position: int | None = None,
+    suffix: str = ".m4a",
+) -> str:
+    parts: list[str] = []
+    if position is not None:
+        parts.append(f"{position:02d}")
+    if artist:
+        artist_part = sanitize_filename_part(artist)
+        if artist_part:
+            parts.append(artist_part)
+    title_part = sanitize_filename_part(title) or "track"
+    parts.append(title_part)
+
+    base = " - ".join(parts)
+    if len(base) > _MAX_TRACK_FILENAME_LEN:
+        base = base[:_MAX_TRACK_FILENAME_LEN].rstrip(". ")
+    return f"{base}{suffix}"
+
+
 def validate_household_slug(slug: str) -> str:
     normalized = normalize_household_slug(slug)
     if len(normalized) < 2 or len(normalized) > 80:

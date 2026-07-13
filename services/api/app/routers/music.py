@@ -16,6 +16,7 @@ from app.services.cache_manager import resolve_audio
 from app.services.piped import piped_client
 from app.services.stream_resolver import resolve_stream, stream_video_chunks
 from app.services.ytdlp import stream_audio_via_ytdlp
+from app.slugify import build_track_filename
 
 router = APIRouter(prefix="/music", tags=["music"])
 
@@ -108,9 +109,10 @@ async def stream_audio(
     video_id: str,
     title: str | None = Query(default=None),
     artist: str | None = Query(default=None),
+    download: bool = Query(default=False),
     current_user: User = Depends(get_current_user_from_token),
     db: AsyncSession = Depends(get_db),
-) -> FileResponse:
+) -> FileResponse | StreamingResponse:
     child_settings = await enforce_child_access(db, current_user)
 
     try:
@@ -142,6 +144,14 @@ async def stream_audio(
     except Exception as exc:
         raise _piped_unavailable(exc) from exc
 
+    filename = (
+        build_track_filename(stream.title, artist=stream.artist, suffix=resolution.path.suffix)
+        if download
+        else f"{stream.video_id}{resolution.path.suffix}"
+    )
+    cache_headers = {"Cache-Control": "no-store"} if resolution.stream else {"Cache-Control": "private, max-age=3600"}
+    disposition = {"Content-Disposition": f'attachment; filename="{filename}"'} if download else {}
+
     if resolution.stream:
         async def iter_bytes():
             async for chunk in stream_audio_via_ytdlp(stream.video_id):
@@ -150,14 +160,14 @@ async def stream_audio(
         return StreamingResponse(
             iter_bytes(),
             media_type=resolution.mime_type,
-            headers={"Cache-Control": "no-store"},
+            headers={**cache_headers, **disposition},
         )
 
     return FileResponse(
         resolution.path,
         media_type=resolution.mime_type,
-        filename=f"{stream.video_id}{resolution.path.suffix}",
-        headers={"Cache-Control": "private, max-age=3600"},
+        filename=filename,
+        headers={**cache_headers, **disposition},
     )
 
 
