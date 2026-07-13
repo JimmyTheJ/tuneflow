@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { TrackRow } from "@/components/TrackRow";
+import { TrackRowWithActions } from "@/components/TrackRowWithActions";
 import { useSearchHistory } from "@/hooks/useSearchHistory";
 import { api } from "@/lib/api";
 import { usePlayerStore } from "@/stores/playerStore";
-import type { Track } from "@/types";
+import type { LikeEntry, Playlist, Track } from "@/types";
 
 function mergeTracks(existing: Track[], incoming: Track[]): Track[] {
   const seen = new Set(existing.map((track) => track.video_id));
@@ -28,10 +28,26 @@ export function SearchPage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [lastQuery, setLastQuery] = useState<string | null>(null);
   const [inputFocused, setInputFocused] = useState(false);
+  const [likedVideoIds, setLikedVideoIds] = useState<Set<string>>(new Set());
+  const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const loadMoreRef = useRef<HTMLDivElement>(null);
   const loadingMoreRef = useRef(false);
   const playTrack = usePlayerStore((s) => s.playTrack);
   const { suggestions, recordQuery, removeQuery, clearHistory } = useSearchHistory(query);
+
+  const loadLibraryData = useCallback(async () => {
+    try {
+      const [likes, playlistList] = await Promise.all([api.listLikes(), api.listPlaylists()]);
+      setLikedVideoIds(new Set(likes.map((like: LikeEntry) => like.video_id)));
+      setPlaylists(playlistList);
+    } catch {
+      /* library actions are optional on search */
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadLibraryData();
+  }, [loadLibraryData]);
 
   useEffect(() => {
     setQuery(urlQuery);
@@ -209,14 +225,19 @@ export function SearchPage() {
         <p className="search-status search-status-empty">No results for &ldquo;{lastQuery}&rdquo;.</p>
       ) : null}
       {results.map((track) => (
-        <TrackRow
+        <TrackRowWithActions
           key={track.video_id}
           track={track}
+          playQueue={playable}
+          likedVideoIds={likedVideoIds}
+          playlists={playlists}
           displayTitle={track.source_title ?? track.title}
           showBadges
           subtitle={track.blocked_reason ? `Blocked: ${track.blocked_reason}` : undefined}
           disabled={!!track.blocked_reason}
-          onClick={() => void playTrack(track, playable)}
+          onPlay={() => void playTrack(track, playable)}
+          onLikedChange={() => void loadLibraryData()}
+          onPlaylistsChange={() => void loadLibraryData()}
         />
       ))}
       {nextPage ? <div ref={loadMoreRef} className="search-load-sentinel" aria-hidden="true" /> : null}

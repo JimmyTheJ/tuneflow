@@ -104,6 +104,11 @@ export const api = {
   listPlaylists: () => request<Playlist[]>("/api/playlists"),
   getPlaylist: (id: number) => request<PlaylistDetail>(`/api/playlists/${id}`),
   createPlaylist: (name: string) => request<Playlist>("/api/playlists", { method: "POST", body: { name } }),
+  addPlaylistTrack: (playlistId: number, track: Track) =>
+    request<PlaylistDetail["tracks"][number]>(`/api/playlists/${playlistId}/tracks`, {
+      method: "POST",
+      body: track,
+    }),
   listHistory: () => request<PlayHistoryEntry[]>("/api/history"),
   recordPlay: (track: Track) => request<PlayHistoryEntry>("/api/history", { method: "POST", body: track }),
   listLikes: () => request<LikeEntry[]>("/api/likes"),

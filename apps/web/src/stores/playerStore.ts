@@ -52,6 +52,7 @@ type PlayerState = {
   removeQueueIndex: (queueIndex: number) => Promise<void>;
   clearUpcoming: () => void;
   reorderQueue: (fromQueueIndex: number, toQueueIndex: number) => void;
+  addToQueue: (track: Track) => void;
   clearError: () => void;
 };
 
@@ -868,6 +869,20 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
     set({ queue: nextQueue, shuffleStep });
     persistSnapshot(get());
+  },
+
+  addToQueue: (track: Track) => {
+    const state = get();
+    const nextQueue = [...state.queue, track];
+    const nextIndex = nextQueue.length - 1;
+
+    let shuffleOrder = state.shuffleOrder;
+    if (state.shuffle) {
+      shuffleOrder = shuffleOrder.length > 0 ? [...shuffleOrder, nextIndex] : [nextIndex];
+    }
+
+    set({ queue: nextQueue, shuffleOrder });
+    if (state.current) persistSnapshot(get());
   },
 
   stop: () => {
