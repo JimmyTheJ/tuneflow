@@ -1,3 +1,4 @@
+import { MoreHorizontal } from "lucide-react";
 import {
   forwardRef,
   useCallback,
@@ -6,7 +7,9 @@ import {
   useRef,
   useState,
 } from "react";
+import { IconButton } from "@/components/ui/IconButton";
 import { api } from "@/lib/api";
+import { cn } from "@/lib/cn";
 import { ApiError } from "@/lib/retry";
 import { usePlayerStore } from "@/stores/playerStore";
 import type { Playlist, Track } from "@/types";
@@ -184,53 +187,61 @@ export const TrackActionsMenu = forwardRef<TrackActionsMenuHandle, Props>(functi
     }
   };
 
+  const itemClass =
+    "block w-full cursor-pointer rounded-lg border-0 bg-transparent px-3 py-2.5 text-left text-sm text-text hover:bg-highlight disabled:cursor-not-allowed disabled:opacity-50";
+
   return (
     <>
-      <button
+      <IconButton
         ref={buttonRef}
-        type="button"
-        className="track-actions-trigger"
-        aria-label={`Actions for ${track.title}`}
+        label={`Actions for ${track.title}`}
+        size="sm"
+        disabled={disabled}
         aria-haspopup="menu"
         aria-expanded={open}
-        disabled={disabled}
+        className={cn(
+          "opacity-0 group-hover:opacity-100",
+          open && "opacity-100 bg-highlight text-text",
+        )}
         onClick={() => (open ? close() : openFromButton())}
       >
-        ⋯
-      </button>
+        <MoreHorizontal className="size-4" />
+      </IconButton>
       {open && position ? (
         <div
           ref={menuRef}
-          className="track-actions-menu"
+          className="fixed z-[80] max-h-[min(420px,calc(100vh-16px))] min-w-[220px] max-w-[min(280px,calc(100vw-16px))] overflow-y-auto rounded-xl border border-border bg-elevated p-1.5 shadow-elevated"
           role="menu"
           style={{ top: position.top, left: position.left }}
           onContextMenu={(event) => event.preventDefault()}
         >
-          <button type="button" className="track-actions-item" role="menuitem" onClick={handlePlay}>
+          <button type="button" className={itemClass} role="menuitem" onClick={handlePlay}>
             Play now
           </button>
-          <button type="button" className="track-actions-item" role="menuitem" onClick={handleAddToQueue}>
+          <button type="button" className={itemClass} role="menuitem" onClick={handleAddToQueue}>
             Add to queue
           </button>
           <button
             type="button"
-            className="track-actions-item"
+            className={itemClass}
             role="menuitem"
             disabled={busy}
             onClick={() => void handleToggleLike()}
           >
             {isLiked ? "Unlike" : "Like"}
           </button>
-          <div className="track-actions-divider" role="separator" />
-          <div className="track-actions-label">Add to playlist</div>
+          <div className="my-1.5 border-t border-border" role="separator" />
+          <div className="px-3 pb-1 pt-1.5 text-[0.7rem] font-semibold uppercase tracking-wide text-text-muted">
+            Add to playlist
+          </div>
           {playlists.length === 0 ? (
-            <div className="track-actions-empty">No playlists yet</div>
+            <div className="px-3 py-2 text-sm text-text-muted">No playlists yet</div>
           ) : (
             playlists.map((playlist) => (
               <button
                 key={playlist.id}
                 type="button"
-                className="track-actions-item track-actions-item-nested"
+                className={cn(itemClass, "pl-5 text-text-secondary")}
                 role="menuitem"
                 disabled={busy}
                 onClick={() => void handleAddToPlaylist(playlist.id, playlist.name)}
@@ -241,7 +252,7 @@ export const TrackActionsMenu = forwardRef<TrackActionsMenuHandle, Props>(functi
           )}
           <button
             type="button"
-            className="track-actions-item track-actions-item-nested"
+            className={cn(itemClass, "pl-5 text-text-secondary")}
             role="menuitem"
             disabled={busy}
             onClick={() => void handleCreatePlaylist()}
@@ -249,7 +260,11 @@ export const TrackActionsMenu = forwardRef<TrackActionsMenuHandle, Props>(functi
             New playlist…
           </button>
           {status ? (
-            <div className="track-actions-status" role="status" aria-live="polite">
+            <div
+              className="mt-1 border-t border-border px-3 py-2 text-sm text-accent"
+              role="status"
+              aria-live="polite"
+            >
               {status}
             </div>
           ) : null}

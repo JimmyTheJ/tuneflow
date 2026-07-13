@@ -1,5 +1,8 @@
+import { Repeat, Repeat1, Shuffle } from "lucide-react";
 import { usePlayerStore } from "@/stores/playerStore";
 import type { RepeatMode } from "@/stores/playerStore";
+import { IconButton } from "@/components/ui/IconButton";
+import { cn } from "@/lib/cn";
 
 type Props = {
   className?: string;
@@ -28,31 +31,34 @@ export function PlayerQueueControls({
 
   const canShuffle = queue.length > 1;
   const repeatActive = repeatMode !== "none";
+  const iconClass = compact ? "size-4" : "size-5";
 
   return (
-    <div className={className ? `player-queue-controls ${className}` : "player-queue-controls"}>
+    <div className={cn("flex items-center gap-1", className)}>
       {showShuffle ? (
-        <button
-          type="button"
-          className={`player-mode-btn${shuffle ? " player-mode-btn-active" : ""}${compact ? " player-mode-btn-compact" : ""}`}
-          onClick={() => toggleShuffle()}
+        <IconButton
+          label={shuffle ? "Shuffle on" : "Shuffle off"}
+          active={shuffle}
+          size={compact ? "sm" : "md"}
           disabled={!canShuffle}
-          aria-label={shuffle ? "Shuffle on" : "Shuffle off"}
-          aria-pressed={shuffle}
+          onClick={() => toggleShuffle()}
         >
-          🔀
-        </button>
+          <Shuffle className={iconClass} />
+        </IconButton>
       ) : null}
       {showRepeat ? (
-        <button
-          type="button"
-          className={`player-mode-btn${repeatActive ? " player-mode-btn-active" : ""}${compact ? " player-mode-btn-compact" : ""}${repeatMode === "one" ? " player-mode-btn-repeat-one" : ""}`}
+        <IconButton
+          label={REPEAT_LABELS[repeatMode]}
+          active={repeatActive}
+          size={compact ? "sm" : "md"}
           onClick={() => cycleRepeatMode()}
-          aria-label={REPEAT_LABELS[repeatMode]}
-          aria-pressed={repeatActive}
         >
-          {repeatMode === "one" ? "🔂" : "🔁"}
-        </button>
+          {repeatMode === "one" ? (
+            <Repeat1 className={iconClass} />
+          ) : (
+            <Repeat className={iconClass} />
+          )}
+        </IconButton>
       ) : null}
     </div>
   );

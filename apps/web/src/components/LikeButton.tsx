@@ -1,5 +1,8 @@
+import { Heart } from "lucide-react";
 import { useState, type MouseEvent } from "react";
+import { IconButton } from "@/components/ui/IconButton";
 import { useLikedTracks } from "@/hooks/useLikedTracks";
+import { cn } from "@/lib/cn";
 import type { Track } from "@/types";
 
 type Props = {
@@ -7,6 +10,12 @@ type Props = {
   className?: string;
   size?: "sm" | "md" | "lg";
 };
+
+const iconSize = {
+  sm: "size-4",
+  md: "size-5",
+  lg: "size-7",
+} as const;
 
 export function LikeButton({ track, className, size = "md" }: Props) {
   const { isLiked, toggleLike } = useLikedTracks();
@@ -28,25 +37,16 @@ export function LikeButton({ track, className, size = "md" }: Props) {
     }
   };
 
-  const classes = [
-    "like-btn",
-    `like-btn-${size}`,
-    liked ? "like-btn-active" : undefined,
-    className,
-  ]
-    .filter(Boolean)
-    .join(" ");
-
   return (
-    <button
-      type="button"
-      className={classes}
-      aria-label={liked ? `Unlike ${track.title}` : `Like ${track.title}`}
-      aria-pressed={liked}
+    <IconButton
+      label={liked ? `Unlike ${track.title}` : `Like ${track.title}`}
+      active={liked}
+      size={size === "lg" ? "lg" : size === "sm" ? "sm" : "md"}
       disabled={busy}
+      className={cn(liked && "text-accent hover:text-accent-hover", className)}
       onClick={(event) => void handleClick(event)}
     >
-      {liked ? "♥" : "♡"}
-    </button>
+      <Heart className={cn(iconSize[size], liked && "fill-current")} />
+    </IconButton>
   );
-};
+}

@@ -39,15 +39,17 @@ export function TrackRowWithActions({
   };
 
   return (
-    <div className="track-row-wrap" onContextMenu={handleContextMenu}>
-      <TrackRow
-        track={track}
-        displayTitle={displayTitle}
-        showBadges={showBadges}
-        subtitle={subtitle}
-        disabled={disabled}
-        onClick={disabled ? undefined : onPlay}
-      />
+    <div className="group flex items-center gap-1 rounded-lg" onContextMenu={handleContextMenu}>
+      <div className="min-w-0 flex-1">
+        <TrackRow
+          track={track}
+          displayTitle={displayTitle}
+          showBadges={showBadges}
+          subtitle={subtitle}
+          disabled={disabled}
+          onClick={disabled ? undefined : onPlay}
+        />
+      </div>
       <TrackActionsMenu
         ref={menuRef}
         track={track}

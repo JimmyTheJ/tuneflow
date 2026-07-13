@@ -30,7 +30,14 @@ function Protected({ children }: { children: React.ReactNode }) {
   }, []);
 
   if (!isReady || needsSetup === null) {
-    return <div className="loading-screen">Loading…</div>;
+    return (
+      <div className="grid min-h-screen place-items-center text-text-secondary">
+        <div className="flex items-center gap-3">
+          <span className="tf-spinner" aria-hidden="true" />
+          Loading…
+        </div>
+      </div>
+    );
   }
   if (needsSetup) return <Navigate to="/setup" replace />;
   if (!user) return <Navigate to="/login" replace />;
@@ -49,7 +56,16 @@ export function App() {
     usePlayerStore.getState().recoverSession();
   }, []);
 
-  if (!isReady) return <div className="loading-screen">Loading…</div>;
+  if (!isReady) {
+    return (
+      <div className="grid min-h-screen place-items-center text-text-secondary">
+        <div className="flex items-center gap-3">
+          <span className="tf-spinner" aria-hidden="true" />
+          Loading…
+        </div>
+      </div>
+    );
+  }
 
   return (
     <BrowserRouter>

@@ -1,6 +1,19 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import {
+  ChevronRight,
+  Database,
+  HeartHandshake,
+  Link2,
+  LogOut,
+  Shield,
+  Users,
+  Trash2,
+} from "lucide-react";
 import { PinModal } from "@/components/PinModal";
+import { Button } from "@/components/ui/Button";
+import { Card } from "@/components/ui/Card";
+import { Input } from "@/components/ui/Input";
 import { api } from "@/lib/api";
 import {
   canManageMembers,
@@ -13,6 +26,29 @@ import {
 import { getApiUrl, setApiUrl } from "@/lib/settings";
 import { useAuthStore } from "@/stores/authStore";
 import type { ParentalSettings, ScrobblerConnectionStatus, ScrobblerProviderInfo } from "@/types";
+
+function SettingsLink({
+  to,
+  icon: Icon,
+  children,
+}: {
+  to: string;
+  icon: typeof Users;
+  children: React.ReactNode;
+}) {
+  return (
+    <Link
+      to={to}
+      className="flex items-center gap-3 rounded-xl border border-border/60 bg-elevated px-4 py-3.5 transition hover:bg-highlight"
+    >
+      <span className="flex size-9 items-center justify-center rounded-full bg-highlight text-accent">
+        <Icon className="size-4" />
+      </span>
+      <span className="flex-1 font-semibold">{children}</span>
+      <ChevronRight className="size-4 text-text-muted" />
+    </Link>
+  );
+}
 
 export function SettingsPage() {
   const user = useAuthStore((s) => s.user);
@@ -162,122 +198,128 @@ export function SettingsPage() {
   };
 
   return (
-    <div className="page">
-      <h1>Settings</h1>
+    <div className="mx-auto max-w-2xl space-y-8">
+      <h1 className="m-0 text-3xl font-bold tracking-tight md:text-4xl">Settings</h1>
+
       {user ? (
-        <div className="card">
-          <p className="label">Signed in as</p>
-          <p className="track-title">
+        <Card>
+          <p className="m-0 text-xs font-semibold uppercase tracking-wide text-text-muted">Signed in as</p>
+          <p className="mt-1 mb-0 text-lg font-bold">
             {user.display_name}
             {user.household_name ? ` · ${user.household_name}` : ""}
           </p>
-          <p className="muted">
+          <p className="mt-1 mb-0 text-sm text-text-secondary">
             {formatRoleProfiles(user.role_profiles)}
             {isRootAdmin ? " · root administrator" : ""}
           </p>
           {user.household_slug && !isRootAdmin ? (
-            <p className="muted">
-              Household login URL: <code>/h/{user.household_slug}/login</code>
+            <p className="mt-2 mb-0 text-sm text-text-muted">
+              Household login URL: <code className="text-text-secondary">/h/{user.household_slug}/login</code>
             </p>
           ) : null}
-        </div>
+        </Card>
       ) : null}
 
       {isChild && childSettings ? (
-        <div className="card">
-          <p className="label">Your limits</p>
-          <p className="muted">
+        <Card>
+          <p className="m-0 text-xs font-semibold uppercase tracking-wide text-text-muted">Your limits</p>
+          <p className="mt-1 mb-0 text-sm text-text-secondary">
             {childSettings.max_daily_minutes != null
               ? `${childSettings.max_daily_minutes} min/day`
               : "No daily limit"}
             {" · "}
             {childSettings.search_enabled ? "Search on" : "Search off"}
           </p>
-        </div>
+        </Card>
       ) : null}
 
-      <button type="button" className="btn-secondary btn-block" onClick={() => void protectedAction("switch")}>
-        Switch account
-      </button>
-      <button type="button" className="btn-secondary btn-block" onClick={() => void protectedAction("logout")}>
-        Sign out
-      </button>
+      <div className="space-y-2">
+        <Button variant="secondary" block onClick={() => void protectedAction("switch")}>
+          Switch account
+        </Button>
+        <Button variant="ghost" block onClick={() => void protectedAction("logout")}>
+          <LogOut className="size-4" />
+          Sign out
+        </Button>
+      </div>
 
-      {isRootAdmin ? (
-        <>
-          <Link to="/admin/households" className="btn-secondary btn-block link-btn">
-            Manage households
-          </Link>
-          <Link to="/admin/integrations" className="btn-secondary btn-block link-btn">
-            Integrations &amp; health
-          </Link>
-          <Link to="/admin/cache" className="btn-secondary btn-block link-btn">
-            Audio cache management
-          </Link>
-          <Link to="/admin/users/deleted" className="btn-secondary btn-block link-btn">
-            Deleted accounts
-          </Link>
-        </>
-      ) : null}
-
-      {canManageMembers(user) ? (
-        <Link to="/family" className="btn-secondary btn-block link-btn">
-          Household members
-        </Link>
-      ) : null}
-
-      {canManageParentalControls(user) ? (
-        <Link to="/parental" className="btn-secondary btn-block link-btn">
-          Parental controls
-        </Link>
+      {isRootAdmin || canManageMembers(user) || canManageParentalControls(user) ? (
+        <section className="space-y-2">
+          <h2 className="m-0 text-sm font-bold uppercase tracking-wide text-text-muted">Management</h2>
+          {isRootAdmin ? (
+            <>
+              <SettingsLink to="/admin/households" icon={Users}>
+                Manage households
+              </SettingsLink>
+              <SettingsLink to="/admin/integrations" icon={Link2}>
+                Integrations &amp; health
+              </SettingsLink>
+              <SettingsLink to="/admin/cache" icon={Database}>
+                Audio cache management
+              </SettingsLink>
+              <SettingsLink to="/admin/users/deleted" icon={Trash2}>
+                Deleted accounts
+              </SettingsLink>
+            </>
+          ) : null}
+          {canManageMembers(user) ? (
+            <SettingsLink to="/family" icon={HeartHandshake}>
+              Household members
+            </SettingsLink>
+          ) : null}
+          {canManageParentalControls(user) ? (
+            <SettingsLink to="/parental" icon={Shield}>
+              Parental controls
+            </SettingsLink>
+          ) : null}
+        </section>
       ) : null}
 
       {isHouseholdAdmin ? (
-        <div className="card">
-          <h2>Household login URL</h2>
-          <p className="muted">
-            The slug appears in your household&apos;s sign-in link. Lowercase letters, numbers, and hyphens only.
+        <Card className="space-y-3">
+          <h2 className="m-0 text-base font-bold">Household login URL</h2>
+          <p className="m-0 text-sm text-text-secondary">
+            The slug appears in your household&apos;s sign-in link. Lowercase letters, numbers, and
+            hyphens only.
           </p>
-          <input
-            className="input"
+          <Input
             placeholder="Household slug"
             value={householdSlug}
             onChange={(e) => setHouseholdSlug(e.target.value.toLowerCase())}
           />
-          <p className="muted">
-            Login URL: <code>/h/{householdSlug || "your-slug"}/login</code>
+          <p className="m-0 text-sm text-text-muted">
+            Login URL: <code className="text-text-secondary">/h/{householdSlug || "your-slug"}/login</code>
           </p>
-          <button
-            type="button"
-            className="btn-secondary btn-block"
+          <Button
+            variant="secondary"
+            block
             disabled={householdSlugBusy || !householdSlug.trim()}
             onClick={() => void saveHouseholdSlug()}
           >
             {householdSlugBusy ? "Saving…" : "Update household slug"}
-          </button>
-          {householdSlugMessage ? <p className="accent">{householdSlugMessage}</p> : null}
-          {householdSlugError ? <p className="error">{householdSlugError}</p> : null}
-        </div>
+          </Button>
+          {householdSlugMessage ? <p className="m-0 text-sm text-accent">{householdSlugMessage}</p> : null}
+          {householdSlugError ? <p className="m-0 text-sm text-danger-fg">{householdSlugError}</p> : null}
+        </Card>
       ) : null}
 
       {canSetParentPin(user) ? (
-        <>
-          <h2>Parent PIN</h2>
-          <p className="muted">
+        <Card className="space-y-3">
+          <h2 className="m-0 text-base font-bold">Parent PIN</h2>
+          <p className="m-0 text-sm text-text-secondary">
             Required for children to switch accounts on a shared device.
             {hasParentPin ? " PIN is set." : " No PIN set yet."}
           </p>
-          <input
-            className="input"
+          <Input
             type="password"
             inputMode="numeric"
             placeholder="4+ digit PIN"
             value={parentPin}
             onChange={(e) => setParentPin(e.target.value)}
           />
-          <button
-            type="button"
-            className="btn-secondary btn-block"
+          <Button
+            variant="secondary"
+            block
             onClick={() =>
               void api.setParentPin(parentPin).then(() => {
                 setHasParentPin(true);
@@ -287,89 +329,87 @@ export function SettingsPage() {
             }
           >
             {hasParentPin ? "Update parent PIN" : "Set parent PIN"}
-          </button>
-        </>
+          </Button>
+        </Card>
       ) : null}
 
       {scrobblerProviders.length > 0 ? (
-        <>
-          <h2>Scrobbling</h2>
-          <p className="muted">
-            Link a scrobbler account for <strong>{user?.display_name}</strong>. Each household member links their own
-            account.
-          </p>
+        <section className="space-y-3">
+          <div>
+            <h2 className="m-0 text-base font-bold">Scrobbling</h2>
+            <p className="mt-1 mb-0 text-sm text-text-secondary">
+              Link a scrobbler account for <strong>{user?.display_name}</strong>. Each household
+              member links their own account.
+            </p>
+          </div>
           {scrobblerProviders.map((provider) => {
             const status = scrobblerStatuses[provider.id];
             const pendingToken = pendingLinkTokens[provider.id];
             return (
-              <div className="card" key={provider.id}>
-                <p className="label">{provider.name}</p>
+              <Card key={provider.id} className="space-y-3">
+                <p className="m-0 text-xs font-semibold uppercase tracking-wide text-text-muted">
+                  {provider.name}
+                </p>
                 {status?.linked ? (
                   <>
-                    <p className="track-title">Linked as {status.username}</p>
-                    <label className="muted">
+                    <p className="m-0 font-semibold">Linked as {status.username}</p>
+                    <label className="flex items-center gap-2 text-sm text-text-secondary">
                       <input
                         type="checkbox"
+                        className="size-4 accent-accent"
                         checked={status.scrobbling_enabled}
                         onChange={(e) => void toggleScrobbling(provider.id, e.target.checked)}
-                      />{" "}
+                      />
                       Scrobble plays for this profile
                     </label>
-                    <button
-                      type="button"
-                      className="btn-secondary btn-block"
-                      onClick={() => void unlinkScrobbler(provider.id)}
-                    >
+                    <Button variant="secondary" block onClick={() => void unlinkScrobbler(provider.id)}>
                       Unlink {provider.name}
-                    </button>
+                    </Button>
                   </>
                 ) : (
                   <>
-                    <p className="muted">Not linked for this profile.</p>
-                    <button
-                      type="button"
-                      className="btn-primary btn-block"
-                      onClick={() => void startScrobblerLink(provider.id)}
-                    >
+                    <p className="m-0 text-sm text-text-secondary">Not linked for this profile.</p>
+                    <Button block onClick={() => void startScrobblerLink(provider.id)}>
                       Connect {provider.name}
-                    </button>
+                    </Button>
                     {pendingToken ? (
-                      <button
-                        type="button"
-                        className="btn-secondary btn-block"
+                      <Button
+                        variant="secondary"
+                        block
                         onClick={() => void completeScrobblerLink(provider.id)}
                       >
                         Complete link
-                      </button>
+                      </Button>
                     ) : null}
                   </>
                 )}
-              </div>
+              </Card>
             );
           })}
-          {scrobblerError ? <p className="error">{scrobblerError}</p> : null}
-        </>
+          {scrobblerError ? <p className="m-0 text-sm text-danger-fg">{scrobblerError}</p> : null}
+        </section>
       ) : null}
 
       {!isChild ? (
-        <>
-          <h2>Server</h2>
-          <p className="muted">API URL for this browser app (default: localhost:8010)</p>
-          <input className="input" value={apiUrl} onChange={(e) => setApiUrlState(e.target.value)} />
-          <button
-            type="button"
-            className="btn-primary btn-block"
+        <Card className="space-y-3">
+          <h2 className="m-0 text-base font-bold">Server</h2>
+          <p className="m-0 text-sm text-text-secondary">
+            API URL for this browser app (default: localhost:8010)
+          </p>
+          <Input value={apiUrl} onChange={(e) => setApiUrlState(e.target.value)} />
+          <Button
+            block
             onClick={() => {
               setApiUrl(apiUrl);
               setMessage("Server URL saved");
             }}
           >
             Save server URL
-          </button>
-        </>
+          </Button>
+        </Card>
       ) : null}
 
-      {message ? <p className="accent">{message}</p> : null}
+      {message ? <p className="m-0 text-sm text-accent">{message}</p> : null}
 
       <PinModal
         visible={pinOpen}

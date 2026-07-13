@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import { Button } from "@/components/ui/Button";
+import { Input } from "@/components/ui/Input";
 import { api } from "@/lib/api";
 import { useAuthStore } from "@/stores/authStore";
 
@@ -50,36 +52,51 @@ export function LoginPage({ presetHouseholdSlug }: LoginPageProps = {}) {
   };
 
   return (
-    <div className="auth-page">
-      <form className="auth-card" onSubmit={(e) => void submit(e)}>
-        <h1>{householdName ? householdName : "Tuneflow"}</h1>
-        <p className="muted">
-          {lockHousehold
-            ? `Sign in to ${householdSlugFromRoute}`
-            : "Sign in with your household, username, and password."}
-        </p>
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden p-6">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--color-accent-dim)_0%,_transparent_55%),radial-gradient(ellipse_at_bottom_right,_#1a1a2e_0%,_var(--color-base)_60%)]" />
+      <form
+        className="relative w-full max-w-md space-y-4 rounded-2xl border border-border bg-elevated/90 p-8 shadow-elevated backdrop-blur-xl"
+        onSubmit={(e) => void submit(e)}
+      >
+        <div>
+          <div className="mb-1 text-sm font-bold uppercase tracking-widest text-accent">Tuneflow</div>
+          <h1 className="m-0 text-3xl font-extrabold tracking-tight">
+            {householdName ? householdName : "Welcome back"}
+          </h1>
+          <p className="mt-2 mb-0 text-sm text-text-secondary">
+            {lockHousehold
+              ? `Sign in to ${householdSlugFromRoute}`
+              : "Sign in with your household, username, and password."}
+          </p>
+        </div>
         {!lockHousehold ? (
-          <input
-            className="input"
+          <Input
             placeholder="Household (e.g. siglerfive)"
             value={householdSlug}
             onChange={(e) => setHouseholdSlug(e.target.value)}
           />
         ) : null}
-        <input className="input" placeholder="Username" value={username} onChange={(e) => setUsername(e.target.value)} />
-        <input
-          className="input"
+        <Input
+          placeholder="Username"
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+          autoComplete="username"
+        />
+        <Input
           type="password"
           placeholder="Password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
+          autoComplete="current-password"
         />
-        {error ? <p className="error">{error}</p> : null}
-        <button className="btn-primary" type="submit" disabled={loading}>
+        {error ? <p className="m-0 text-sm text-danger-fg">{error}</p> : null}
+        <Button type="submit" block disabled={loading}>
           {loading ? "Signing in…" : "Sign in"}
-        </button>
+        </Button>
         {!lockHousehold ? (
-          <p className="muted">Root administrators: use household <code>system</code>.</p>
+          <p className="m-0 text-center text-xs text-text-muted">
+            Root administrators: use household <code className="text-text-secondary">system</code>.
+          </p>
         ) : null}
       </form>
     </div>
@@ -106,29 +123,48 @@ export function SetupPage() {
   };
 
   return (
-    <div className="auth-page">
-      <form className="auth-card" onSubmit={(e) => void submit(e)}>
-        <h1>Welcome to Tuneflow</h1>
-        <p className="muted">
-          Create the root administrator account for this server. Root admins belong to the system household, manage
-          households and system settings, and cannot add members to that household.
-        </p>
-        <input className="input" placeholder="Display name" value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
-        <input className="input" placeholder="Username" value={username} onChange={(e) => setUsername(e.target.value)} />
-        <input
-          className="input"
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden p-6">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--color-accent-dim)_0%,_transparent_55%),radial-gradient(ellipse_at_bottom_left,_#1a1a2e_0%,_var(--color-base)_60%)]" />
+      <form
+        className="relative w-full max-w-md space-y-4 rounded-2xl border border-border bg-elevated/90 p-8 shadow-elevated backdrop-blur-xl"
+        onSubmit={(e) => void submit(e)}
+      >
+        <div>
+          <div className="mb-1 text-sm font-bold uppercase tracking-widest text-accent">Tuneflow</div>
+          <h1 className="m-0 text-3xl font-extrabold tracking-tight">Welcome</h1>
+          <p className="mt-2 mb-0 text-sm text-text-secondary">
+            Create the root administrator account for this server. Root admins belong to the system
+            household, manage households and system settings, and cannot add members to that
+            household.
+          </p>
+        </div>
+        <Input
+          placeholder="Display name"
+          value={displayName}
+          onChange={(e) => setDisplayName(e.target.value)}
+        />
+        <Input
+          placeholder="Username"
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+        />
+        <Input
           type="password"
           placeholder="Password (8+ characters)"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           minLength={8}
         />
-        {error ? <p className="error">{error}</p> : null}
-        <button className="btn-primary" type="submit">
+        {error ? <p className="m-0 text-sm text-danger-fg">{error}</p> : null}
+        <Button type="submit" block>
           Create account
-        </button>
-        <p className="muted">
-          Already set up? <Link to="/login">Sign in</Link> with household <code>system</code>.
+        </Button>
+        <p className="m-0 text-center text-xs text-text-muted">
+          Already set up?{" "}
+          <Link to="/login" className="font-semibold text-accent hover:underline">
+            Sign in
+          </Link>{" "}
+          with household <code className="text-text-secondary">system</code>.
         </p>
       </form>
     </div>

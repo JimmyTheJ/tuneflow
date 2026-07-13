@@ -1,9 +1,13 @@
+import { Search as SearchIcon, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { TrackRowWithActions } from "@/components/TrackRowWithActions";
+import { Button } from "@/components/ui/Button";
+import { TrackRowSkeleton } from "@/components/ui/Skeleton";
 import { useLikedTracks } from "@/hooks/useLikedTracks";
 import { useSearchHistory } from "@/hooks/useSearchHistory";
 import { api } from "@/lib/api";
+import { cn } from "@/lib/cn";
 import { usePlayerStore } from "@/stores/playerStore";
 import type { Playlist, Track } from "@/types";
 
@@ -155,13 +159,20 @@ export function SearchPage() {
   const playable = results.filter((t) => !t.blocked_reason);
 
   return (
-    <div className="page">
-      <h1>Search</h1>
-      <form className="search-row" onSubmit={runSearch}>
-        <div className="search-field">
+    <div className="space-y-6">
+      <h1 className="m-0 text-3xl font-bold tracking-tight md:text-4xl">Search</h1>
+
+      <form className="relative flex gap-2" onSubmit={runSearch}>
+        <div className="relative flex-1">
+          <SearchIcon className="pointer-events-none absolute left-4 top-1/2 size-5 -translate-y-1/2 text-text-muted" />
           <input
-            className="input"
-            placeholder="Search songs, artists…"
+            className={cn(
+              "w-full rounded-full border border-border bg-elevated py-3.5 pl-12 pr-4 text-text",
+              "placeholder:text-text-muted transition-colors",
+              "focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/30",
+              "disabled:opacity-50",
+            )}
+            placeholder="What do you want to listen to?"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onFocus={() => setInputFocused(true)}
@@ -176,20 +187,29 @@ export function SearchPage() {
             role="combobox"
           />
           {showSuggestions ? (
-            <div id="search-suggestions" className="search-suggestions" role="listbox">
+            <div
+              id="search-suggestions"
+              className="absolute left-0 right-0 top-[calc(100%+6px)] z-20 overflow-hidden rounded-xl border border-border bg-elevated shadow-elevated"
+              role="listbox"
+            >
               {!query.trim() ? (
-                <div className="search-suggestions-header">
+                <div className="flex items-center justify-between border-b border-border px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-text-muted">
                   <span>Recent searches</span>
-                  <button className="search-suggestions-clear" type="button" onMouseDown={(e) => e.preventDefault()} onClick={clearHistory}>
+                  <button
+                    className="border-0 bg-transparent text-xs font-semibold normal-case tracking-normal text-text-secondary hover:text-text cursor-pointer"
+                    type="button"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={clearHistory}
+                  >
                     Clear
                   </button>
                 </div>
               ) : null}
-              <ul className="search-suggestions-list">
+              <ul className="m-0 list-none p-1">
                 {suggestions.map((suggestion) => (
-                  <li key={suggestion.text} className="search-suggestion-item" role="option">
+                  <li key={suggestion.text} className="flex items-center" role="option">
                     <button
-                      className="search-suggestion"
+                      className="min-w-0 flex-1 cursor-pointer border-0 bg-transparent px-3 py-2.5 text-left text-sm text-text hover:bg-highlight rounded-lg"
                       type="button"
                       onMouseDown={(e) => e.preventDefault()}
                       onClick={() => selectSuggestion(suggestion.text)}
@@ -198,13 +218,13 @@ export function SearchPage() {
                     </button>
                     {!query.trim() ? (
                       <button
-                        className="search-suggestion-remove"
+                        className="cursor-pointer border-0 bg-transparent px-3 py-2 text-text-muted hover:text-text"
                         type="button"
                         aria-label={`Remove ${suggestion.text}`}
                         onMouseDown={(e) => e.preventDefault()}
                         onClick={() => removeQuery(suggestion.text)}
                       >
-                        ×
+                        <X className="size-4" />
                       </button>
                     ) : null}
                   </li>
@@ -213,40 +233,52 @@ export function SearchPage() {
             </div>
           ) : null}
         </div>
-        <button className="btn-primary" type="submit" disabled={loading || !query.trim()}>
-          {loading ? "Searching…" : "Go"}
-        </button>
+        <Button type="submit" disabled={loading || !query.trim()} className="shrink-0 px-6">
+          {loading ? "Searching…" : "Search"}
+        </Button>
       </form>
+
       {loading ? (
-        <p className="search-status" role="status" aria-live="polite">
-          <span className="search-spinner" aria-hidden="true" />
-          Searching for &ldquo;{lastQuery}&rdquo;&hellip;
-        </p>
+        <div className="space-y-1" role="status" aria-live="polite">
+          <p className="mb-3 flex items-center gap-2 text-sm text-text-secondary">
+            <span className="tf-spinner" aria-hidden="true" />
+            Searching for &ldquo;{lastQuery}&rdquo;&hellip;
+          </p>
+          {Array.from({ length: 6 }).map((_, i) => (
+            <TrackRowSkeleton key={i} />
+          ))}
+        </div>
       ) : null}
-      {error ? <p className="error">{error}</p> : null}
+
+      {error ? <p className="text-danger-fg">{error}</p> : null}
+
       {!loading && lastQuery && results.length === 0 && !error ? (
-        <p className="search-status search-status-empty">No results for &ldquo;{lastQuery}&rdquo;.</p>
+        <p className="text-text-muted">No results for &ldquo;{lastQuery}&rdquo;.</p>
       ) : null}
-      {results.map((track) => (
-        <TrackRowWithActions
-          key={track.video_id}
-          track={track}
-          playQueue={playable}
-          likedVideoIds={likedVideoIds}
-          playlists={playlists}
-          displayTitle={track.source_title ?? track.title}
-          showBadges
-          subtitle={track.blocked_reason ? `Blocked: ${track.blocked_reason}` : undefined}
-          disabled={!!track.blocked_reason}
-          onPlay={() => void playTrack(track, playable)}
-          onLikedChange={() => void loadLibraryData()}
-          onPlaylistsChange={() => void loadLibraryData()}
-        />
-      ))}
-      {nextPage ? <div ref={loadMoreRef} className="search-load-sentinel" aria-hidden="true" /> : null}
+
+      <div className="space-y-0.5">
+        {results.map((track) => (
+          <TrackRowWithActions
+            key={track.video_id}
+            track={track}
+            playQueue={playable}
+            likedVideoIds={likedVideoIds}
+            playlists={playlists}
+            displayTitle={track.source_title ?? track.title}
+            showBadges
+            subtitle={track.blocked_reason ? `Blocked: ${track.blocked_reason}` : undefined}
+            disabled={!!track.blocked_reason}
+            onPlay={() => void playTrack(track, playable)}
+            onLikedChange={() => void loadLibraryData()}
+            onPlaylistsChange={() => void loadLibraryData()}
+          />
+        ))}
+      </div>
+
+      {nextPage ? <div ref={loadMoreRef} className="h-px" aria-hidden="true" /> : null}
       {loadingMore ? (
-        <p className="search-status" role="status" aria-live="polite">
-          <span className="search-spinner" aria-hidden="true" />
+        <p className="flex items-center gap-2 text-sm text-text-secondary" role="status" aria-live="polite">
+          <span className="tf-spinner" aria-hidden="true" />
           Loading more results&hellip;
         </p>
       ) : null}

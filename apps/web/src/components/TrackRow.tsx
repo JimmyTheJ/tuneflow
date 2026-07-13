@@ -1,11 +1,13 @@
 import type { Track } from "@/types";
 import { TrackThumb } from "@/components/TrackThumb";
+import { Badge } from "@/components/ui/Badge";
 import {
   extractTrackBadges,
   formatTrackArtist,
   trackDetailLine,
 } from "@/lib/tracks";
 import { formatTime } from "@/lib/time";
+import { cn } from "@/lib/cn";
 
 type Props = {
   track: Track;
@@ -14,6 +16,7 @@ type Props = {
   displayTitle?: string;
   showDuration?: boolean;
   showBadges?: boolean;
+  index?: number;
   onClick?: () => void;
   disabled?: boolean;
 };
@@ -25,6 +28,7 @@ export function TrackRow({
   displayTitle,
   showDuration = true,
   showBadges = false,
+  index,
   onClick,
   disabled,
 }: Props) {
@@ -38,30 +42,45 @@ export function TrackRow({
       : null;
 
   return (
-    <button type="button" className="track-row" onClick={onClick} disabled={disabled}>
+    <button
+      type="button"
+      className={cn(
+        "group flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors",
+        "border-0 bg-transparent text-inherit",
+        onClick && !disabled ? "cursor-pointer hover:bg-highlight/80" : "cursor-default",
+        disabled && "cursor-not-allowed opacity-50",
+      )}
+      onClick={onClick}
+      disabled={disabled}
+    >
+      {index != null ? (
+        <span className="w-5 shrink-0 text-center text-sm tabular-nums text-text-muted">{index}</span>
+      ) : null}
       <TrackThumb
         videoId={track.video_id}
-        className="track-thumb"
-        fallbackClassName="track-thumb track-thumb-fallback"
+        className="size-[52px] shrink-0 rounded-md"
+        fallbackClassName="size-[52px] shrink-0 rounded-md"
       />
-      <div className="track-meta">
-        <div className="track-title-row">
-          <div className="track-title">{title}</div>
-          {duration ? <span className="track-duration">{duration}</span> : null}
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline gap-3">
+          <div className="min-w-0 flex-1 truncate font-semibold text-text">{title}</div>
+          {duration ? (
+            <span className="shrink-0 text-sm tabular-nums text-text-secondary">{duration}</span>
+          ) : null}
         </div>
-        <div className="track-subtitle-row">
-          <div className="track-subtitle">{artistLine}</div>
+        <div className="mt-0.5 flex min-w-0 items-center gap-2">
+          <div className="min-w-0 truncate text-sm text-text-secondary">{artistLine}</div>
           {badges.length > 0 ? (
-            <div className="track-badges" aria-label="Version details">
+            <div className="flex shrink-0 flex-wrap gap-1" aria-label="Version details">
               {badges.map((badge) => (
-                <span key={badge} className="track-badge">
-                  {badge}
-                </span>
+                <Badge key={badge}>{badge}</Badge>
               ))}
             </div>
           ) : null}
         </div>
-        {detailLine ? <div className="track-detail">{detailLine}</div> : null}
+        {detailLine ? (
+          <div className="mt-1 line-clamp-2 text-xs leading-snug text-text-muted">{detailLine}</div>
+        ) : null}
       </div>
     </button>
   );

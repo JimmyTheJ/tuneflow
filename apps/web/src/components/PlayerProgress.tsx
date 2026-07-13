@@ -1,4 +1,5 @@
 import { formatTime } from "@/lib/time";
+import { cn } from "@/lib/cn";
 import { usePlayerStore } from "@/stores/playerStore";
 
 type Props = {
@@ -12,14 +13,15 @@ export function PlayerProgress({ className }: Props) {
 
   const max = Math.max(durationSec, 0);
   const value = Math.min(positionSec, max || positionSec);
+  const percent = max > 0 ? (value / max) * 100 : 0;
 
   return (
-    <div className={className ? `player-progress ${className}` : "player-progress"}>
-      <span className="player-time" aria-hidden="true">
+    <div className={cn("grid w-full grid-cols-[auto_1fr_auto] items-center gap-2", className)}>
+      <span className="min-w-10 text-right text-xs tabular-nums text-text-muted" aria-hidden="true">
         {formatTime(positionSec)}
       </span>
       <input
-        className="player-progress-slider"
+        className="tf-slider"
         type="range"
         min={0}
         max={max || 0}
@@ -27,9 +29,10 @@ export function PlayerProgress({ className }: Props) {
         value={value}
         disabled={max <= 0}
         aria-label="Seek"
+        style={{ ["--value" as string]: `${percent}%` }}
         onChange={(e) => seek(Number(e.target.value))}
       />
-      <span className="player-time" aria-hidden="true">
+      <span className="min-w-10 text-xs tabular-nums text-text-muted" aria-hidden="true">
         {formatTime(durationSec)}
       </span>
     </div>

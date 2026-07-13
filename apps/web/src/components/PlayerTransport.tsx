@@ -1,5 +1,8 @@
+import { Pause, Play, SkipBack, SkipForward } from "lucide-react";
 import { canPlayNext, canPlayPrevious, usePlayerStore } from "@/stores/playerStore";
 import { PlayerQueueControls } from "@/components/PlayerQueueControls";
+import { IconButton } from "@/components/ui/IconButton";
+import { cn } from "@/lib/cn";
 
 type Props = {
   size?: "mini" | "large";
@@ -15,40 +18,48 @@ export function PlayerTransport({ size = "mini", showQueueControls = false }: Pr
   const playPrevious = usePlayerStore((s) => s.playPrevious);
   const playNext = usePlayerStore((s) => s.playNext);
 
-  const className = size === "large" ? "player-transport player-transport-large" : "player-transport";
+  const large = size === "large";
 
   return (
-    <div className={className}>
-      {showQueueControls ? <PlayerQueueControls compact={size === "mini"} showRepeat={false} /> : null}
-      <button
-        type="button"
-        className="player-transport-btn"
-        onClick={() => void playPrevious()}
+    <div className={cn("flex items-center gap-2", large && "w-full justify-center gap-5")}>
+      {showQueueControls ? <PlayerQueueControls compact={!large} showRepeat={false} /> : null}
+      <IconButton
+        label="Previous"
+        size={large ? "lg" : "md"}
         disabled={!canPrevious}
-        aria-label="Previous"
+        onClick={() => void playPrevious()}
       >
-        ⏮
-      </button>
+        <SkipBack className={large ? "size-6" : "size-5"} fill="currentColor" />
+      </IconButton>
       <button
         type="button"
-        className={`player-transport-btn player-transport-btn-primary${size === "large" ? " player-transport-btn-large" : ""}`}
-        onClick={() => togglePlayback()}
-        disabled={isLoading}
         aria-label={isPlaying ? "Pause" : "Play"}
+        disabled={isLoading}
+        onClick={() => togglePlayback()}
+        className={cn(
+          "inline-flex items-center justify-center rounded-full bg-text text-base transition-transform",
+          "hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed",
+          large ? "size-16" : "size-9",
+        )}
       >
-        {isLoading ? "…" : isPlaying ? "⏸" : "▶"}
+        {isLoading ? (
+          <span className="tf-spinner border-base border-t-accent" />
+        ) : isPlaying ? (
+          <Pause className={large ? "size-7" : "size-4"} fill="currentColor" />
+        ) : (
+          <Play className={cn(large ? "size-7" : "size-4", "translate-x-0.5")} fill="currentColor" />
+        )}
       </button>
-      <button
-        type="button"
-        className="player-transport-btn"
-        onClick={() => void playNext()}
+      <IconButton
+        label="Next"
+        size={large ? "lg" : "md"}
         disabled={!canNext}
-        aria-label="Next"
+        onClick={() => void playNext()}
       >
-        ⏭
-      </button>
+        <SkipForward className={large ? "size-6" : "size-5"} fill="currentColor" />
+      </IconButton>
       {showQueueControls ? (
-        <PlayerQueueControls compact={size === "mini"} showShuffle={false} />
+        <PlayerQueueControls compact={!large} showShuffle={false} />
       ) : null}
     </div>
   );
