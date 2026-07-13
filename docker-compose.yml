@@ -1,7 +1,7 @@
 # Optional shared reverse-proxy network: set DOCKER_SHARED_NETWORK in .env and use compose.ps1 / compose.sh.
 
 services:
-  api:
+  tuneflow-api:
     build:
       context: ./services/api
       args:
@@ -20,7 +20,7 @@ services:
       - ${TUNEFLOW_DATA_HOST_PATH:-tuneflow-data}:/app/data
     restart: unless-stopped
 
-  web:
+  tuneflow-web:
     build:
       context: ./apps/web
       args:
@@ -28,10 +28,10 @@ services:
     ports:
       - "${WEB_PORT:-3010}:80"
     depends_on:
-      - api
+      - tuneflow-api
     restart: unless-stopped
 
-  piped-backend:
+  tuneflow-piped:
     image: 1337kavin/piped-backend:latest
     profiles: ["piped"]
     environment:

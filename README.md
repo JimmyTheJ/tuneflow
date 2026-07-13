@@ -17,7 +17,7 @@ cd D:\workspace\tuneflow
 copy .env.example .env
 # Edit JWT_SECRET, BOOTSTRAP_* and LLM_BASE_URL
 
-.\compose.ps1 up --build api
+.\compose.ps1 up --build tuneflow-api
 ```
 
 API runs at `http://localhost:8010` by default. Interactive docs at `http://localhost:8010/docs`.
@@ -77,7 +77,7 @@ Open **http://localhost:5190**. The default API URL is `http://localhost:8010` (
 
 ```powershell
 cd D:\workspace\tuneflow
-.\compose.ps1 up --build api web
+.\compose.ps1 up --build tuneflow-api tuneflow-web
 ```
 
 On Linux/macOS, use `./compose.sh` instead of `.\compose.ps1`.
@@ -92,7 +92,7 @@ Override host ports in `.env`: `API_PORT=8020`, `WEB_PORT=3020`.
 
 Set `VITE_API_URL` in `.env` before building if the browser needs a different API address (e.g. LAN IP).
 
-To attach API and web to an existing reverse-proxy network (e.g. nginx), set `DOCKER_SHARED_NETWORK=nginx_network` in `.env` and use `compose.ps1` / `compose.sh`. The network must already exist; nginx can then reach `http://web:80` and `http://api:8000`.
+To attach API and web to an existing reverse-proxy network (e.g. nginx), set `DOCKER_SHARED_NETWORK=nginx_network` in `.env` and use `compose.ps1` / `compose.sh`. The network must already exist; nginx can then reach `http://tuneflow-web:80` and `http://tuneflow-api:8000`.
 
 ### Persistent data (Docker)
 
@@ -226,7 +226,7 @@ Check connectivity: `GET /api/ai/status`
 ## Self-hosted Piped (optional)
 
 ```powershell
-# In .env: PIPED_BASE_URL=http://piped-backend:8080
+# In .env: PIPED_BASE_URL=http://tuneflow-piped:8080
 .\compose.ps1 --profile piped up --build
 ```
 

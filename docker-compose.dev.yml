@@ -1,8 +1,8 @@
 # Override for local dev without self-hosted Piped.
-# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up api
+# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up tuneflow-api
 
 services:
-  api:
+  tuneflow-api:
     environment:
       PIPED_BASE_URL: https://pipedapi.kavin.rocks
     depends_on: []

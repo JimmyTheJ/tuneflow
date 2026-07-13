@@ -4,10 +4,10 @@
 # The network must already exist (e.g. docker network create nginx_network).
 
 services:
-  api:
+  tuneflow-api:
     networks:
       - shared
-  web:
+  tuneflow-web:
     networks:
       - shared
 
