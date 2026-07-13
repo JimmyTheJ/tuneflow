@@ -2,6 +2,7 @@
 
 services:
   tuneflow-api:
+    container_name: tuneflow-api
     build:
       context: ./services/api
       args:
@@ -21,6 +22,7 @@ services:
     restart: unless-stopped
 
   tuneflow-web:
+    container_name: tuneflow-web
     build:
       context: ./apps/web
       args:
@@ -32,6 +34,7 @@ services:
     restart: unless-stopped
 
   tuneflow-piped:
+    container_name: tuneflow-piped
     image: 1337kavin/piped-backend:latest
     profiles: ["piped"]
     environment:
