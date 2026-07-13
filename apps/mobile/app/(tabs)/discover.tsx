@@ -1,15 +1,11 @@
+import { Ionicons } from "@expo/vector-icons";
 import { useCallback, useEffect, useState } from "react";
-import {
-  ActivityIndicator,
-  Pressable,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from "react-native";
+import { RefreshControl, ScrollView, Text, View } from "react-native";
 
 import { TrackRow } from "@/components/TrackRow";
+import { Card } from "@/components/ui/Card";
+import { SectionHeader } from "@/components/ui/SectionHeader";
+import { Skeleton, TrackRowSkeleton } from "@/components/ui/Skeleton";
 import { api } from "@/lib/api";
 import { usePlayerStore } from "@/stores/player";
 import type { AiInsights, AiRecommendations, LlmStatus } from "@/types";
@@ -52,135 +48,82 @@ export default function DiscoverScreen() {
 
   return (
     <ScrollView
-      style={styles.container}
-      refreshControl={<RefreshControl refreshing={loading} onRefresh={() => void load()} />}
+      className="flex-1 bg-base px-4 pt-2"
+      refreshControl={<RefreshControl refreshing={loading} onRefresh={() => void load()} tintColor="#1db954" />}
     >
-      <Text style={styles.heading}>Discover</Text>
-      <Text style={styles.subheading}>Personalized insights from your listening history</Text>
+      <Text className="text-3xl font-bold tracking-tight text-text">Discover</Text>
+      <Text className="mb-4 mt-1 text-text-secondary">
+        Personalized insights from your listening history
+      </Text>
 
-      {loading && !status ? <ActivityIndicator color="#22c55e" style={{ marginTop: 24 }} /> : null}
-      {error ? <Text style={styles.error}>{error}</Text> : null}
+      {error ? <Text className="mb-3 text-danger-fg">{error}</Text> : null}
+
+      {loading && !status ? (
+        <View className="gap-4">
+          <Skeleton className="h-24 w-full rounded-xl" />
+          <Skeleton className="h-32 w-full rounded-xl" />
+          {Array.from({ length: 3 }).map((_, i) => (
+            <TrackRowSkeleton key={i} />
+          ))}
+        </View>
+      ) : null}
 
       {status ? (
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>AI status</Text>
-          <Text style={styles.cardBody}>
-            {status.reachable
-              ? `Connected to ${status.model} at ${status.base_url}`
-              : status.detail ?? "LLM not reachable. Check server LLM_BASE_URL (e.g. Ollama on your LAN)."}
-          </Text>
-        </View>
+        <Card className="mb-4">
+          <View className="flex-row items-start gap-3">
+            <View className="h-10 w-10 items-center justify-center rounded-full bg-accent/20">
+              <Ionicons name="sparkles" size={20} color="#1db954" />
+            </View>
+            <View className="min-w-0 flex-1">
+              <Text className="text-base font-bold text-text">AI status</Text>
+              <Text className="mt-1 text-sm text-text-secondary">
+                {status.reachable
+                  ? `Connected to ${status.model}`
+                  : (status.detail ??
+                    "LLM not reachable. Check server LLM_BASE_URL (e.g. Ollama on your LAN).")}
+              </Text>
+            </View>
+          </View>
+        </Card>
       ) : null}
 
       {insights ? (
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Your listening</Text>
-          <Text style={styles.cardBody}>{insights.summary}</Text>
+        <Card className="mb-4">
+          <Text className="text-base font-bold text-text">Your listening</Text>
+          <Text className="mt-2 text-[15px] leading-6 text-text">{insights.summary}</Text>
           {insights.top_artists.length > 0 ? (
-            <Text style={styles.meta}>Top artists: {insights.top_artists.join(", ")}</Text>
+            <Text className="mt-2 text-sm text-text-secondary">
+              Top artists: {insights.top_artists.join(", ")}
+            </Text>
           ) : null}
           {insights.listening_patterns.map((item) => (
-            <Text key={item} style={styles.bullet}>
+            <Text key={item} className="mt-1 text-sm leading-5 text-text-secondary">
               • {item}
             </Text>
           ))}
-        </View>
+        </Card>
       ) : null}
 
-      {recommendations ? (
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Suggested for you</Text>
-          <Text style={styles.cardBody}>{recommendations.summary}</Text>
-          {recommendations.suggestions.map((suggestion) => (
-            <View key={suggestion.query} style={styles.suggestionBlock}>
-              <Text style={styles.suggestionReason}>{suggestion.reason}</Text>
-              {suggestion.tracks.map((track) => (
-                <TrackRow
-                  key={track.video_id}
-                  track={track}
-                  onPress={() => void playTrack(track, suggestion.tracks)}
-                />
-              ))}
-              {!suggestion.tracks.length ? (
-                <Pressable
-                  style={styles.searchLink}
-                  onPress={() => {
-                    // User can search manually; keep MVP simple
-                  }}
-                >
-                  <Text style={styles.searchLinkText}>Try searching: {suggestion.query}</Text>
-                </Pressable>
-              ) : null}
-            </View>
-          ))}
+      {recommendations?.suggestions.map((suggestion) => (
+        <View key={suggestion.query} className="mb-5">
+          <SectionHeader title={suggestion.reason} />
+          <Card className="!p-2">
+            {suggestion.tracks.map((track) => (
+              <TrackRow
+                key={track.video_id}
+                track={track}
+                onPress={() => void playTrack(track, suggestion.tracks)}
+              />
+            ))}
+            {!suggestion.tracks.length ? (
+              <Text className="px-2 py-2 text-sm text-text-muted">
+                Try searching: {suggestion.query}
+              </Text>
+            ) : null}
+          </Card>
         </View>
-      ) : null}
+      ))}
+      <View className="h-8" />
     </ScrollView>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#0a0a0a",
-    paddingHorizontal: 16,
-    paddingTop: 8,
-  },
-  heading: {
-    color: "#fff",
-    fontSize: 28,
-    fontWeight: "700",
-  },
-  subheading: {
-    color: "#a3a3a3",
-    fontSize: 15,
-    marginBottom: 16,
-    marginTop: 4,
-  },
-  card: {
-    backgroundColor: "#171717",
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 16,
-    gap: 8,
-  },
-  cardTitle: {
-    color: "#fff",
-    fontSize: 18,
-    fontWeight: "700",
-  },
-  cardBody: {
-    color: "#d4d4d4",
-    fontSize: 15,
-    lineHeight: 22,
-  },
-  meta: {
-    color: "#a3a3a3",
-    fontSize: 14,
-  },
-  bullet: {
-    color: "#d4d4d4",
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  suggestionBlock: {
-    marginTop: 8,
-    gap: 4,
-  },
-  suggestionReason: {
-    color: "#22c55e",
-    fontSize: 14,
-    fontWeight: "600",
-  },
-  searchLink: {
-    paddingVertical: 8,
-  },
-  searchLinkText: {
-    color: "#a3a3a3",
-    fontSize: 14,
-  },
-  error: {
-    color: "#f87171",
-    marginBottom: 12,
-  },
-});

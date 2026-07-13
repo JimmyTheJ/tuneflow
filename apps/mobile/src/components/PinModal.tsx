@@ -1,5 +1,7 @@
 import { useState } from "react";
-import { Modal, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { Modal, Text, TextInput, View } from "react-native";
+
+import { Button } from "@/components/ui/Button";
 
 type Props = {
   visible: boolean;
@@ -45,10 +47,10 @@ export function PinModal({ visible, title, message, onVerify, onSuccess, onCance
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={handleCancel}>
-      <View style={styles.overlay}>
-        <View style={styles.card}>
-          <Text style={styles.title}>{title}</Text>
-          {message ? <Text style={styles.message}>{message}</Text> : null}
+      <View className="flex-1 justify-center bg-black/70 px-6">
+        <View className="gap-3 rounded-2xl border border-border bg-elevated p-5">
+          <Text className="text-xl font-bold tracking-tight text-text">{title}</Text>
+          {message ? <Text className="text-[15px] leading-6 text-text-secondary">{message}</Text> : null}
           <TextInput
             value={pin}
             onChangeText={setPin}
@@ -56,86 +58,20 @@ export function PinModal({ visible, title, message, onVerify, onSuccess, onCance
             secureTextEntry
             maxLength={12}
             placeholder="Parent PIN"
-            placeholderTextColor="#737373"
-            style={styles.input}
+            placeholderTextColor="#6a6a6a"
+            className="rounded-xl border border-border bg-base px-3.5 py-3 text-center text-lg tracking-[4px] text-text"
           />
-          {error ? <Text style={styles.error}>{error}</Text> : null}
-          <View style={styles.actions}>
-            <Pressable style={styles.cancelButton} onPress={handleCancel}>
-              <Text style={styles.cancelText}>Cancel</Text>
-            </Pressable>
-            <Pressable style={styles.confirmButton} onPress={() => void submit()} disabled={loading}>
-              <Text style={styles.confirmText}>{loading ? "..." : "Confirm"}</Text>
-            </Pressable>
+          {error ? <Text className="text-sm text-danger-fg">{error}</Text> : null}
+          <View className="mt-1 flex-row gap-2.5">
+            <Button variant="secondary" className="flex-1" onPress={handleCancel}>
+              Cancel
+            </Button>
+            <Button className="flex-1" loading={loading} onPress={() => void submit()}>
+              Confirm
+            </Button>
           </View>
         </View>
       </View>
     </Modal>
   );
 }
-
-const styles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.7)",
-    justifyContent: "center",
-    padding: 24,
-  },
-  card: {
-    backgroundColor: "#171717",
-    borderRadius: 16,
-    padding: 20,
-    gap: 12,
-  },
-  title: {
-    color: "#fff",
-    fontSize: 20,
-    fontWeight: "700",
-  },
-  message: {
-    color: "#a3a3a3",
-    fontSize: 15,
-    lineHeight: 22,
-  },
-  input: {
-    backgroundColor: "#0a0a0a",
-    color: "#fff",
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 18,
-    letterSpacing: 4,
-    textAlign: "center",
-  },
-  error: {
-    color: "#f87171",
-    fontSize: 14,
-  },
-  actions: {
-    flexDirection: "row",
-    gap: 10,
-    marginTop: 4,
-  },
-  cancelButton: {
-    flex: 1,
-    backgroundColor: "#262626",
-    borderRadius: 12,
-    paddingVertical: 12,
-    alignItems: "center",
-  },
-  cancelText: {
-    color: "#fff",
-    fontWeight: "600",
-  },
-  confirmButton: {
-    flex: 1,
-    backgroundColor: "#22c55e",
-    borderRadius: 12,
-    paddingVertical: 12,
-    alignItems: "center",
-  },
-  confirmText: {
-    color: "#052e16",
-    fontWeight: "700",
-  },
-});

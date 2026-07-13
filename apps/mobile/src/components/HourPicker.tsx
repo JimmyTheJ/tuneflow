@@ -1,4 +1,4 @@
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, Text, View } from "react-native";
 
 type Props = {
   label: string;
@@ -15,52 +15,25 @@ function formatHour(hour: number): string {
 
 export function HourPicker({ label, value, onChange }: Props) {
   return (
-    <View style={styles.container}>
-      <Text style={styles.label}>{label}</Text>
-      <View style={styles.row}>
-        <Pressable style={styles.button} onPress={() => onChange((value + 23) % 24)}>
-          <Text style={styles.buttonText}>−</Text>
+    <View className="gap-2">
+      <Text className="text-sm text-text-secondary">{label}</Text>
+      <View className="flex-row items-center gap-4">
+        <Pressable
+          className="h-11 w-11 items-center justify-center rounded-xl bg-highlight active:bg-hover"
+          onPress={() => onChange((value + 23) % 24)}
+        >
+          <Text className="text-xl font-semibold text-text">−</Text>
         </Pressable>
-        <Text style={styles.value}>{formatHour(value)}</Text>
-        <Pressable style={styles.button} onPress={() => onChange((value + 1) % 24)}>
-          <Text style={styles.buttonText}>+</Text>
+        <Text className="min-w-[80px] text-center text-lg font-semibold tabular-nums text-text">
+          {formatHour(value)}
+        </Text>
+        <Pressable
+          className="h-11 w-11 items-center justify-center rounded-xl bg-highlight active:bg-hover"
+          onPress={() => onChange((value + 1) % 24)}
+        >
+          <Text className="text-xl font-semibold text-text">+</Text>
         </Pressable>
       </View>
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    gap: 8,
-  },
-  label: {
-    color: "#d4d4d4",
-    fontSize: 14,
-  },
-  row: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 16,
-  },
-  button: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    backgroundColor: "#0a0a0a",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  buttonText: {
-    color: "#fff",
-    fontSize: 22,
-    fontWeight: "600",
-  },
-  value: {
-    color: "#fff",
-    fontSize: 18,
-    fontWeight: "600",
-    minWidth: 80,
-    textAlign: "center",
-  },
-});

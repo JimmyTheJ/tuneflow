@@ -75,6 +75,11 @@ export type StreamInfo = Track & {
   playable_video_id?: string | null;
 };
 
+export type StreamSelection = {
+  video: boolean;
+  audio: boolean;
+};
+
 export type PlayHistoryEntry = Track & {
   id: number;
   listened_sec?: number | null;

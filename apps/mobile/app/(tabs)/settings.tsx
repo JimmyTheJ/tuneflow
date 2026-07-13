@@ -1,14 +1,46 @@
+import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import * as Linking from "expo-linking";
 import { useEffect, useState } from "react";
-import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { Pressable, ScrollView, Switch, Text, TextInput, View } from "react-native";
 
 import { PinModal } from "@/components/PinModal";
+import { Button } from "@/components/ui/Button";
+import { Card } from "@/components/ui/Card";
 import { api } from "@/lib/api";
-import { canManageMembers, canManageParentalControls, canSetParentPin, formatRoleProfiles, isChildProfile } from "@/lib/permissions";
+import {
+  canManageMembers,
+  canManageParentalControls,
+  canSetParentPin,
+  formatRoleProfiles,
+  isChildProfile,
+} from "@/lib/permissions";
 import { getApiUrl, setApiUrl } from "@/lib/settings";
 import { useAuthStore } from "@/stores/auth";
 import type { ParentalSettings, ScrobblerConnectionStatus, ScrobblerProviderInfo } from "@/types";
+
+function SettingsLink({
+  icon,
+  label,
+  onPress,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      className="mb-2 flex-row items-center gap-3 rounded-xl border border-border/60 bg-elevated px-4 py-3.5 active:bg-highlight"
+    >
+      <View className="h-9 w-9 items-center justify-center rounded-full bg-highlight">
+        <Ionicons name={icon} size={18} color="#1db954" />
+      </View>
+      <Text className="flex-1 font-semibold text-text">{label}</Text>
+      <Ionicons name="chevron-forward" size={16} color="#6a6a6a" />
+    </Pressable>
+  );
+}
 
 export default function SettingsScreen() {
   const user = useAuthStore((state) => state.user);
@@ -40,14 +72,14 @@ export default function SettingsScreen() {
           const status = await api.parentPinStatus();
           setHasParentPin(status.has_pin);
         } catch {
-          // ignore
+          /* ignore */
         }
       }
       if (isChild) {
         try {
           setChildSettings(await api.getMyChildSettings());
         } catch {
-          // ignore
+          /* ignore */
         }
       }
     })();
@@ -61,7 +93,7 @@ export default function SettingsScreen() {
         const statuses = await Promise.all(providers.map((provider) => api.getScrobblerStatus(provider.id)));
         setScrobblerStatuses(Object.fromEntries(statuses.map((status) => [status.provider, status])));
       } catch {
-        // scrobbling not configured
+        /* scrobbling not configured */
       }
     })();
   }, []);
@@ -149,28 +181,20 @@ export default function SettingsScreen() {
 
   const requestProtectedAction = async (action: "logout" | "switch") => {
     if (!isChild) {
-      if (action === "logout") {
-        await logout();
-      } else {
-        await logout();
-        router.replace("/(auth)/login");
-      }
+      await logout();
+      if (action === "switch") router.replace("/(auth)/login");
       return;
     }
 
     try {
       const { enforced } = await api.parentPinEnforced();
       if (!enforced) {
-        if (action === "logout") {
-          await logout();
-        } else {
-          await logout();
-          router.replace("/(auth)/login");
-        }
+        await logout();
+        if (action === "switch") router.replace("/(auth)/login");
         return;
       }
     } catch {
-      // fall through to PIN modal
+      /* fall through */
     }
 
     setPinAction(action);
@@ -179,64 +203,72 @@ export default function SettingsScreen() {
 
   const handlePinSuccess = async () => {
     setPinModalVisible(false);
-    if (pinAction === "logout") {
-      await logout();
-    } else if (pinAction === "switch") {
-      await logout();
-      router.replace("/(auth)/login");
-    }
+    await logout();
+    if (pinAction === "switch") router.replace("/(auth)/login");
     setPinAction(null);
   };
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.heading}>Account</Text>
+    <ScrollView className="flex-1 bg-base px-4 pt-2" contentContainerStyle={{ paddingBottom: 40 }}>
+      <Text className="mb-3 text-3xl font-bold tracking-tight text-text">Settings</Text>
+
       {user ? (
-        <View style={styles.card}>
-          <Text style={styles.label}>Signed in as</Text>
-          <Text style={styles.value}>
-            {user.display_name} ({formatRoleProfiles(user.role_profiles)})
+        <Card className="mb-4">
+          <Text className="text-xs font-semibold uppercase tracking-wide text-text-muted">
+            Signed in as
           </Text>
-        </View>
+          <Text className="mt-1 text-lg font-bold text-text">{user.display_name}</Text>
+          <Text className="mt-1 text-sm text-text-secondary">
+            {formatRoleProfiles(user.role_profiles)}
+          </Text>
+        </Card>
       ) : null}
 
       {isChild && childSettings ? (
-        <View style={styles.card}>
-          <Text style={styles.label}>Your limits</Text>
-          <Text style={styles.limitText}>
+        <Card className="mb-4">
+          <Text className="text-xs font-semibold uppercase tracking-wide text-text-muted">
+            Your limits
+          </Text>
+          <Text className="mt-1 text-sm text-text-secondary">
             {childSettings.max_daily_minutes != null
               ? `${childSettings.max_daily_minutes} min/day`
               : "No daily limit"}
             {" · "}
             {childSettings.search_enabled ? "Search on" : "Search off"}
           </Text>
+        </Card>
+      ) : null}
+
+      <View className="mb-4 gap-2">
+        <Button variant="secondary" block onPress={() => void requestProtectedAction("switch")}>
+          Switch account
+        </Button>
+        <Button variant="ghost" block onPress={() => void requestProtectedAction("logout")}>
+          <View className="flex-row items-center gap-2">
+            <Ionicons name="log-out-outline" size={16} color="#b3b3b3" />
+            <Text className="font-semibold text-text-secondary">Sign out</Text>
+          </View>
+        </Button>
+      </View>
+
+      {canManageFamily || canManageParental ? (
+        <View className="mb-4">
+          <Text className="mb-2 text-xs font-bold uppercase tracking-wide text-text-muted">
+            Management
+          </Text>
+          {canManageFamily ? (
+            <SettingsLink icon="people" label="Household members" onPress={() => router.push("/family")} />
+          ) : null}
+          {canManageParental ? (
+            <SettingsLink icon="shield-checkmark" label="Parental controls" onPress={() => router.push("/parental")} />
+          ) : null}
         </View>
       ) : null}
 
-      <Pressable style={styles.secondaryButton} onPress={() => void requestProtectedAction("switch")}>
-        <Text style={styles.secondaryButtonText}>Switch account</Text>
-      </Pressable>
-
-      <Pressable style={styles.secondaryButton} onPress={() => void requestProtectedAction("logout")}>
-        <Text style={styles.secondaryButtonText}>Sign out</Text>
-      </Pressable>
-
-      {canManageFamily ? (
-        <Pressable style={styles.secondaryButton} onPress={() => router.push("/family")}>
-          <Text style={styles.secondaryButtonText}>Household members</Text>
-        </Pressable>
-      ) : null}
-
-      {canManageParental ? (
-        <Pressable style={styles.secondaryButton} onPress={() => router.push("/parental")}>
-          <Text style={styles.secondaryButtonText}>Parental controls</Text>
-        </Pressable>
-      ) : null}
-
       {canPin ? (
-        <>
-          <Text style={[styles.heading, { marginTop: 20, fontSize: 22 }]}>Parent PIN</Text>
-          <Text style={styles.help}>
+        <Card className="mb-4 gap-3">
+          <Text className="text-base font-bold text-text">Parent PIN</Text>
+          <Text className="text-sm text-text-secondary">
             Required for children to switch accounts or sign out on a shared device.
             {hasParentPin ? " PIN is set." : " No PIN set yet."}
           </Text>
@@ -245,89 +277,94 @@ export default function SettingsScreen() {
             onChangeText={setParentPin}
             keyboardType="number-pad"
             secureTextEntry
-            style={styles.input}
+            className="rounded-xl border border-border bg-base px-3.5 py-3 text-base text-text"
             placeholder="4+ digit PIN"
-            placeholderTextColor="#737373"
+            placeholderTextColor="#6a6a6a"
           />
-          <Pressable style={styles.secondaryButton} onPress={() => void saveParentPin()}>
-            <Text style={styles.secondaryButtonText}>
-              {hasParentPin ? "Update parent PIN" : "Set parent PIN"}
-            </Text>
-          </Pressable>
-        </>
+          <Button variant="secondary" block onPress={() => void saveParentPin()}>
+            {hasParentPin ? "Update parent PIN" : "Set parent PIN"}
+          </Button>
+        </Card>
       ) : null}
 
       {scrobblerProviders.length > 0 ? (
-        <>
-          <Text style={[styles.heading, { marginTop: 20, fontSize: 22 }]}>Scrobbling</Text>
-          <Text style={styles.help}>
-            Link a scrobbler account for {user?.display_name}. Each family member links their own account.
+        <View className="mb-4">
+          <Text className="mb-1 text-base font-bold text-text">Scrobbling</Text>
+          <Text className="mb-3 text-sm text-text-secondary">
+            Link a scrobbler account for {user?.display_name}. Each family member links their own
+            account.
           </Text>
           {scrobblerProviders.map((provider) => {
             const status = scrobblerStatuses[provider.id];
             const pendingToken = pendingLinkTokens[provider.id];
             return (
-              <View style={styles.card} key={provider.id}>
-                <Text style={styles.label}>{provider.name}</Text>
+              <Card key={provider.id} className="mb-3 gap-3">
+                <Text className="text-xs font-semibold uppercase tracking-wide text-text-muted">
+                  {provider.name}
+                </Text>
                 {status?.linked ? (
                   <>
-                    <Text style={styles.value}>Linked as {status.username}</Text>
-                    <Pressable
-                      style={styles.secondaryButton}
-                      onPress={() => void toggleScrobbling(provider.id, !status.scrobbling_enabled)}
-                    >
-                      <Text style={styles.secondaryButtonText}>
-                        {status.scrobbling_enabled ? "Scrobbling on" : "Scrobbling off"}
-                      </Text>
-                    </Pressable>
-                    <Pressable style={styles.secondaryButton} onPress={() => void unlinkScrobbler(provider.id)}>
-                      <Text style={styles.secondaryButtonText}>Unlink {provider.name}</Text>
-                    </Pressable>
+                    <Text className="font-semibold text-text">Linked as {status.username}</Text>
+                    <View className="flex-row items-center justify-between">
+                      <Text className="text-sm text-text-secondary">Scrobble plays</Text>
+                      <Switch
+                        value={status.scrobbling_enabled}
+                        onValueChange={(enabled) => void toggleScrobbling(provider.id, enabled)}
+                        trackColor={{ false: "#3a3a3a", true: "#14532d" }}
+                        thumbColor={status.scrobbling_enabled ? "#1db954" : "#b3b3b3"}
+                      />
+                    </View>
+                    <Button variant="secondary" block onPress={() => void unlinkScrobbler(provider.id)}>
+                      Unlink {provider.name}
+                    </Button>
                   </>
                 ) : (
                   <>
-                    <Text style={styles.help}>Not linked for this profile.</Text>
-                    <Pressable style={styles.button} onPress={() => void startScrobblerLink(provider.id)}>
-                      <Text style={styles.buttonText}>Connect {provider.name}</Text>
-                    </Pressable>
+                    <Text className="text-sm text-text-secondary">Not linked for this profile.</Text>
+                    <Button block onPress={() => void startScrobblerLink(provider.id)}>
+                      Connect {provider.name}
+                    </Button>
                     {pendingToken ? (
-                      <Pressable style={styles.secondaryButton} onPress={() => void completeScrobblerLink(provider.id)}>
-                        <Text style={styles.secondaryButtonText}>Complete link</Text>
-                      </Pressable>
+                      <Button
+                        variant="secondary"
+                        block
+                        onPress={() => void completeScrobblerLink(provider.id)}
+                      >
+                        Complete link
+                      </Button>
                     ) : null}
                   </>
                 )}
-              </View>
+              </Card>
             );
           })}
-          {scrobblerError ? <Text style={styles.error}>{scrobblerError}</Text> : null}
-        </>
+          {scrobblerError ? <Text className="text-sm text-danger-fg">{scrobblerError}</Text> : null}
+        </View>
       ) : null}
 
       {!isChild ? (
-        <>
-          <Text style={[styles.heading, { marginTop: 28 }]}>Server</Text>
-          <Text style={styles.help}>
+        <Card className="mb-4 gap-3">
+          <Text className="text-base font-bold text-text">Server</Text>
+          <Text className="text-sm text-text-secondary">
             Point the app at your self-hosted Tuneflow API.
           </Text>
-          <Text style={styles.label}>API URL</Text>
           <TextInput
             value={apiUrl}
             onChangeText={setApiUrlState}
             autoCapitalize="none"
             autoCorrect={false}
-            style={styles.input}
+            className="rounded-xl border border-border bg-base px-3.5 py-3 text-base text-text"
             placeholder="http://192.168.1.50:8000"
-            placeholderTextColor="#737373"
+            placeholderTextColor="#6a6a6a"
           />
-          <Pressable style={styles.button} onPress={() => void saveServer()}>
-            <Text style={styles.buttonText}>{saved ? "Saved" : "Save server URL"}</Text>
-          </Pressable>
-        </>
+          <Button block onPress={() => void saveServer()}>
+            {saved ? "Saved" : "Save server URL"}
+          </Button>
+        </Card>
       ) : null}
 
-      {message ? <Text style={styles.message}>{message}</Text> : null}
-      {error ? <Text style={styles.error}>{error}</Text> : null}
+      {message ? <Text className="mb-2 text-sm text-accent">{message}</Text> : null}
+      {error ? <Text className="mb-2 text-sm text-danger-fg">{error}</Text> : null}
 
       <PinModal
         visible={pinModalVisible}
@@ -340,87 +377,6 @@ export default function SettingsScreen() {
           setPinAction(null);
         }}
       />
-    </View>
+    </ScrollView>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#0a0a0a",
-    paddingHorizontal: 16,
-    paddingTop: 8,
-  },
-  heading: {
-    color: "#fff",
-    fontSize: 28,
-    fontWeight: "700",
-    marginBottom: 8,
-  },
-  help: {
-    color: "#a3a3a3",
-    fontSize: 15,
-    lineHeight: 22,
-    marginBottom: 12,
-  },
-  card: {
-    backgroundColor: "#171717",
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 12,
-  },
-  label: {
-    color: "#a3a3a3",
-    fontSize: 13,
-    marginBottom: 4,
-  },
-  value: {
-    color: "#fff",
-    fontSize: 17,
-    fontWeight: "600",
-  },
-  limitText: {
-    color: "#d4d4d4",
-    fontSize: 15,
-  },
-  input: {
-    backgroundColor: "#171717",
-    color: "#fff",
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 16,
-    marginBottom: 12,
-  },
-  button: {
-    backgroundColor: "#22c55e",
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: "center",
-  },
-  buttonText: {
-    color: "#052e16",
-    fontWeight: "700",
-    fontSize: 16,
-  },
-  secondaryButton: {
-    backgroundColor: "#171717",
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: "center",
-    marginBottom: 10,
-  },
-  secondaryButtonText: {
-    color: "#fff",
-    fontWeight: "600",
-    fontSize: 15,
-  },
-  message: {
-    color: "#22c55e",
-    marginTop: 12,
-  },
-  error: {
-    color: "#f87171",
-    marginTop: 12,
-  },
-});

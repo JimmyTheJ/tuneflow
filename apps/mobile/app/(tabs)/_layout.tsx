@@ -6,14 +6,19 @@ import { MiniPlayer } from "@/components/MiniPlayer";
 
 export default function TabLayout() {
   return (
-    <View style={{ flex: 1, backgroundColor: "#0a0a0a" }}>
+    <View className="flex-1 bg-base">
       <Tabs
         screenOptions={{
           headerStyle: { backgroundColor: "#0a0a0a" },
           headerTintColor: "#fff",
-          tabBarStyle: { backgroundColor: "#111", borderTopColor: "#222" },
-          tabBarActiveTintColor: "#22c55e",
-          tabBarInactiveTintColor: "#888",
+          headerShadowVisible: false,
+          tabBarStyle: {
+            backgroundColor: "rgba(18,18,18,0.95)",
+            borderTopColor: "#282828",
+            borderTopWidth: 0.5,
+          },
+          tabBarActiveTintColor: "#1db954",
+          tabBarInactiveTintColor: "#6a6a6a",
         }}
       >
         <Tabs.Screen
@@ -41,7 +46,7 @@ export default function TabLayout() {
           name="library"
           options={{
             title: "Library",
-            tabBarIcon: ({ color, size }) => <Ionicons name="albums" color={color} size={size} />,
+            tabBarIcon: ({ color, size }) => <Ionicons name="library" color={color} size={size} />,
           }}
         />
         <Tabs.Screen

@@ -1,12 +1,14 @@
-import { useState } from "react";
-import { Image, Pressable, StyleSheet, Text, View } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
+import { useState, type ReactNode } from "react";
+import { Image, Pressable, Text, View } from "react-native";
 
+import { Badge } from "@/components/ui/Badge";
 import { trackThumbnailUrl } from "@/lib/thumbnails";
 import {
   extractTrackBadges,
   formatTrackArtist,
   trackDetailLine,
-  trackDisplayTitle,
 } from "@/lib/tracks";
 import { formatDuration } from "@/lib/time";
 import type { Track } from "@/types";
@@ -18,7 +20,9 @@ type Props = {
   displayTitle?: string;
   showDuration?: boolean;
   showBadges?: boolean;
-  trailing?: React.ReactNode;
+  index?: number;
+  trailing?: ReactNode;
+  active?: boolean;
 };
 
 export function TrackRow({
@@ -28,7 +32,9 @@ export function TrackRow({
   displayTitle,
   showDuration = true,
   showBadges = false,
+  index,
   trailing,
+  active = false,
 }: Props) {
   const [failed, setFailed] = useState(false);
   const title = displayTitle ?? track.title;
@@ -41,39 +47,46 @@ export function TrackRow({
       : null;
 
   return (
-    <Pressable style={styles.row} onPress={onPress}>
+    <Pressable
+      className={`flex-row items-center gap-3 rounded-lg px-1 py-2 active:bg-highlight/80 ${active ? "bg-accent/10" : ""}`}
+      onPress={onPress}
+      disabled={!onPress}
+    >
+      {index != null ? (
+        <Text className="w-5 text-center text-sm tabular-nums text-text-muted">{index}</Text>
+      ) : null}
       {failed ? (
-        <View style={[styles.thumbnail, styles.thumbnailFallback]} />
+        <LinearGradient
+          colors={["#1f1f1f", "#2a2a2a"]}
+          className="h-[52px] w-[52px] items-center justify-center rounded-md"
+          style={{ width: 52, height: 52, borderRadius: 8, alignItems: "center", justifyContent: "center" }}
+        >
+          <Ionicons name="musical-notes" size={20} color="#6a6a6a" />
+        </LinearGradient>
       ) : (
         <Image
           source={{ uri: trackThumbnailUrl(track.video_id) }}
-          style={styles.thumbnail}
+          className="h-[52px] w-[52px] rounded-md bg-highlight"
           onError={() => setFailed(true)}
         />
       )}
-      <View style={styles.meta}>
-        <View style={styles.titleRow}>
-          <Text style={styles.title} numberOfLines={2}>
+      <View className="min-w-0 flex-1 gap-1">
+        <View className="flex-row items-start gap-2">
+          <Text className={`flex-1 text-base font-semibold ${active ? "text-accent" : "text-text"}`} numberOfLines={2}>
             {title}
           </Text>
-          {duration ? <Text style={styles.duration}>{duration}</Text> : null}
+          {duration ? <Text className="text-[13px] tabular-nums text-text-secondary">{duration}</Text> : null}
         </View>
-        <View style={styles.subtitleRow}>
-          <Text style={styles.subtitle} numberOfLines={1}>
+        <View className="flex-row flex-wrap items-center gap-1.5">
+          <Text className="shrink text-sm text-text-secondary" numberOfLines={1}>
             {artistLine}
           </Text>
-          {badges.length > 0 ? (
-            <View style={styles.badges}>
-              {badges.map((badge) => (
-                <View key={badge} style={styles.badge}>
-                  <Text style={styles.badgeText}>{badge}</Text>
-                </View>
-              ))}
-            </View>
-          ) : null}
+          {badges.map((badge) => (
+            <Badge key={badge}>{badge}</Badge>
+          ))}
         </View>
         {detailLine ? (
-          <Text style={styles.detail} numberOfLines={2}>
+          <Text className="text-xs leading-4 text-text-muted" numberOfLines={2}>
             {detailLine}
           </Text>
         ) : null}
@@ -82,74 +95,3 @@ export function TrackRow({
     </Pressable>
   );
 }
-
-const styles = StyleSheet.create({
-  row: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    paddingVertical: 10,
-  },
-  thumbnail: {
-    width: 52,
-    height: 52,
-    borderRadius: 8,
-    backgroundColor: "#1f1f1f",
-  },
-  thumbnailFallback: {
-    backgroundColor: "#2a2a2a",
-  },
-  meta: {
-    flex: 1,
-    gap: 4,
-  },
-  titleRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 8,
-  },
-  title: {
-    color: "#fff",
-    fontSize: 16,
-    fontWeight: "600",
-    flex: 1,
-  },
-  duration: {
-    color: "#a3a3a3",
-    fontSize: 13,
-    fontVariant: ["tabular-nums"],
-  },
-  subtitleRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    flexWrap: "wrap",
-  },
-  subtitle: {
-    color: "#a3a3a3",
-    fontSize: 14,
-    flexShrink: 1,
-  },
-  badges: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 4,
-  },
-  badge: {
-    backgroundColor: "#262626",
-    borderRadius: 999,
-    paddingHorizontal: 6,
-    paddingVertical: 1,
-  },
-  badgeText: {
-    color: "#d4d4d4",
-    fontSize: 10,
-    fontWeight: "700",
-    textTransform: "uppercase",
-  },
-  detail: {
-    color: "#737373",
-    fontSize: 12,
-    lineHeight: 16,
-  },
-});

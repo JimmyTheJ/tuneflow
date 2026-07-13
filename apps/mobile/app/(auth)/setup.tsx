@@ -1,6 +1,8 @@
+import { LinearGradient } from "expo-linear-gradient";
 import { useState } from "react";
-import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { Text, TextInput, View } from "react-native";
 
+import { Button } from "@/components/ui/Button";
 import { useAuthStore } from "@/stores/auth";
 
 export default function SetupScreen() {
@@ -24,85 +26,49 @@ export default function SetupScreen() {
   };
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Welcome to Tuneflow</Text>
-      <Text style={styles.subtitle}>Create the local parent account for your household</Text>
-
-      <TextInput
-        value={displayName}
-        onChangeText={setDisplayName}
-        placeholder="Display name"
-        placeholderTextColor="#737373"
-        style={styles.input}
+    <View className="flex-1 bg-base">
+      <LinearGradient
+        colors={["#14532d", "#0a0a0a", "#0a0a0a"]}
+        style={{ position: "absolute", left: 0, right: 0, top: 0, bottom: 0 }}
       />
-      <TextInput
-        value={username}
-        onChangeText={setUsername}
-        autoCapitalize="none"
-        autoCorrect={false}
-        placeholder="Username"
-        placeholderTextColor="#737373"
-        style={styles.input}
-      />
-      <TextInput
-        value={password}
-        onChangeText={setPassword}
-        secureTextEntry
-        placeholder="Password (8+ characters)"
-        placeholderTextColor="#737373"
-        style={styles.input}
-      />
+      <View className="flex-1 justify-center gap-3 px-6">
+        <Text className="text-sm font-bold uppercase tracking-widest text-accent">Tuneflow</Text>
+        <Text className="text-4xl font-extrabold tracking-tight text-text">Welcome</Text>
+        <Text className="mb-4 text-base leading-6 text-text-secondary">
+          Create the local parent account for your household
+        </Text>
 
-      {error ? <Text style={styles.error}>{error}</Text> : null}
+        <TextInput
+          value={displayName}
+          onChangeText={setDisplayName}
+          placeholder="Display name"
+          placeholderTextColor="#6a6a6a"
+          className="rounded-xl border border-border bg-elevated px-3.5 py-3.5 text-base text-text"
+        />
+        <TextInput
+          value={username}
+          onChangeText={setUsername}
+          autoCapitalize="none"
+          autoCorrect={false}
+          placeholder="Username"
+          placeholderTextColor="#6a6a6a"
+          className="rounded-xl border border-border bg-elevated px-3.5 py-3.5 text-base text-text"
+        />
+        <TextInput
+          value={password}
+          onChangeText={setPassword}
+          secureTextEntry
+          placeholder="Password (8+ characters)"
+          placeholderTextColor="#6a6a6a"
+          className="rounded-xl border border-border bg-elevated px-3.5 py-3.5 text-base text-text"
+        />
 
-      <Pressable style={styles.button} onPress={() => void submit()} disabled={loading}>
-        {loading ? <ActivityIndicator color="#052e16" /> : <Text style={styles.buttonText}>Create account</Text>}
-      </Pressable>
+        {error ? <Text className="text-sm text-danger-fg">{error}</Text> : null}
+
+        <Button block loading={loading} onPress={() => void submit()} className="mt-2">
+          Create account
+        </Button>
+      </View>
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#0a0a0a",
-    padding: 24,
-    justifyContent: "center",
-    gap: 12,
-  },
-  title: {
-    color: "#fff",
-    fontSize: 32,
-    fontWeight: "800",
-    marginBottom: 4,
-  },
-  subtitle: {
-    color: "#a3a3a3",
-    fontSize: 16,
-    marginBottom: 20,
-    lineHeight: 22,
-  },
-  input: {
-    backgroundColor: "#171717",
-    color: "#fff",
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 16,
-  },
-  button: {
-    backgroundColor: "#22c55e",
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: "center",
-    marginTop: 8,
-  },
-  buttonText: {
-    color: "#052e16",
-    fontWeight: "700",
-    fontSize: 16,
-  },
-  error: {
-    color: "#f87171",
-  },
-});

@@ -4,7 +4,6 @@ import {
   FlatList,
   Pressable,
   ScrollView,
-  StyleSheet,
   Switch,
   Text,
   TextInput,
@@ -13,6 +12,8 @@ import {
 
 import { HourPicker } from "@/components/HourPicker";
 import { TrackRow } from "@/components/TrackRow";
+import { Button } from "@/components/ui/Button";
+import { Card } from "@/components/ui/Card";
 import { api } from "@/lib/api";
 import type { ChildProfile, ChildUsageToday, PlayHistoryEntry } from "@/types";
 
@@ -137,125 +138,136 @@ export default function ParentalScreen() {
   };
 
   if (loading) {
-    return <ActivityIndicator color="#22c55e" style={{ marginTop: 48 }} />;
+    return (
+      <View className="flex-1 items-center justify-center bg-base">
+        <ActivityIndicator color="#1db954" />
+      </View>
+    );
   }
 
   return (
-    <View style={styles.container}>
-      <View style={styles.tabRow}>
-        <Pressable
-          style={[styles.tab, tab === "controls" && styles.tabActive]}
-          onPress={() => setTab("controls")}
-        >
-          <Text style={[styles.tabText, tab === "controls" && styles.tabTextActive]}>Controls</Text>
-        </Pressable>
-        <Pressable
-          style={[styles.tab, tab === "history" && styles.tabActive]}
-          onPress={() => setTab("history")}
-        >
-          <Text style={[styles.tabText, tab === "history" && styles.tabTextActive]}>History</Text>
-        </Pressable>
+    <View className="flex-1 bg-base px-4 pt-4">
+      <View className="mb-4 flex-row gap-2">
+        {(["controls", "history"] as const).map((option) => (
+          <Pressable
+            key={option}
+            className={`flex-1 items-center rounded-xl py-2.5 ${tab === option ? "bg-accent-dim" : "bg-elevated"}`}
+            onPress={() => setTab(option)}
+          >
+            <Text className={`font-semibold capitalize ${tab === option ? "text-text" : "text-text-secondary"}`}>
+              {option}
+            </Text>
+          </Pressable>
+        ))}
       </View>
 
-      {error ? <Text style={styles.error}>{error}</Text> : null}
-      {message ? <Text style={styles.message}>{message}</Text> : null}
+      {error ? <Text className="mb-2 text-sm text-danger-fg">{error}</Text> : null}
+      {message ? <Text className="mb-2 text-sm text-accent">{message}</Text> : null}
 
       {children.length === 0 ? (
-        <Text style={styles.empty}>
+        <Text className="mt-3 text-[15px] text-text-muted">
           No child accounts yet. Add one from Settings → Family.
         </Text>
       ) : (
         <>
-          <Text style={styles.label}>Child account</Text>
-          <View style={styles.chipRow}>
+          <Text className="mb-2 text-sm text-text-secondary">Child account</Text>
+          <View className="mb-3 flex-row flex-wrap gap-2">
             {children.map((child) => (
               <Pressable
                 key={child.user.id}
-                style={[styles.chip, selectedId === child.user.id && styles.chipActive]}
+                className={`rounded-full px-3.5 py-2 ${selectedId === child.user.id ? "bg-accent-dim" : "bg-elevated"}`}
                 onPress={() => setSelectedId(child.user.id)}
               >
-                <Text style={styles.chipText}>{child.user.display_name}</Text>
+                <Text className="font-semibold text-text">{child.user.display_name}</Text>
               </Pressable>
             ))}
           </View>
 
           {selected && usage ? (
-            <View style={styles.usageCard}>
-              <Text style={styles.usageText}>
+            <Card className="mb-3 gap-1">
+              <Text className="text-[15px] font-semibold text-text">
                 Today: {usage.listened_minutes_today} min listened
                 {usage.max_daily_minutes != null
                   ? ` · ${usage.remaining_minutes ?? 0} min remaining`
                   : " · no daily limit"}
               </Text>
-              <Text style={styles.usageMeta}>
+              <Text className="text-[13px] text-text-secondary">
                 Allowed hours: {formatHourRange(startHour, endHour)}
               </Text>
-            </View>
+            </Card>
           ) : null}
 
           {tab === "controls" && selected ? (
-            <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
-              <View style={styles.card}>
-                <View style={styles.row}>
-                  <Text style={styles.rowLabel}>Block explicit content</Text>
+            <ScrollView contentContainerStyle={{ paddingBottom: 24 }}>
+              <Card className="gap-3">
+                <View className="flex-row items-center justify-between">
+                  <Text className="text-base text-text">Block explicit content</Text>
                   <Switch
                     value={selected.settings.block_explicit}
                     onValueChange={(value) => toggleSetting("block_explicit", value)}
+                    trackColor={{ false: "#3a3a3a", true: "#14532d" }}
+                    thumbColor={selected.settings.block_explicit ? "#1db954" : "#b3b3b3"}
                   />
                 </View>
-                <View style={styles.row}>
-                  <Text style={styles.rowLabel}>Allow search</Text>
+                <View className="flex-row items-center justify-between">
+                  <Text className="text-base text-text">Allow search</Text>
                   <Switch
                     value={selected.settings.search_enabled}
                     onValueChange={(value) => toggleSetting("search_enabled", value)}
+                    trackColor={{ false: "#3a3a3a", true: "#14532d" }}
+                    thumbColor={selected.settings.search_enabled ? "#1db954" : "#b3b3b3"}
                   />
                 </View>
 
-                <Text style={styles.label}>Daily limit (minutes, blank = unlimited)</Text>
+                <Text className="mt-1 text-sm text-text-secondary">
+                  Daily limit (minutes, blank = unlimited)
+                </Text>
                 <TextInput
                   value={maxMinutes}
                   onChangeText={setMaxMinutes}
                   keyboardType="number-pad"
-                  style={styles.input}
+                  className="rounded-xl border border-border bg-base px-3.5 py-3 text-base text-text"
                   placeholder="60"
-                  placeholderTextColor="#737373"
+                  placeholderTextColor="#6a6a6a"
                 />
 
-                <Text style={styles.sectionTitle}>Listening hours</Text>
+                <Text className="text-base font-bold text-text">Listening hours</Text>
                 <HourPicker label="Earliest" value={startHour} onChange={setStartHour} />
                 <HourPicker label="Latest (exclusive)" value={endHour} onChange={setEndHour} />
 
-                <Text style={styles.label}>Blocked keywords (comma-separated)</Text>
+                <Text className="text-sm text-text-secondary">Blocked keywords (comma-separated)</Text>
                 <TextInput
                   value={keywords}
                   onChangeText={setKeywords}
-                  style={[styles.input, styles.multiline]}
+                  className="min-h-[72px] rounded-xl border border-border bg-base px-3.5 py-3 text-base text-text"
                   placeholder="artist name, topic"
-                  placeholderTextColor="#737373"
+                  placeholderTextColor="#6a6a6a"
                   multiline
+                  textAlignVertical="top"
                 />
 
-                <Text style={styles.label}>Blocked video IDs (comma-separated)</Text>
+                <Text className="text-sm text-text-secondary">Blocked video IDs (comma-separated)</Text>
                 <TextInput
                   value={videoIds}
                   onChangeText={setVideoIds}
-                  style={[styles.input, styles.multiline]}
+                  className="min-h-[72px] rounded-xl border border-border bg-base px-3.5 py-3 text-base text-text"
                   placeholder="dQw4w9WgXcQ, ..."
-                  placeholderTextColor="#737373"
+                  placeholderTextColor="#6a6a6a"
                   multiline
                   autoCapitalize="none"
+                  textAlignVertical="top"
                 />
 
-                <Pressable style={styles.button} onPress={() => void save()} disabled={saving}>
-                  <Text style={styles.buttonText}>{saving ? "Saving..." : "Save controls"}</Text>
-                </Pressable>
-              </View>
+                <Button block loading={saving} onPress={() => void save()}>
+                  Save controls
+                </Button>
+              </Card>
             </ScrollView>
           ) : null}
 
           {tab === "history" && selected ? (
             historyLoading ? (
-              <ActivityIndicator color="#22c55e" style={{ marginTop: 24 }} />
+              <ActivityIndicator color="#1db954" style={{ marginTop: 24 }} />
             ) : (
               <FlatList
                 data={history}
@@ -264,7 +276,9 @@ export default function ParentalScreen() {
                   <TrackRow track={item} subtitle={item.artist ?? "Unknown artist"} />
                 )}
                 ListEmptyComponent={
-                  <Text style={styles.empty}>No listening history for this child yet.</Text>
+                  <Text className="mt-3 text-[15px] text-text-muted">
+                    No listening history for this child yet.
+                  </Text>
                 }
               />
             )
@@ -284,139 +298,3 @@ function formatHourRange(start: number, end: number): string {
   };
   return `${fmt(start)} – ${fmt(end)}`;
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#0a0a0a",
-    padding: 16,
-  },
-  tabRow: {
-    flexDirection: "row",
-    gap: 8,
-    marginBottom: 16,
-  },
-  tab: {
-    flex: 1,
-    backgroundColor: "#171717",
-    borderRadius: 12,
-    paddingVertical: 10,
-    alignItems: "center",
-  },
-  tabActive: {
-    backgroundColor: "#14532d",
-  },
-  tabText: {
-    color: "#a3a3a3",
-    fontWeight: "600",
-  },
-  tabTextActive: {
-    color: "#fff",
-  },
-  label: {
-    color: "#d4d4d4",
-    fontSize: 14,
-    marginBottom: 8,
-    marginTop: 8,
-  },
-  sectionTitle: {
-    color: "#fff",
-    fontSize: 16,
-    fontWeight: "700",
-    marginTop: 8,
-    marginBottom: 4,
-  },
-  chipRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-    marginBottom: 12,
-  },
-  chip: {
-    backgroundColor: "#171717",
-    borderRadius: 999,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-  },
-  chipActive: {
-    backgroundColor: "#14532d",
-  },
-  chipText: {
-    color: "#fff",
-    fontWeight: "600",
-  },
-  usageCard: {
-    backgroundColor: "#171717",
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 12,
-    gap: 4,
-  },
-  usageText: {
-    color: "#fff",
-    fontSize: 15,
-    fontWeight: "600",
-  },
-  usageMeta: {
-    color: "#a3a3a3",
-    fontSize: 13,
-  },
-  scroll: {
-    flex: 1,
-  },
-  scrollContent: {
-    paddingBottom: 24,
-  },
-  card: {
-    backgroundColor: "#171717",
-    borderRadius: 16,
-    padding: 16,
-    gap: 12,
-  },
-  row: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  rowLabel: {
-    color: "#fff",
-    fontSize: 16,
-  },
-  input: {
-    backgroundColor: "#0a0a0a",
-    color: "#fff",
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 16,
-  },
-  multiline: {
-    minHeight: 72,
-    textAlignVertical: "top",
-  },
-  button: {
-    backgroundColor: "#22c55e",
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: "center",
-    marginTop: 8,
-  },
-  buttonText: {
-    color: "#052e16",
-    fontWeight: "700",
-    fontSize: 16,
-  },
-  empty: {
-    color: "#737373",
-    fontSize: 15,
-    marginTop: 12,
-  },
-  error: {
-    color: "#f87171",
-    marginBottom: 8,
-  },
-  message: {
-    color: "#22c55e",
-    marginBottom: 8,
-  },
-});

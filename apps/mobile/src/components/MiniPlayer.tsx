@@ -1,73 +1,75 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { useState } from "react";
+import { Image, Pressable, Text, View } from "react-native";
 
-import { usePlayerStore } from "@/stores/player";
+import { LikeButton } from "@/components/ui/LikeButton";
+import { IconButton } from "@/components/ui/IconButton";
+import { trackThumbnailUrl } from "@/lib/thumbnails";
+import { canPlayNext, usePlayerStore } from "@/stores/player";
 
 export function MiniPlayer() {
   const current = usePlayerStore((state) => state.current);
   const isPlaying = usePlayerStore((state) => state.isPlaying);
   const isLoading = usePlayerStore((state) => state.isLoading);
+  const positionSec = usePlayerStore((state) => state.positionSec);
+  const durationSec = usePlayerStore((state) => state.durationSec);
+  const canNext = usePlayerStore((state) => canPlayNext(state));
   const togglePlayback = usePlayerStore((state) => state.togglePlayback);
   const playNext = usePlayerStore((state) => state.playNext);
+  const [artFailed, setArtFailed] = useState(false);
 
   if (!current) {
     return null;
   }
 
+  const progress = durationSec > 0 ? Math.min(1, positionSec / durationSec) : 0;
+
   return (
-    <Pressable style={styles.container} onPress={() => router.push("/player")}>
-      <View style={styles.meta}>
-        <Text style={styles.title} numberOfLines={1}>
-          {current.title}
-        </Text>
-        <Text style={styles.artist} numberOfLines={1}>
-          {current.artist ?? "Unknown artist"}
-        </Text>
+    <View className="border-t border-border bg-elevated/95">
+      <View className="h-0.5 w-full bg-border-strong">
+        <View className="h-full bg-accent" style={{ width: `${progress * 100}%` }} />
       </View>
-      <View style={styles.controls}>
-        <Pressable onPress={() => void togglePlayback()} hitSlop={12}>
-          <Ionicons
-            name={isLoading ? "hourglass-outline" : isPlaying ? "pause" : "play"}
-            size={24}
-            color="#fff"
+      <Pressable
+        className="flex-row items-center gap-3 px-3 py-2.5 active:opacity-90"
+        onPress={() => router.push("/player")}
+      >
+        {artFailed ? (
+          <View className="h-12 w-12 items-center justify-center rounded-md bg-highlight">
+            <Ionicons name="musical-notes" size={20} color="#6a6a6a" />
+          </View>
+        ) : (
+          <Image
+            source={{ uri: trackThumbnailUrl(current.video_id) }}
+            className="h-12 w-12 rounded-md bg-highlight"
+            onError={() => setArtFailed(true)}
           />
-        </Pressable>
-        <Pressable onPress={() => void playNext()} hitSlop={12}>
-          <Ionicons name="play-skip-forward" size={22} color="#fff" />
-        </Pressable>
-      </View>
-    </Pressable>
+        )}
+        <View className="min-w-0 flex-1">
+          <Text className="text-[15px] font-semibold text-text" numberOfLines={1}>
+            {current.title}
+          </Text>
+          <Text className="text-[13px] text-text-secondary" numberOfLines={1}>
+            {current.artist ?? "Unknown artist"}
+          </Text>
+        </View>
+        <LikeButton track={current} size="sm" />
+        <IconButton
+          name={isLoading ? "hourglass-outline" : isPlaying ? "pause" : "play"}
+          label={isPlaying ? "Pause" : "Play"}
+          color="#fff"
+          size="sm"
+          onPress={() => void togglePlayback()}
+        />
+        <IconButton
+          name="play-skip-forward"
+          label="Next"
+          color="#fff"
+          size="sm"
+          disabled={!canNext}
+          onPress={() => void playNext()}
+        />
+      </Pressable>
+    </View>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: "#171717",
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: "#2f2f2f",
-  },
-  meta: {
-    flex: 1,
-    gap: 2,
-  },
-  title: {
-    color: "#fff",
-    fontSize: 15,
-    fontWeight: "600",
-  },
-  artist: {
-    color: "#a3a3a3",
-    fontSize: 13,
-  },
-  controls: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 16,
-  },
-});

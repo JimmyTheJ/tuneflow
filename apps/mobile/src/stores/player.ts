@@ -1,3 +1,4 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Audio } from "expo-av";
 import { create } from "zustand";
 
@@ -5,6 +6,8 @@ import { api } from "@/lib/api";
 import { getAccessToken, getApiUrl } from "@/lib/settings";
 import { withRetry } from "@/lib/retry";
 import type { StreamInfo, StreamSelection, Track } from "@/types";
+
+export type RepeatMode = "none" | "one" | "all";
 
 type VideoControls = {
   play: () => Promise<void>;
@@ -21,20 +24,52 @@ type PlayerState = {
   playbackKind: "audio" | "video";
   isPlaying: boolean;
   isLoading: boolean;
+  positionSec: number;
+  durationSec: number;
+  volume: number;
   queue: Track[];
+  shuffle: boolean;
+  shuffleOrder: number[];
+  shuffleStep: number;
+  repeatMode: RepeatMode;
   sound: Audio.Sound | null;
   videoControls: VideoControls | null;
-  playTrack: (track: Track, queue?: Track[]) => Promise<void>;
+  error: string | null;
+  playTrack: (track: Track, queue?: Track[], options?: { fromNavigation?: boolean }) => Promise<void>;
   togglePlayback: () => Promise<void>;
   setStreamSelection: (selection: Partial<StreamSelection>) => Promise<void>;
   registerVideoControls: (controls: VideoControls | null) => void;
-  playNext: () => Promise<void>;
+  seek: (seconds: number) => Promise<void>;
+  setVolume: (volume: number) => Promise<void>;
+  toggleShuffle: () => void;
+  cycleRepeatMode: () => void;
+  playPrevious: () => Promise<void>;
+  playNext: (fromAutoAdvance?: boolean) => Promise<void>;
+  onTrackEnded: () => Promise<void>;
+  playQueueIndex: (queueIndex: number) => Promise<void>;
+  removeQueueIndex: (queueIndex: number) => Promise<void>;
+  clearUpcoming: () => void;
+  reorderQueue: (fromQueueIndex: number, toQueueIndex: number) => void;
+  addToQueue: (track: Track) => void;
   stop: () => Promise<void>;
+  clearError: () => void;
+  reportProgress: (positionSec: number, durationSec?: number) => void;
 };
 
 const DEFAULT_SELECTION: StreamSelection = { video: false, audio: true };
+const VOLUME_KEY = "tuneflow.volume";
 
 let playGeneration = 0;
+let storedVolume = 1;
+
+void AsyncStorage.getItem(VOLUME_KEY).then((raw) => {
+  if (raw == null) return;
+  const parsed = Number(raw);
+  if (Number.isFinite(parsed)) {
+    storedVolume = Math.max(0, Math.min(1, parsed));
+    usePlayerStore.setState({ volume: storedVolume });
+  }
+});
 
 function isActiveGeneration(generation: number): boolean {
   return generation === playGeneration;
@@ -59,8 +94,8 @@ function playableIdFromStream(stream: StreamInfo): string {
 }
 
 function buildMediaUrl(stream: StreamInfo, selection: StreamSelection): string {
-  const token = encodeURIComponent(getAccessToken() ?? "");
-  const base = getApiUrl();
+  const token = encodeURIComponent(getAccessTokenSync());
+  const base = apiUrlCache;
   const playableId = playableIdFromStream(stream);
 
   if (selection.video) {
@@ -72,6 +107,25 @@ function buildMediaUrl(stream: StreamInfo, selection: StreamSelection): string {
   }
 
   return `${base}/api/music/audio/${playableId}?token=${token}`;
+}
+
+let apiUrlCache = "http://localhost:8000";
+let accessTokenCache = "";
+
+void getApiUrl().then((url) => {
+  apiUrlCache = url;
+});
+void getAccessToken().then((token) => {
+  accessTokenCache = token;
+});
+
+function getAccessTokenSync(): string {
+  return accessTokenCache;
+}
+
+export async function refreshPlayerMediaConfig(): Promise<void> {
+  apiUrlCache = await getApiUrl();
+  accessTokenCache = await getAccessToken();
 }
 
 async function disposeSound(sound: Audio.Sound | null): Promise<void> {
@@ -96,35 +150,162 @@ async function configureAudio() {
   });
 }
 
-async function loadAudioPlayback(
-  mediaUrl: string,
-  generation: number,
-  set: (partial: Partial<PlayerState>) => void,
-  get: () => PlayerState,
-  autoplay: boolean,
-): Promise<Audio.Sound | null> {
-  const { sound } = await withRetry(
-    () => Audio.Sound.createAsync({ uri: mediaUrl }, { shouldPlay: autoplay }),
-    {
-      maxAttempts: 2,
-      shouldRetry: (error) => error instanceof Error,
-    },
-  );
-  if (!isActiveGeneration(generation)) {
-    await disposeSound(sound);
-    return null;
+function currentQueueIndex(state: Pick<PlayerState, "current" | "queue">): number {
+  if (!state.current) return -1;
+  return state.queue.findIndex((track) => track.video_id === state.current!.video_id);
+}
+
+function buildShuffleOrder(length: number, currentIndex: number): number[] {
+  if (length <= 0) return [];
+  if (length === 1) return [0];
+
+  const order = Array.from({ length }, (_, index) => index);
+  for (let index = order.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [order[index], order[swapIndex]] = [order[swapIndex], order[index]];
   }
 
-  sound.setOnPlaybackStatusUpdate((status) => {
-    if (!isActiveGeneration(generation)) return;
-    if (!status.isLoaded) return;
-    set({ isPlaying: status.isPlaying });
-    if (status.didJustFinish) {
-      void get().playNext();
-    }
-  });
+  const currentPosition = order.indexOf(currentIndex);
+  if (currentPosition > 0) {
+    order.splice(currentPosition, 1);
+    order.unshift(currentIndex);
+  }
 
-  return sound;
+  return order;
+}
+
+type NextAction =
+  | { type: "track"; queueIndex: number; shuffleStep: number }
+  | { type: "repeat-one" }
+  | { type: "stop" };
+
+function resolveNextAction(state: PlayerState): NextAction {
+  const queueIndex = currentQueueIndex(state);
+  if (queueIndex < 0) return { type: "stop" };
+
+  if (state.queue.length <= 1) {
+    if (state.repeatMode === "one") return { type: "repeat-one" };
+    if (state.repeatMode === "all") {
+      return { type: "track", queueIndex: 0, shuffleStep: 0 };
+    }
+    return { type: "stop" };
+  }
+
+  if (state.shuffle && state.shuffleOrder.length > 1) {
+    const step = state.shuffleOrder.indexOf(queueIndex);
+    const activeStep = step >= 0 ? step : state.shuffleStep;
+
+    if (activeStep < state.shuffleOrder.length - 1) {
+      const nextIndex = state.shuffleOrder[activeStep + 1];
+      return { type: "track", queueIndex: nextIndex, shuffleStep: activeStep + 1 };
+    }
+    if (state.repeatMode === "all") {
+      return { type: "track", queueIndex: state.shuffleOrder[0], shuffleStep: 0 };
+    }
+    if (state.repeatMode === "one") return { type: "repeat-one" };
+    return { type: "stop" };
+  }
+
+  if (queueIndex < state.queue.length - 1) {
+    return { type: "track", queueIndex: queueIndex + 1, shuffleStep: queueIndex + 1 };
+  }
+  if (state.repeatMode === "all") {
+    return { type: "track", queueIndex: 0, shuffleStep: 0 };
+  }
+  if (state.repeatMode === "one") return { type: "repeat-one" };
+  return { type: "stop" };
+}
+
+type PreviousAction =
+  | { type: "track"; queueIndex: number; shuffleStep: number }
+  | { type: "restart" };
+
+function resolvePreviousAction(state: PlayerState): PreviousAction {
+  const queueIndex = currentQueueIndex(state);
+  if (queueIndex < 0) return { type: "restart" };
+
+  if (state.positionSec > 3) {
+    return { type: "restart" };
+  }
+
+  if (state.queue.length <= 1) {
+    return { type: "restart" };
+  }
+
+  if (state.shuffle && state.shuffleOrder.length > 1) {
+    const step = state.shuffleOrder.indexOf(queueIndex);
+    const activeStep = step >= 0 ? step : state.shuffleStep;
+
+    if (activeStep > 0) {
+      const previousIndex = state.shuffleOrder[activeStep - 1];
+      return { type: "track", queueIndex: previousIndex, shuffleStep: activeStep - 1 };
+    }
+    if (state.repeatMode === "all") {
+      const lastStep = state.shuffleOrder.length - 1;
+      return {
+        type: "track",
+        queueIndex: state.shuffleOrder[lastStep],
+        shuffleStep: lastStep,
+      };
+    }
+    return { type: "restart" };
+  }
+
+  if (queueIndex > 0) {
+    return { type: "track", queueIndex: queueIndex - 1, shuffleStep: queueIndex - 1 };
+  }
+  if (state.repeatMode === "all") {
+    const lastIndex = state.queue.length - 1;
+    return { type: "track", queueIndex: lastIndex, shuffleStep: lastIndex };
+  }
+  return { type: "restart" };
+}
+
+function removeIndexFromShuffleOrder(
+  shuffleOrder: number[],
+  removedIndex: number,
+  shuffleStep: number,
+): { shuffleOrder: number[]; shuffleStep: number } {
+  const removedStep = shuffleOrder.indexOf(removedIndex);
+  const nextOrder = shuffleOrder
+    .filter((index) => index !== removedIndex)
+    .map((index) => (index > removedIndex ? index - 1 : index));
+
+  let nextStep = shuffleStep;
+  if (removedStep >= 0 && removedStep < shuffleStep) {
+    nextStep = shuffleStep - 1;
+  }
+
+  return { shuffleOrder: nextOrder, shuffleStep: Math.max(0, nextStep) };
+}
+
+function moveInShuffleOrder(
+  shuffleOrder: number[],
+  fromQueueIndex: number,
+  toQueueIndex: number,
+): number[] {
+  const fromStep = shuffleOrder.indexOf(fromQueueIndex);
+  const toStep = shuffleOrder.indexOf(toQueueIndex);
+  if (fromStep < 0 || toStep < 0 || fromStep === toStep) return shuffleOrder;
+
+  const next = [...shuffleOrder];
+  const [item] = next.splice(fromStep, 1);
+  next.splice(toStep, 0, item);
+  return next;
+}
+
+function moveInQueue(queue: Track[], fromIndex: number, toIndex: number): Track[] {
+  if (fromIndex === toIndex) return queue;
+  const next = [...queue];
+  const [item] = next.splice(fromIndex, 1);
+  next.splice(toIndex, 0, item);
+  return next;
+}
+
+function expectedNextTrack(state: PlayerState): Track | null {
+  const action = resolveNextAction(state);
+  if (action.type !== "track") return null;
+  return state.queue[action.queueIndex] ?? null;
 }
 
 type PrefetchEntry = {
@@ -154,13 +335,6 @@ function selectionMatches(a: StreamSelection, b: StreamSelection): boolean {
   return a.video === b.video && a.audio === b.audio;
 }
 
-function getNextTrack(state: PlayerState): Track | null {
-  const { current, queue } = state;
-  if (!current || queue.length <= 1) return null;
-  const index = queue.findIndex((track) => track.video_id === current.video_id);
-  return queue[index + 1] ?? null;
-}
-
 function tryAdoptPrefetch(track: Track, selection: StreamSelection): PrefetchEntry | null {
   if (!prefetchEntry || prefetchEntry.track.video_id !== track.video_id) return null;
   if (!selectionMatches(prefetchEntry.selection, selection)) {
@@ -176,7 +350,7 @@ function tryAdoptPrefetch(track: Track, selection: StreamSelection): PrefetchEnt
 
 function prefetchMatchesNext(state: PlayerState): boolean {
   if (!prefetchEntry) return false;
-  const next = getNextTrack(state);
+  const next = expectedNextTrack(state);
   if (!next || next.video_id !== prefetchEntry.track.video_id) return false;
   const selection = normalizeSelection(state.streamSelection, state.stream);
   return selectionMatches(prefetchEntry.selection, selection);
@@ -189,7 +363,7 @@ function syncPrefetchWithQueue(get: () => PlayerState): void {
   }
 
   const state = get();
-  if (!getNextTrack(state)) {
+  if (!expectedNextTrack(state)) {
     invalidatePrefetch();
     return;
   }
@@ -206,12 +380,13 @@ async function prefetchNextTrack(get: () => PlayerState): Promise<void> {
   await clearPrefetch();
 
   const state = get();
-  const track = getNextTrack(state);
+  const track = expectedNextTrack(state);
   if (!track) return;
 
   const selection = normalizeSelection(state.streamSelection, state.stream);
 
   try {
+    await refreshPlayerMediaConfig();
     const stream = await api.getStream(track.video_id, track);
     if (token !== prefetchToken) return;
 
@@ -222,7 +397,7 @@ async function prefetchNextTrack(get: () => PlayerState): Promise<void> {
     let sound: Audio.Sound | null = null;
     if (playbackKind === "audio") {
       const created = await withRetry(
-        () => Audio.Sound.createAsync({ uri: mediaUrl }, { shouldPlay: false }),
+        () => Audio.Sound.createAsync({ uri: mediaUrl }, { shouldPlay: false, volume: get().volume }),
         {
           maxAttempts: 2,
           shouldRetry: (error) => error instanceof Error,
@@ -236,7 +411,7 @@ async function prefetchNextTrack(get: () => PlayerState): Promise<void> {
     }
 
     const latest = get();
-    const latestTrack = getNextTrack(latest);
+    const latestTrack = expectedNextTrack(latest);
     if (!latestTrack || latestTrack.video_id !== track.video_id) {
       await disposeSound(sound);
       return;
@@ -265,6 +440,45 @@ function schedulePrefetchNext(get: () => PlayerState): void {
   syncPrefetchWithQueue(get);
 }
 
+async function loadAudioPlayback(
+  mediaUrl: string,
+  generation: number,
+  set: (partial: Partial<PlayerState>) => void,
+  get: () => PlayerState,
+  autoplay: boolean,
+): Promise<Audio.Sound | null> {
+  const { sound } = await withRetry(
+    () =>
+      Audio.Sound.createAsync(
+        { uri: mediaUrl },
+        { shouldPlay: autoplay, volume: get().volume },
+      ),
+    {
+      maxAttempts: 2,
+      shouldRetry: (error) => error instanceof Error,
+    },
+  );
+  if (!isActiveGeneration(generation)) {
+    await disposeSound(sound);
+    return null;
+  }
+
+  sound.setOnPlaybackStatusUpdate((status) => {
+    if (!isActiveGeneration(generation)) return;
+    if (!status.isLoaded) return;
+    set({
+      isPlaying: status.isPlaying,
+      positionSec: (status.positionMillis ?? 0) / 1000,
+      durationSec: (status.durationMillis ?? 0) / 1000 || get().durationSec,
+    });
+    if (status.didJustFinish) {
+      void get().onTrackEnded();
+    }
+  });
+
+  return sound;
+}
+
 export const usePlayerStore = create<PlayerState>((set, get) => ({
   current: null,
   stream: null,
@@ -273,21 +487,118 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   playbackKind: "audio",
   isPlaying: false,
   isLoading: false,
+  positionSec: 0,
+  durationSec: 0,
+  volume: storedVolume,
   queue: [],
+  shuffle: false,
+  shuffleOrder: [],
+  shuffleStep: 0,
+  repeatMode: "none",
   sound: null,
   videoControls: null,
+  error: null,
+
+  clearError: () => set({ error: null }),
+
+  reportProgress: (positionSec, durationSec) => {
+    set({
+      positionSec,
+      ...(durationSec != null && durationSec > 0 ? { durationSec } : {}),
+    });
+  },
 
   registerVideoControls: (controls) => set({ videoControls: controls }),
 
-  playTrack: async (track, queue = []) => {
+  setVolume: async (volume) => {
+    const clamped = Math.max(0, Math.min(1, volume));
+    storedVolume = clamped;
+    void AsyncStorage.setItem(VOLUME_KEY, String(clamped));
+    const { sound } = get();
+    if (sound) {
+      try {
+        await sound.setVolumeAsync(clamped);
+      } catch {
+        /* ignore */
+      }
+    }
+    set({ volume: clamped });
+  },
+
+  seek: async (seconds) => {
+    const { sound, videoControls, playbackKind, durationSec } = get();
+    const max = durationSec || 0;
+    const clamped = max > 0 ? Math.max(0, Math.min(seconds, max)) : Math.max(0, seconds);
+    set({ positionSec: clamped });
+
+    if (playbackKind === "video") {
+      await videoControls?.setPositionSec(clamped);
+      return;
+    }
+    if (!sound) return;
+    try {
+      await sound.setPositionAsync(clamped * 1000);
+    } catch {
+      /* ignore */
+    }
+  },
+
+  toggleShuffle: () => {
+    const state = get();
+    if (state.queue.length <= 1) return;
+
+    if (state.shuffle) {
+      set({ shuffle: false, shuffleOrder: [], shuffleStep: currentQueueIndex(state) });
+      invalidatePrefetch();
+      syncPrefetchWithQueue(get);
+      return;
+    }
+
+    const queueIndex = currentQueueIndex(state);
+    const shuffleOrder = buildShuffleOrder(state.queue.length, queueIndex >= 0 ? queueIndex : 0);
+    set({ shuffle: true, shuffleOrder, shuffleStep: 0 });
+    syncPrefetchWithQueue(get);
+  },
+
+  cycleRepeatMode: () => {
+    const next: Record<RepeatMode, RepeatMode> = {
+      none: "all",
+      all: "one",
+      one: "none",
+    };
+    set({ repeatMode: next[get().repeatMode] });
+    syncPrefetchWithQueue(get);
+  },
+
+  playTrack: async (track, queue = [], options) => {
     const generation = ++playGeneration;
     await disposeSound(get().sound);
     get().videoControls?.pause().catch(() => undefined);
+    await refreshPlayerMediaConfig();
 
     const selection = normalizeSelection(get().streamSelection, get().stream);
     const adopted = tryAdoptPrefetch(track, selection);
     if (!adopted) {
       invalidatePrefetch();
+    }
+
+    const nextQueue = queue.length ? queue : [track];
+    const queueIndex = nextQueue.findIndex((item) => item.video_id === track.video_id);
+    const activeIndex = queueIndex >= 0 ? queueIndex : 0;
+
+    let shuffleOrder = get().shuffleOrder;
+    let shuffleStep = get().shuffleStep;
+    if (get().shuffle && nextQueue.length > 1) {
+      if (options?.fromNavigation && shuffleOrder.length === nextQueue.length) {
+        shuffleStep = shuffleOrder.indexOf(activeIndex);
+        if (shuffleStep < 0) shuffleStep = 0;
+      } else {
+        shuffleOrder = buildShuffleOrder(nextQueue.length, activeIndex);
+        shuffleStep = 0;
+      }
+    } else {
+      shuffleOrder = [];
+      shuffleStep = activeIndex;
     }
 
     set({
@@ -297,8 +608,13 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       isLoading: true,
       isPlaying: false,
       current: track,
-      queue: queue.length ? queue : [track],
+      queue: nextQueue,
+      shuffleOrder,
+      shuffleStep,
       streamSelection: adopted?.selection ?? selection,
+      error: null,
+      positionSec: 0,
+      durationSec: track.duration_sec ?? 0,
     });
 
     await configureAudio();
@@ -319,11 +635,16 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
           sound.setOnPlaybackStatusUpdate((status) => {
             if (!isActiveGeneration(generation)) return;
             if (!status.isLoaded) return;
-            set({ isPlaying: status.isPlaying });
+            set({
+              isPlaying: status.isPlaying,
+              positionSec: (status.positionMillis ?? 0) / 1000,
+              durationSec: (status.durationMillis ?? 0) / 1000 || get().durationSec,
+            });
             if (status.didJustFinish) {
-              void get().playNext();
+              void get().onTrackEnded();
             }
           });
+          await sound.setVolumeAsync(get().volume);
           await sound.playAsync();
         }
         if (!sound) return;
@@ -354,13 +675,13 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       schedulePrefetchNext(get);
     } catch (error) {
       if (!isActiveGeneration(generation)) return;
-      set({ isLoading: false, isPlaying: false });
-      throw error;
+      const message = error instanceof Error ? error.message : "Playback failed";
+      set({ isLoading: false, isPlaying: false, error: message });
     }
   },
 
   setStreamSelection: async (patch) => {
-    const { current, stream, streamSelection, sound, videoControls, isPlaying } = get();
+    const { current, stream, streamSelection, sound, videoControls, isPlaying, positionSec } = get();
     if (!current || !stream) return;
 
     const nextSelection = normalizeSelection({ ...streamSelection, ...patch }, stream);
@@ -373,19 +694,18 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
     const generation = ++playGeneration;
     invalidatePrefetch();
+    await refreshPlayerMediaConfig();
     const resumeSec =
       get().playbackKind === "video"
-        ? (videoControls?.getPositionSec() ?? 0)
-        : ((await sound?.getStatusAsync().catch(() => null))?.isLoaded
-            ? ((await sound?.getStatusAsync()) as { positionMillis?: number }).positionMillis! / 1000
-            : 0);
+        ? (videoControls?.getPositionSec() ?? positionSec)
+        : positionSec;
 
     await disposeSound(sound);
     videoControls?.pause().catch(() => undefined);
 
     const mediaUrl = buildMediaUrl(stream, nextSelection);
     const playbackKind = nextSelection.video ? "video" : "audio";
-    set({ sound: null, mediaUrl, playbackKind, streamSelection: nextSelection, isLoading: true });
+    set({ sound: null, mediaUrl, playbackKind, streamSelection: nextSelection, isLoading: true, error: null });
 
     try {
       if (playbackKind === "audio") {
@@ -394,7 +714,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
         if (resumeSec > 0) {
           await nextSound.setPositionAsync(resumeSec * 1000);
         }
-        set({ sound: nextSound, isLoading: false, isPlaying });
+        set({ sound: nextSound, isLoading: false, isPlaying, positionSec: resumeSec });
       } else {
         if (resumeSec > 0) {
           await videoControls?.setPositionSec(resumeSec);
@@ -402,12 +722,13 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
         if (isPlaying) {
           await videoControls?.play();
         }
-        set({ sound: null, isLoading: false, isPlaying });
+        set({ sound: null, isLoading: false, isPlaying, positionSec: resumeSec });
       }
       schedulePrefetchNext(get);
-    } catch {
+    } catch (error) {
       if (!isActiveGeneration(generation)) return;
-      set({ isLoading: false, isPlaying: false });
+      const message = error instanceof Error ? error.message : "Could not switch stream";
+      set({ isLoading: false, isPlaying: false, error: message });
     }
   },
 
@@ -425,21 +746,187 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     else await sound.playAsync();
   },
 
-  playNext: async () => {
-    const { current, queue } = get();
-    if (!current || queue.length <= 1) {
+  onTrackEnded: async () => {
+    if (get().repeatMode === "one") {
+      await get().seek(0);
+      const { playbackKind, sound, videoControls } = get();
+      if (playbackKind === "video") await videoControls?.play();
+      else await sound?.playAsync();
+      set({ isPlaying: true });
+      return;
+    }
+    await get().playNext(true);
+  },
+
+  playPrevious: async () => {
+    const action = resolvePreviousAction(get());
+    if (action.type === "restart") {
+      await get().seek(0);
+      return;
+    }
+
+    const track = get().queue[action.queueIndex];
+    if (!track) return;
+    set({ shuffleStep: action.shuffleStep });
+    await get().playTrack(track, get().queue, { fromNavigation: true });
+  },
+
+  playNext: async (_fromAutoAdvance = false) => {
+    const action = resolveNextAction(get());
+    if (action.type === "repeat-one") {
+      await get().seek(0);
+      const { playbackKind, sound, videoControls } = get();
+      if (playbackKind === "video") await videoControls?.play();
+      else await sound?.playAsync();
+      set({ isPlaying: true });
+      return;
+    }
+    if (action.type === "stop") {
       set({ isPlaying: false });
       return;
     }
 
-    const index = queue.findIndex((track) => track.video_id === current.video_id);
-    const next = queue[index + 1];
-    if (!next) {
+    const track = get().queue[action.queueIndex];
+    if (!track) {
       set({ isPlaying: false });
       return;
     }
+    set({ shuffleStep: action.shuffleStep });
+    await get().playTrack(track, get().queue, { fromNavigation: true });
+  },
 
-    await get().playTrack(next, queue);
+  playQueueIndex: async (queueIndex) => {
+    const state = get();
+    const track = state.queue[queueIndex];
+    if (!track) return;
+
+    if (state.shuffle && state.shuffleOrder.length > 1) {
+      const step = state.shuffleOrder.indexOf(queueIndex);
+      if (step >= 0) {
+        set({ shuffleStep: step });
+      }
+    }
+
+    await get().playTrack(track, state.queue, { fromNavigation: true });
+  },
+
+  removeQueueIndex: async (queueIndex) => {
+    const state = get();
+    if (queueIndex < 0 || queueIndex >= state.queue.length) return;
+
+    const currentIndex = currentQueueIndex(state);
+    const isCurrent = queueIndex === currentIndex;
+    const nextQueue = state.queue.filter((_, index) => index !== queueIndex);
+
+    let shuffleOrder = state.shuffleOrder;
+    let shuffleStep = state.shuffleStep;
+    if (state.shuffle && shuffleOrder.length > 0) {
+      ({ shuffleOrder, shuffleStep } = removeIndexFromShuffleOrder(
+        shuffleOrder,
+        queueIndex,
+        shuffleStep,
+      ));
+    } else if (!isCurrent && queueIndex < shuffleStep) {
+      shuffleStep = Math.max(0, shuffleStep - 1);
+    }
+
+    if (isCurrent) {
+      if (nextQueue.length === 0) {
+        await get().stop();
+        return;
+      }
+
+      const action = resolveNextAction(state);
+      set({ queue: nextQueue, shuffleOrder, shuffleStep });
+
+      if (action.type === "track" && action.queueIndex !== queueIndex) {
+        const nextTrack = state.queue[action.queueIndex];
+        const nextIndex = nextQueue.findIndex((track) => track.video_id === nextTrack.video_id);
+        if (nextIndex >= 0) {
+          if (state.shuffle && shuffleOrder.length > 1) {
+            const step = shuffleOrder.indexOf(nextIndex);
+            if (step >= 0) set({ shuffleStep: step });
+          }
+          await get().playTrack(nextTrack, nextQueue, { fromNavigation: true });
+          return;
+        }
+      }
+
+      const fallbackIndex = Math.min(queueIndex, nextQueue.length - 1);
+      await get().playTrack(nextQueue[fallbackIndex], nextQueue, { fromNavigation: true });
+      return;
+    }
+
+    set({ queue: nextQueue, shuffleOrder, shuffleStep });
+    syncPrefetchWithQueue(get);
+  },
+
+  clearUpcoming: () => {
+    const state = get();
+    if (state.queue.length === 0) return;
+
+    const currentIndex = currentQueueIndex(state);
+    if (currentIndex < 0) {
+      void get().stop();
+      return;
+    }
+
+    if (currentIndex >= state.queue.length - 1) return;
+
+    const nextQueue = [state.queue[currentIndex]];
+    set({
+      queue: nextQueue,
+      shuffle: false,
+      shuffleOrder: [],
+      shuffleStep: 0,
+    });
+    syncPrefetchWithQueue(get);
+  },
+
+  reorderQueue: (fromQueueIndex, toQueueIndex) => {
+    const state = get();
+    if (fromQueueIndex === toQueueIndex) return;
+    if (fromQueueIndex < 0 || toQueueIndex < 0) return;
+    if (fromQueueIndex >= state.queue.length || toQueueIndex >= state.queue.length) return;
+
+    const currentIndex = currentQueueIndex(state);
+    if (fromQueueIndex === currentIndex || toQueueIndex === currentIndex) return;
+
+    if (state.shuffle && state.shuffleOrder.length > 1) {
+      const nextOrder = moveInShuffleOrder(state.shuffleOrder, fromQueueIndex, toQueueIndex);
+      set({ shuffleOrder: nextOrder });
+      syncPrefetchWithQueue(get);
+      return;
+    }
+
+    const nextQueue = moveInQueue(state.queue, fromQueueIndex, toQueueIndex);
+    let shuffleStep = state.shuffleStep;
+    if (fromQueueIndex === shuffleStep) {
+      shuffleStep = toQueueIndex;
+    } else if (fromQueueIndex < shuffleStep && toQueueIndex >= shuffleStep) {
+      shuffleStep -= 1;
+    } else if (fromQueueIndex > shuffleStep && toQueueIndex <= shuffleStep) {
+      shuffleStep += 1;
+    }
+
+    set({ queue: nextQueue, shuffleStep });
+    syncPrefetchWithQueue(get);
+  },
+
+  addToQueue: (track) => {
+    const state = get();
+    const nextQueue = [...state.queue, track];
+    const nextIndex = nextQueue.length - 1;
+
+    let shuffleOrder = state.shuffleOrder;
+    if (state.shuffle) {
+      shuffleOrder = shuffleOrder.length > 0 ? [...shuffleOrder, nextIndex] : [nextIndex];
+    }
+
+    set({ queue: nextQueue, shuffleOrder });
+    if (state.current) {
+      syncPrefetchWithQueue(get);
+    }
   },
 
   stop: async () => {
@@ -455,8 +942,85 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       playbackKind: "audio",
       isPlaying: false,
       isLoading: false,
+      positionSec: 0,
+      durationSec: 0,
       queue: [],
+      shuffleOrder: [],
+      shuffleStep: 0,
       streamSelection: DEFAULT_SELECTION,
+      error: null,
     });
   },
 }));
+
+export type QueueViewItem = {
+  track: Track;
+  queueIndex: number;
+  status: "playing" | "upcoming";
+};
+
+export function getQueueView(
+  state: Pick<PlayerState, "current" | "queue" | "shuffle" | "shuffleOrder" | "shuffleStep">,
+): QueueViewItem[] {
+  if (!state.current || state.queue.length === 0) return [];
+
+  const currentIndex = currentQueueIndex(state);
+  if (currentIndex < 0) {
+    return [{ track: state.current, queueIndex: 0, status: "playing" }];
+  }
+
+  const items: QueueViewItem[] = [];
+
+  if (state.shuffle && state.shuffleOrder.length > 1) {
+    const step = state.shuffleOrder.indexOf(currentIndex);
+    const activeStep = step >= 0 ? step : state.shuffleStep;
+
+    items.push({ track: state.queue[currentIndex], queueIndex: currentIndex, status: "playing" });
+    for (let index = activeStep + 1; index < state.shuffleOrder.length; index += 1) {
+      const queueIndex = state.shuffleOrder[index];
+      items.push({ track: state.queue[queueIndex], queueIndex, status: "upcoming" });
+    }
+    return items;
+  }
+
+  for (let index = currentIndex; index < state.queue.length; index += 1) {
+    items.push({
+      track: state.queue[index],
+      queueIndex: index,
+      status: index === currentIndex ? "playing" : "upcoming",
+    });
+  }
+  return items;
+}
+
+export function canPlayNext(
+  state: Pick<
+    PlayerState,
+    "current" | "queue" | "repeatMode" | "shuffle" | "shuffleOrder" | "shuffleStep"
+  >,
+): boolean {
+  return resolveNextAction(state as PlayerState).type !== "stop";
+}
+
+export function canPlayPrevious(
+  state: Pick<
+    PlayerState,
+    "current" | "queue" | "positionSec" | "repeatMode" | "shuffle" | "shuffleOrder" | "shuffleStep"
+  >,
+): boolean {
+  if (!state.current) return false;
+  if (state.positionSec > 3) return true;
+  if (state.queue.length <= 1) return false;
+
+  const queueIndex = currentQueueIndex(state);
+  if (queueIndex < 0) return false;
+
+  if (state.shuffle && state.shuffleOrder.length > 1) {
+    const step = state.shuffleOrder.indexOf(queueIndex);
+    if (step > 0) return true;
+    return state.repeatMode === "all";
+  }
+
+  if (queueIndex > 0) return true;
+  return state.repeatMode === "all";
+}

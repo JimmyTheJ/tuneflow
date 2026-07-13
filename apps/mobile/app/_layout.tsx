@@ -1,3 +1,4 @@
+import "../global.css";
 import { Stack, router, useSegments } from "expo-router";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, View } from "react-native";
@@ -51,20 +52,34 @@ export default function RootLayout() {
 
   if (!isReady || needsSetup === null) {
     return (
-      <View style={{ flex: 1, backgroundColor: "#0a0a0a", justifyContent: "center", alignItems: "center" }}>
-        <ActivityIndicator color="#22c55e" size="large" />
+      <View className="flex-1 items-center justify-center bg-base">
+        <ActivityIndicator color="#1db954" size="large" />
       </View>
     );
   }
 
+  const headerOptions = {
+    headerShown: true,
+    headerStyle: { backgroundColor: "#0a0a0a" },
+    headerTintColor: "#fff",
+    headerShadowVisible: false,
+    contentStyle: { backgroundColor: "#0a0a0a" },
+  };
+
   return (
-    <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: "#0a0a0a" } }}>
+    <Stack
+      screenOptions={{
+        headerShown: false,
+        contentStyle: { backgroundColor: "#0a0a0a" },
+      }}
+    >
       <Stack.Screen name="(auth)" />
       <Stack.Screen name="(tabs)" />
       <Stack.Screen name="player" options={{ presentation: "modal" }} />
-      <Stack.Screen name="family" options={{ headerShown: true, title: "Family" }} />
-      <Stack.Screen name="parental" options={{ headerShown: true, title: "Parental controls" }} />
-      <Stack.Screen name="playlist/[id]" options={{ headerShown: true, title: "Playlist" }} />
+      <Stack.Screen name="queue" options={{ ...headerOptions, presentation: "modal", title: "Queue" }} />
+      <Stack.Screen name="family" options={{ ...headerOptions, title: "Family" }} />
+      <Stack.Screen name="parental" options={{ ...headerOptions, title: "Parental controls" }} />
+      <Stack.Screen name="playlist/[id]" options={{ ...headerOptions, title: "Playlist" }} />
     </Stack>
   );
 }

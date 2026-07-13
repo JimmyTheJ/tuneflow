@@ -4,13 +4,14 @@ import {
   ActivityIndicator,
   Pressable,
   ScrollView,
-  StyleSheet,
   Switch,
   Text,
   TextInput,
   View,
 } from "react-native";
 
+import { Button } from "@/components/ui/Button";
+import { Card } from "@/components/ui/Card";
 import { api } from "@/lib/api";
 import { canManageMembers, formatRoleProfiles } from "@/lib/permissions";
 import { useAuthStore } from "@/stores/auth";
@@ -92,204 +93,100 @@ export default function FamilyScreen() {
   };
 
   if (loading) {
-    return <ActivityIndicator color="#22c55e" style={{ marginTop: 48 }} />;
+    return (
+      <View className="flex-1 items-center justify-center bg-base">
+        <ActivityIndicator color="#1db954" />
+      </View>
+    );
   }
 
   return (
-    <ScrollView style={styles.container}>
-      <Text style={styles.help}>
+    <ScrollView className="flex-1 bg-base px-4 pt-4" contentContainerStyle={{ paddingBottom: 40 }}>
+      <Text className="mb-4 text-[15px] leading-6 text-text-secondary">
         Add accounts for family members. Child accounts automatically get parental controls.
       </Text>
 
-      {error ? <Text style={styles.error}>{error}</Text> : null}
-      {message ? <Text style={styles.message}>{message}</Text> : null}
+      {error ? <Text className="mb-2 text-sm text-danger-fg">{error}</Text> : null}
+      {message ? <Text className="mb-2 text-sm text-accent">{message}</Text> : null}
 
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Add family member</Text>
+      <Card className="mb-6 gap-2">
+        <Text className="mb-1 text-lg font-bold text-text">Add family member</Text>
 
-        <Text style={styles.label}>Display name</Text>
+        <Text className="mt-1 text-sm text-text-secondary">Display name</Text>
         <TextInput
           value={displayName}
           onChangeText={setDisplayName}
-          style={styles.input}
+          className="rounded-xl border border-border bg-base px-3.5 py-3 text-base text-text"
           placeholder="Alex"
-          placeholderTextColor="#737373"
+          placeholderTextColor="#6a6a6a"
         />
 
-        <Text style={styles.label}>Username</Text>
+        <Text className="mt-1 text-sm text-text-secondary">Username</Text>
         <TextInput
           value={username}
           onChangeText={setUsername}
           autoCapitalize="none"
           autoCorrect={false}
-          style={styles.input}
+          className="rounded-xl border border-border bg-base px-3.5 py-3 text-base text-text"
           placeholder="alex"
-          placeholderTextColor="#737373"
+          placeholderTextColor="#6a6a6a"
         />
 
-        <Text style={styles.label}>Password</Text>
+        <Text className="mt-1 text-sm text-text-secondary">Password</Text>
         <TextInput
           value={password}
           onChangeText={setPassword}
           secureTextEntry
-          style={styles.input}
+          className="rounded-xl border border-border bg-base px-3.5 py-3 text-base text-text"
           placeholder="••••••"
-          placeholderTextColor="#737373"
+          placeholderTextColor="#6a6a6a"
         />
 
-        <Text style={styles.label}>Account type</Text>
-        <View style={styles.chipRow}>
+        <Text className="mt-1 text-sm text-text-secondary">Account type</Text>
+        <View className="mb-2 mt-1 flex-row gap-2">
           {(["child", "adult"] as const).map((option) => (
             <Pressable
               key={option}
-              style={[styles.chip, role === option && styles.chipActive]}
+              className={`rounded-full px-3.5 py-2 ${role === option ? "bg-accent-dim" : "bg-highlight"}`}
               onPress={() => setRole(option)}
             >
-              <Text style={styles.chipText}>{option}</Text>
+              <Text className="font-semibold capitalize text-text">{option}</Text>
             </Pressable>
           ))}
         </View>
 
-        <Pressable style={styles.button} onPress={() => void createMember()} disabled={saving}>
-          <Text style={styles.buttonText}>{saving ? "Adding..." : "Add member"}</Text>
-        </Pressable>
-      </View>
+        <Button block loading={saving} onPress={() => void createMember()}>
+          Add member
+        </Button>
+      </Card>
 
-      <Text style={styles.sectionTitle}>Household</Text>
+      <Text className="mb-3 text-lg font-bold text-text">Household</Text>
       {members.map((member) => (
-        <View key={member.id} style={styles.memberRow}>
-          <View style={styles.memberMeta}>
-            <Text style={styles.memberName}>{member.display_name}</Text>
-            <Text style={styles.memberSub}>
+        <View
+          key={member.id}
+          className="flex-row items-center justify-between border-b border-border py-3"
+        >
+          <View className="min-w-0 flex-1 gap-0.5">
+            <Text className="text-base font-semibold text-text">{member.display_name}</Text>
+            <Text className="text-[13px] text-text-muted">
               @{member.username} · {formatRoleProfiles(member.role_profiles)}
               {!member.is_active ? " · disabled" : ""}
             </Text>
           </View>
           {canManageMembers(currentUser) && member.id !== currentUser?.id ? (
-            <Switch value={member.is_active} onValueChange={() => void toggleActive(member)} />
+            <Switch
+              value={member.is_active}
+              onValueChange={() => void toggleActive(member)}
+              trackColor={{ false: "#3a3a3a", true: "#14532d" }}
+              thumbColor={member.is_active ? "#1db954" : "#b3b3b3"}
+            />
           ) : null}
         </View>
       ))}
 
-      <Pressable style={styles.linkButton} onPress={() => router.push("/parental")}>
-        <Text style={styles.linkButtonText}>Manage parental controls →</Text>
+      <Pressable className="mb-8 mt-6 py-3" onPress={() => router.push("/parental")}>
+        <Text className="text-base font-semibold text-accent">Manage parental controls →</Text>
       </Pressable>
     </ScrollView>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#0a0a0a",
-    padding: 16,
-  },
-  help: {
-    color: "#a3a3a3",
-    fontSize: 15,
-    lineHeight: 22,
-    marginBottom: 16,
-  },
-  card: {
-    backgroundColor: "#171717",
-    borderRadius: 16,
-    padding: 16,
-    gap: 8,
-    marginBottom: 24,
-  },
-  cardTitle: {
-    color: "#fff",
-    fontSize: 18,
-    fontWeight: "700",
-    marginBottom: 4,
-  },
-  label: {
-    color: "#d4d4d4",
-    fontSize: 14,
-    marginTop: 4,
-  },
-  input: {
-    backgroundColor: "#0a0a0a",
-    color: "#fff",
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 16,
-  },
-  chipRow: {
-    flexDirection: "row",
-    gap: 8,
-    marginVertical: 8,
-  },
-  chip: {
-    backgroundColor: "#0a0a0a",
-    borderRadius: 999,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-  },
-  chipActive: {
-    backgroundColor: "#14532d",
-  },
-  chipText: {
-    color: "#fff",
-    fontWeight: "600",
-    textTransform: "capitalize",
-  },
-  button: {
-    backgroundColor: "#22c55e",
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: "center",
-    marginTop: 8,
-  },
-  buttonText: {
-    color: "#052e16",
-    fontWeight: "700",
-    fontSize: 16,
-  },
-  sectionTitle: {
-    color: "#fff",
-    fontSize: 18,
-    fontWeight: "700",
-    marginBottom: 12,
-  },
-  memberRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#262626",
-  },
-  memberMeta: {
-    flex: 1,
-    gap: 2,
-  },
-  memberName: {
-    color: "#fff",
-    fontSize: 16,
-    fontWeight: "600",
-  },
-  memberSub: {
-    color: "#737373",
-    fontSize: 13,
-  },
-  linkButton: {
-    marginTop: 24,
-    marginBottom: 32,
-    paddingVertical: 12,
-  },
-  linkButtonText: {
-    color: "#22c55e",
-    fontSize: 16,
-    fontWeight: "600",
-  },
-  error: {
-    color: "#f87171",
-    marginBottom: 8,
-  },
-  message: {
-    color: "#22c55e",
-    marginBottom: 8,
-  },
-});

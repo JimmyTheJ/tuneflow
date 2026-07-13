@@ -1,15 +1,16 @@
+import { Ionicons } from "@expo/vector-icons";
 import { useCallback, useRef, useState } from "react";
 import {
-  ActivityIndicator,
   FlatList,
   Pressable,
-  StyleSheet,
   Text,
   TextInput,
   View,
 } from "react-native";
 
 import { TrackRow } from "@/components/TrackRow";
+import { Button } from "@/components/ui/Button";
+import { TrackRowSkeleton } from "@/components/ui/Skeleton";
 import { useSearchHistory } from "@/hooks/useSearchHistory";
 import { api } from "@/lib/api";
 import { usePlayerStore } from "@/stores/player";
@@ -34,21 +35,21 @@ export default function SearchScreen() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [inputFocused, setInputFocused] = useState(false);
+  const [lastQuery, setLastQuery] = useState<string | null>(null);
   const loadingMoreRef = useRef(false);
   const playTrack = usePlayerStore((state) => state.playTrack);
   const { suggestions, recordQuery, removeQuery, clearHistory } = useSearchHistory(query);
 
   const runSearch = async (searchText?: string) => {
     const trimmed = (searchText ?? query).trim();
-    if (!trimmed) {
-      return;
-    }
+    if (!trimmed) return;
     setQuery(trimmed);
     setInputFocused(false);
     setLoading(true);
     setLoadingMore(false);
     setError(null);
     setNextPage(null);
+    setLastQuery(trimmed);
     try {
       const page = await api.search(trimmed);
       setResults(page.results);
@@ -65,9 +66,7 @@ export default function SearchScreen() {
 
   const loadMore = useCallback(async () => {
     const trimmed = query.trim();
-    if (!trimmed || !nextPage || loadingMoreRef.current || loading) {
-      return;
-    }
+    if (!trimmed || !nextPage || loadingMoreRef.current || loading) return;
 
     loadingMoreRef.current = true;
     setLoadingMore(true);
@@ -89,50 +88,67 @@ export default function SearchScreen() {
   const playable = results.filter((track) => !track.blocked_reason);
 
   return (
-    <View style={styles.container}>
-      <View style={styles.searchRow}>
-        <TextInput
-          value={query}
-          onChangeText={setQuery}
-          placeholder="Search songs, artists..."
-          placeholderTextColor="#737373"
-          style={styles.input}
-          onFocus={() => setInputFocused(true)}
-          onBlur={() => setInputFocused(false)}
-          onSubmitEditing={() => void runSearch()}
-          returnKeyType="search"
-        />
-        <Pressable style={styles.button} onPress={() => void runSearch()}>
-          <Text style={styles.buttonText}>Go</Text>
-        </Pressable>
+    <View className="flex-1 bg-base px-4 pt-2">
+      <Text className="mb-3 text-3xl font-bold tracking-tight text-text">Search</Text>
+
+      <View className="mb-3 flex-row items-center gap-2">
+        <View className="relative min-w-0 flex-1">
+          <Ionicons
+            name="search"
+            size={18}
+            color="#6a6a6a"
+            style={{ position: "absolute", left: 14, top: 14, zIndex: 1 }}
+          />
+          <TextInput
+            value={query}
+            onChangeText={setQuery}
+            placeholder="What do you want to listen to?"
+            placeholderTextColor="#6a6a6a"
+            className="rounded-full border border-border bg-elevated py-3.5 pl-11 pr-4 text-base text-text"
+            onFocus={() => setInputFocused(true)}
+            onBlur={() => setInputFocused(false)}
+            onSubmitEditing={() => void runSearch()}
+            returnKeyType="search"
+          />
+        </View>
+        <Button
+          onPress={() => void runSearch()}
+          disabled={loading || !query.trim()}
+          loading={loading}
+          className="px-5"
+        >
+          Search
+        </Button>
       </View>
 
       {showSuggestions ? (
-        <View style={styles.suggestions}>
+        <View className="mb-3 overflow-hidden rounded-xl border border-border bg-elevated">
           {!query.trim() ? (
-            <View style={styles.suggestionsHeader}>
-              <Text style={styles.suggestionsTitle}>Recent searches</Text>
+            <View className="flex-row items-center justify-between border-b border-border px-4 py-2.5">
+              <Text className="text-xs font-semibold uppercase tracking-wide text-text-muted">
+                Recent searches
+              </Text>
               <Pressable onPress={clearHistory} hitSlop={8}>
-                <Text style={styles.suggestionsClear}>Clear</Text>
+                <Text className="text-xs font-semibold text-text-secondary">Clear</Text>
               </Pressable>
             </View>
           ) : null}
           {suggestions.map((suggestion) => (
-            <View key={suggestion.text} style={styles.suggestionRow}>
+            <View key={suggestion.text} className="flex-row items-center">
               <Pressable
-                style={styles.suggestionButton}
+                className="flex-1 px-4 py-3 active:bg-highlight"
                 onPress={() => void runSearch(suggestion.text)}
               >
-                <Text style={styles.suggestionText}>{suggestion.text}</Text>
+                <Text className="text-base text-text">{suggestion.text}</Text>
               </Pressable>
               {!query.trim() ? (
                 <Pressable
-                  style={styles.suggestionRemove}
+                  className="px-4 py-3"
                   onPress={() => removeQuery(suggestion.text)}
                   hitSlop={8}
                   accessibilityLabel={`Remove ${suggestion.text}`}
                 >
-                  <Text style={styles.suggestionRemoveText}>×</Text>
+                  <Ionicons name="close" size={16} color="#6a6a6a" />
                 </Pressable>
               ) : null}
             </View>
@@ -140,8 +156,22 @@ export default function SearchScreen() {
         </View>
       ) : null}
 
-      {loading ? <ActivityIndicator color="#22c55e" style={{ marginTop: 24 }} /> : null}
-      {error ? <Text style={styles.error}>{error}</Text> : null}
+      {loading ? (
+        <View className="gap-1">
+          <Text className="mb-2 text-sm text-text-secondary">
+            Searching for &ldquo;{lastQuery}&rdquo;…
+          </Text>
+          {Array.from({ length: 6 }).map((_, i) => (
+            <TrackRowSkeleton key={i} />
+          ))}
+        </View>
+      ) : null}
+
+      {error ? <Text className="mb-2 text-danger-fg">{error}</Text> : null}
+
+      {!loading && lastQuery && results.length === 0 && !error ? (
+        <Text className="text-text-muted">No results for &ldquo;{lastQuery}&rdquo;.</Text>
+      ) : null}
 
       <FlatList
         data={results}
@@ -151,115 +181,29 @@ export default function SearchScreen() {
             track={item}
             displayTitle={item.source_title ?? item.title}
             showBadges
-            subtitle={item.blocked_reason ? `Blocked: ${item.blocked_reason}` : item.artist ?? "Unknown artist"}
-            onPress={
-              item.blocked_reason ? undefined : () => void playTrack(item, playable)
+            subtitle={
+              item.blocked_reason
+                ? `Blocked: ${item.blocked_reason}`
+                : (item.artist ?? "Unknown artist")
             }
+            onPress={item.blocked_reason ? undefined : () => void playTrack(item, playable)}
           />
         )}
         onEndReached={() => void loadMore()}
         onEndReachedThreshold={0.4}
         ListFooterComponent={
-          loadingMore ? <ActivityIndicator color="#22c55e" style={{ marginVertical: 20 }} /> : null
+          loadingMore ? (
+            <Text className="my-4 text-center text-sm text-text-secondary">Loading more…</Text>
+          ) : null
         }
         ListEmptyComponent={
-          !loading && !showSuggestions ? (
-            <Text style={styles.empty}>Search YouTube’s music catalog via your server.</Text>
+          !loading && !showSuggestions && !lastQuery ? (
+            <Text className="mt-6 text-text-muted">
+              Search YouTube’s music catalog via your server.
+            </Text>
           ) : null
         }
       />
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#0a0a0a",
-    paddingHorizontal: 16,
-    paddingTop: 8,
-  },
-  searchRow: {
-    flexDirection: "row",
-    gap: 8,
-    marginBottom: 12,
-  },
-  input: {
-    flex: 1,
-    backgroundColor: "#171717",
-    color: "#fff",
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 16,
-  },
-  button: {
-    backgroundColor: "#22c55e",
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    justifyContent: "center",
-  },
-  buttonText: {
-    color: "#052e16",
-    fontWeight: "700",
-    fontSize: 15,
-  },
-  empty: {
-    color: "#737373",
-    marginTop: 24,
-    fontSize: 15,
-  },
-  error: {
-    color: "#f87171",
-    marginBottom: 8,
-  },
-  suggestions: {
-    backgroundColor: "#171717",
-    borderRadius: 12,
-    marginBottom: 12,
-    overflow: "hidden",
-  },
-  suggestionsHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#262626",
-  },
-  suggestionsTitle: {
-    color: "#737373",
-    fontSize: 12,
-    fontWeight: "600",
-    letterSpacing: 0.4,
-    textTransform: "uppercase",
-  },
-  suggestionsClear: {
-    color: "#a3a3a3",
-    fontSize: 13,
-    fontWeight: "600",
-  },
-  suggestionRow: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  suggestionButton: {
-    flex: 1,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-  },
-  suggestionText: {
-    color: "#e5e5e5",
-    fontSize: 16,
-  },
-  suggestionRemove: {
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-  },
-  suggestionRemoveText: {
-    color: "#737373",
-    fontSize: 20,
-    lineHeight: 20,
-  },
-});
