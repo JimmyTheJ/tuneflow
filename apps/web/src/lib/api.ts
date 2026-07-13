@@ -126,6 +126,9 @@ export const api = {
   permanentlyDeleteUser: (userId: number) =>
     request<void>(`/api/users/${userId}/permanent`, { method: "DELETE" }),
   listHouseholds: () => request<Household[]>("/api/households"),
+  getMyHousehold: () => request<Household>("/api/households/mine"),
+  updateMyHousehold: (payload: { slug: string }) =>
+    request<Household>("/api/households/mine", { method: "PATCH", body: payload }),
   createHousehold: (payload: {
     name: string;
     slug: string;

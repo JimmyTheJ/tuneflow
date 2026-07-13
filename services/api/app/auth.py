@@ -212,6 +212,22 @@ async def require_manage_parental_controls(
     return current_user
 
 
+async def require_manage_role_profiles(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    if current_user.is_root_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Household settings are managed by household administrators",
+        )
+    if current_user.household_id is None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Household membership required")
+    if not await user_has_permission(db, current_user, Permission.MANAGE_ROLE_PROFILES):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Household administrator access required")
+    return current_user
+
+
 async def require_set_parent_pin(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),

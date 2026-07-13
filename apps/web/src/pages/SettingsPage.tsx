@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import {
   canManageMembers,
   canManageParentalControls,
+  canManageRoleProfiles,
   canSetParentPin,
   formatRoleProfiles,
   isChildProfile,
@@ -16,6 +17,7 @@ import type { ParentalSettings, ScrobblerConnectionStatus, ScrobblerProviderInfo
 export function SettingsPage() {
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
+  const hydrate = useAuthStore((s) => s.hydrate);
   const navigate = useNavigate();
   const isChild = isChildProfile(user);
   const isRootAdmin = user?.is_root_admin === true;
@@ -30,6 +32,20 @@ export function SettingsPage() {
   const [scrobblerStatuses, setScrobblerStatuses] = useState<Record<string, ScrobblerConnectionStatus>>({});
   const [pendingLinkTokens, setPendingLinkTokens] = useState<Record<string, string>>({});
   const [scrobblerError, setScrobblerError] = useState<string | null>(null);
+  const [householdSlug, setHouseholdSlug] = useState("");
+  const [householdSlugMessage, setHouseholdSlugMessage] = useState<string | null>(null);
+  const [householdSlugError, setHouseholdSlugError] = useState<string | null>(null);
+  const [householdSlugBusy, setHouseholdSlugBusy] = useState(false);
+
+  const isHouseholdAdmin = canManageRoleProfiles(user) && !isRootAdmin;
+
+  useEffect(() => {
+    if (!isHouseholdAdmin) return;
+    void api
+      .getMyHousehold()
+      .then((household) => setHouseholdSlug(household.slug))
+      .catch(() => undefined);
+  }, [isHouseholdAdmin]);
 
   useEffect(() => {
     if (canSetParentPin(user)) {
@@ -129,6 +145,22 @@ export function SettingsPage() {
     setPinOpen(true);
   };
 
+  const saveHouseholdSlug = async () => {
+    setHouseholdSlugBusy(true);
+    setHouseholdSlugError(null);
+    setHouseholdSlugMessage(null);
+    try {
+      const household = await api.updateMyHousehold({ slug: householdSlug.trim().toLowerCase() });
+      setHouseholdSlug(household.slug);
+      setHouseholdSlugMessage("Household slug updated. Share the new login URL with your household.");
+      await hydrate();
+    } catch (err) {
+      setHouseholdSlugError(err instanceof Error ? err.message : "Could not update household slug");
+    } finally {
+      setHouseholdSlugBusy(false);
+    }
+  };
+
   return (
     <div className="page">
       <h1>Settings</h1>
@@ -198,6 +230,34 @@ export function SettingsPage() {
         <Link to="/parental" className="btn-secondary btn-block link-btn">
           Parental controls
         </Link>
+      ) : null}
+
+      {isHouseholdAdmin ? (
+        <div className="card">
+          <h2>Household login URL</h2>
+          <p className="muted">
+            The slug appears in your household&apos;s sign-in link. Lowercase letters, numbers, and hyphens only.
+          </p>
+          <input
+            className="input"
+            placeholder="Household slug"
+            value={householdSlug}
+            onChange={(e) => setHouseholdSlug(e.target.value.toLowerCase())}
+          />
+          <p className="muted">
+            Login URL: <code>/h/{householdSlug || "your-slug"}/login</code>
+          </p>
+          <button
+            type="button"
+            className="btn-secondary btn-block"
+            disabled={householdSlugBusy || !householdSlug.trim()}
+            onClick={() => void saveHouseholdSlug()}
+          >
+            {householdSlugBusy ? "Saving…" : "Update household slug"}
+          </button>
+          {householdSlugMessage ? <p className="accent">{householdSlugMessage}</p> : null}
+          {householdSlugError ? <p className="error">{householdSlugError}</p> : null}
+        </div>
       ) : null}
 
       {canSetParentPin(user) ? (

@@ -3,12 +3,16 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.auth import build_user_read, require_root_admin
+from app.auth import build_user_read, get_current_user, require_manage_role_profiles, require_root_admin
 from app.database import get_db
 from app.models import Household, User, UserRoleAssignment
-from app.schemas import HouseholdCreate, HouseholdPublicRead, HouseholdRead, UserRead
+from app.schemas import HouseholdCreate, HouseholdPublicRead, HouseholdRead, HouseholdUpdate, UserRead
 from app.security import hash_password
-from app.services.households import ensure_unique_household_slug, ensure_unique_username_in_household
+from app.services.households import (
+    ensure_unique_household_slug,
+    ensure_unique_username_in_household,
+    get_household_for_user,
+)
 from app.services.roles import assign_role_profile, get_role_profile_by_slug
 from app.slugify import validate_household_slug
 
@@ -46,6 +50,37 @@ async def get_public_household(slug: str, db: AsyncSession = Depends(get_db)) ->
     if household is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Household not found")
     return HouseholdPublicRead(slug=household.slug, name=household.name)
+
+
+@router.get("/mine", response_model=HouseholdRead)
+async def get_my_household(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> HouseholdRead:
+    household = await get_household_for_user(db, current_user)
+    if household.is_system:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="System household has no editable settings")
+    return await _household_read(db, household)
+
+
+@router.patch("/mine", response_model=HouseholdRead)
+async def update_my_household(
+    payload: HouseholdUpdate,
+    current_user: User = Depends(require_manage_role_profiles),
+    db: AsyncSession = Depends(get_db),
+) -> HouseholdRead:
+    household = await get_household_for_user(db, current_user)
+    if household.is_system:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="System household slug cannot be changed")
+
+    household.slug = await ensure_unique_household_slug(
+        db,
+        payload.slug,
+        exclude_household_id=household.id,
+    )
+    await db.commit()
+    await db.refresh(household)
+    return await _household_read(db, household)
 
 
 @router.get("", response_model=list[HouseholdRead])

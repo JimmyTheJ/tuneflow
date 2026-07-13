@@ -61,6 +61,10 @@ class HouseholdCreate(BaseModel):
     admin_display_name: str = Field(min_length=1, max_length=120)
 
 
+class HouseholdUpdate(BaseModel):
+    slug: str = Field(min_length=2, max_length=80)
+
+
 class TrackBase(BaseModel):
     video_id: str = Field(min_length=6, max_length=20)
     title: str

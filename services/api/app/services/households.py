@@ -19,12 +19,21 @@ async def require_household_by_slug(db: AsyncSession, slug: str) -> Household:
     return household
 
 
-async def ensure_unique_household_slug(db: AsyncSession, slug: str) -> str:
+async def ensure_unique_household_slug(db: AsyncSession, slug: str, *, exclude_household_id: int | None = None) -> str:
     normalized = validate_household_slug(slug)
     existing = await get_household_by_slug(db, normalized)
-    if existing is not None:
+    if existing is not None and existing.id != exclude_household_id:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Household slug already exists")
     return normalized
+
+
+async def get_household_for_user(db: AsyncSession, user: User) -> Household:
+    if user.household_id is None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Household membership required")
+    household = await db.get(Household, user.household_id)
+    if household is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Household not found")
+    return household
 
 
 async def get_user_in_household(
