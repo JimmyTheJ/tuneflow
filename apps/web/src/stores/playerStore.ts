@@ -49,6 +49,9 @@ type PlayerState = {
   recoverSession: () => boolean;
   stopOrphanedPlayback: () => void;
   playQueueIndex: (queueIndex: number) => Promise<void>;
+  removeQueueIndex: (queueIndex: number) => Promise<void>;
+  clearUpcoming: () => void;
+  reorderQueue: (fromQueueIndex: number, toQueueIndex: number) => void;
   clearError: () => void;
 };
 
@@ -271,6 +274,47 @@ function resolvePreviousAction(state: PlayerState): PreviousAction {
     return { type: "track", queueIndex: lastIndex, shuffleStep: lastIndex };
   }
   return { type: "restart" };
+}
+
+function removeIndexFromShuffleOrder(
+  shuffleOrder: number[],
+  removedIndex: number,
+  shuffleStep: number,
+): { shuffleOrder: number[]; shuffleStep: number } {
+  const removedStep = shuffleOrder.indexOf(removedIndex);
+  const nextOrder = shuffleOrder
+    .filter((index) => index !== removedIndex)
+    .map((index) => (index > removedIndex ? index - 1 : index));
+
+  let nextStep = shuffleStep;
+  if (removedStep >= 0 && removedStep < shuffleStep) {
+    nextStep = shuffleStep - 1;
+  }
+
+  return { shuffleOrder: nextOrder, shuffleStep: Math.max(0, nextStep) };
+}
+
+function moveInShuffleOrder(
+  shuffleOrder: number[],
+  fromQueueIndex: number,
+  toQueueIndex: number,
+): number[] {
+  const fromStep = shuffleOrder.indexOf(fromQueueIndex);
+  const toStep = shuffleOrder.indexOf(toQueueIndex);
+  if (fromStep < 0 || toStep < 0 || fromStep === toStep) return shuffleOrder;
+
+  const next = [...shuffleOrder];
+  const [item] = next.splice(fromStep, 1);
+  next.splice(toStep, 0, item);
+  return next;
+}
+
+function moveInQueue(queue: Track[], fromIndex: number, toIndex: number): Track[] {
+  if (fromIndex === toIndex) return queue;
+  const next = [...queue];
+  const [item] = next.splice(fromIndex, 1);
+  next.splice(toIndex, 0, item);
+  return next;
 }
 
 function attachMediaListeners(
@@ -720,6 +764,110 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     }
 
     await get().playTrack(track, state.queue, { fromNavigation: true });
+  },
+
+  removeQueueIndex: async (queueIndex: number) => {
+    const state = get();
+    if (queueIndex < 0 || queueIndex >= state.queue.length) return;
+
+    const currentIndex = currentQueueIndex(state);
+    const isCurrent = queueIndex === currentIndex;
+    const nextQueue = state.queue.filter((_, index) => index !== queueIndex);
+
+    let shuffleOrder = state.shuffleOrder;
+    let shuffleStep = state.shuffleStep;
+    if (state.shuffle && shuffleOrder.length > 0) {
+      ({ shuffleOrder, shuffleStep } = removeIndexFromShuffleOrder(
+        shuffleOrder,
+        queueIndex,
+        shuffleStep,
+      ));
+    } else if (!isCurrent && queueIndex < shuffleStep) {
+      shuffleStep = Math.max(0, shuffleStep - 1);
+    }
+
+    if (isCurrent) {
+      if (nextQueue.length === 0) {
+        get().stop();
+        return;
+      }
+
+      const action = resolveNextAction(state);
+      set({ queue: nextQueue, shuffleOrder, shuffleStep });
+      persistSnapshot(get());
+
+      if (action.type === "track" && action.queueIndex !== queueIndex) {
+        const nextTrack = state.queue[action.queueIndex];
+        const nextIndex = nextQueue.findIndex((track) => track.video_id === nextTrack.video_id);
+        if (nextIndex >= 0) {
+          if (state.shuffle && shuffleOrder.length > 1) {
+            const step = shuffleOrder.indexOf(nextIndex);
+            if (step >= 0) set({ shuffleStep: step });
+          }
+          await get().playTrack(nextTrack, nextQueue, { fromNavigation: true });
+          return;
+        }
+      }
+
+      const fallbackIndex = Math.min(queueIndex, nextQueue.length - 1);
+      await get().playTrack(nextQueue[fallbackIndex], nextQueue, { fromNavigation: true });
+      return;
+    }
+
+    set({ queue: nextQueue, shuffleOrder, shuffleStep });
+    persistSnapshot(get());
+  },
+
+  clearUpcoming: () => {
+    const state = get();
+    if (state.queue.length === 0) return;
+
+    const currentIndex = currentQueueIndex(state);
+    if (currentIndex < 0) {
+      get().stop();
+      return;
+    }
+
+    if (currentIndex >= state.queue.length - 1) return;
+
+    const nextQueue = [state.queue[currentIndex]];
+    set({
+      queue: nextQueue,
+      shuffle: false,
+      shuffleOrder: [],
+      shuffleStep: 0,
+    });
+    persistSnapshot(get());
+  },
+
+  reorderQueue: (fromQueueIndex: number, toQueueIndex: number) => {
+    const state = get();
+    if (fromQueueIndex === toQueueIndex) return;
+    if (fromQueueIndex < 0 || toQueueIndex < 0) return;
+    if (fromQueueIndex >= state.queue.length || toQueueIndex >= state.queue.length) return;
+
+    const currentIndex = currentQueueIndex(state);
+    if (fromQueueIndex === currentIndex || toQueueIndex === currentIndex) return;
+
+    if (state.shuffle && state.shuffleOrder.length > 1) {
+      const nextOrder = moveInShuffleOrder(state.shuffleOrder, fromQueueIndex, toQueueIndex);
+      set({ shuffleOrder: nextOrder });
+      persistSnapshot(get());
+      return;
+    }
+
+    const nextQueue = moveInQueue(state.queue, fromQueueIndex, toQueueIndex);
+    let shuffleStep = state.shuffleStep;
+    if (fromQueueIndex === shuffleStep) {
+      shuffleStep = toQueueIndex;
+    } else if (fromQueueIndex < shuffleStep && toQueueIndex >= shuffleStep) {
+      shuffleStep -= 1;
+    } else if (fromQueueIndex > shuffleStep && toQueueIndex <= shuffleStep) {
+      shuffleStep += 1;
+    }
+
+    set({ queue: nextQueue, shuffleStep });
+    persistSnapshot(get());
   },
 
   stop: () => {

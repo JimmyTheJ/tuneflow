@@ -804,6 +804,29 @@ textarea {
   gap: 12px;
 }
 
+.player-queue-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.player-queue-clear {
+  background: none;
+  border: 1px solid #3a3a3a;
+  border-radius: 999px;
+  color: #c7c7c7;
+  cursor: pointer;
+  font-size: 0.8rem;
+  padding: 4px 10px;
+  white-space: nowrap;
+}
+
+.player-queue-clear:hover {
+  border-color: #555;
+  color: #fff;
+}
+
 .player-queue-header h2 {
   margin: 0;
   font-size: 1.15rem;
@@ -833,15 +856,80 @@ textarea {
   margin: 0;
 }
 
+.player-queue-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.player-queue-item .track-row {
+  border-bottom: none;
+}
+
+.player-queue-track {
+  flex: 1;
+  min-width: 0;
+}
+
+.player-queue-drag {
+  background: none;
+  border: none;
+  color: #666;
+  cursor: grab;
+  flex-shrink: 0;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 8px 4px;
+  touch-action: none;
+  user-select: none;
+}
+
+.player-queue-drag:active {
+  cursor: grabbing;
+}
+
+.player-queue-drag-placeholder {
+  cursor: default;
+  visibility: hidden;
+}
+
+.player-queue-remove {
+  background: none;
+  border: none;
+  color: #666;
+  cursor: pointer;
+  flex-shrink: 0;
+  font-size: 0.95rem;
+  line-height: 1;
+  padding: 8px;
+}
+
+.player-queue-remove:hover {
+  color: #fff;
+}
+
+.player-queue-item-dragging {
+  opacity: 0.45;
+}
+
+.player-queue-item-drop-target {
+  outline: 1px dashed #4ade80;
+  outline-offset: -1px;
+  border-radius: 12px;
+}
+
 .player-queue-list .track-row:last-child {
   border-bottom: none;
 }
 
-.player-queue-item-playing .track-row {
+.player-queue-item-playing {
   background: #1a2e1f;
   border-radius: 12px;
-  padding-inline: 8px;
-  border-bottom-color: transparent;
+  padding-inline: 4px 0;
+}
+
+.player-queue-item-playing .track-row {
+  cursor: default;
 }
 
 .player-queue-overlay {
