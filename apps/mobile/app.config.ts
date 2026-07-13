@@ -4,6 +4,7 @@ import type { ConfigContext, ExpoConfig } from "expo/config";
 import { ensureVersionFile, getVersionCode, loadVersionName } from "./scripts/dev-build-metadata.mjs";
 
 const baseVersion = "0.1.0";
+const defaultNdkVersion = "27.2.12479018";
 
 export default ({ config }: ConfigContext): ExpoConfig => {
   const devBuildRequested = process.env.TUNEFLOW_DEV_BUILD === "1";
@@ -18,7 +19,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     orientation: "portrait",
     scheme: "tuneflow",
     userInterfaceStyle: "dark",
-    newArchEnabled: true,
+    newArchEnabled: process.env.TUNEFLOW_DEV_BUILD === "1" ? false : true,
     splash: {
       resizeMode: "contain",
       backgroundColor: "#0a0a0a",
@@ -34,10 +35,19 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       },
       package: "com.tuneflow.app",
       versionCode,
-      // HTTP API URLs on LAN (Expo applies this; types lag behind the schema).
-      usesCleartextTraffic: true,
-    } as ExpoConfig["android"],
-    plugins: ["expo-router"],
+    },
+    plugins: [
+      "expo-router",
+      [
+        "expo-build-properties",
+        {
+          android: {
+            ndkVersion: defaultNdkVersion,
+            usesCleartextTraffic: true,
+          },
+        },
+      ],
+    ],
     experiments: {
       typedRoutes: true,
     },

@@ -10,12 +10,17 @@ import path from "node:path";
  * - last-build.properties: metadata for the most recently produced dev APK
  */
 export const DIR_NAME = ".tuneflow-mobile-dev";
+export const ANDROID_SDK_DIR_NAME = ".tuneflow-android-sdk";
 export const VERSION_FILE = "version.properties";
 export const LAST_BUILD_FILE = "last-build.properties";
 export const INITIAL_DEV_VERSION = "0.1.0-dev.1";
 
 export function userDir() {
   return path.join(os.homedir(), DIR_NAME);
+}
+
+export function userAndroidSdkDir() {
+  return path.join(os.homedir(), ANDROID_SDK_DIR_NAME);
 }
 
 export function versionFilePath() {

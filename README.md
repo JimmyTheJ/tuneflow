@@ -139,7 +139,7 @@ Local debug builds use auto-incrementing versions stored under `%USERPROFILE%\.t
 | `version.properties` | Version for the **next** dev build (e.g. `0.1.0-dev.3`) |
 | `last-build.properties` | Metadata for the most recent APK (path, git commit, etc.) |
 
-Requires **Android Studio** (or Android SDK + JDK 17) with `ANDROID_HOME` set.
+Requires **Android Studio** command-line tools (or an existing SDK install). On first run the script bootstraps a writable SDK at `%USERPROFILE%\.tuneflow-android-sdk\` (platform tools, build-tools, CMake, NDK) so it does not need to write into `Program Files`.
 
 ```powershell
 cd apps\mobile
