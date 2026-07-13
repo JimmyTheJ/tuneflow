@@ -75,18 +75,17 @@ def role_profile_to_summary(profile: RoleProfile) -> RoleProfileSummary:
 
 
 async def build_user_read(db: AsyncSession, user: User) -> UserRead:
-    if not user.role_assignments:
-        result = await db.execute(
-            select(User)
-            .options(
-                selectinload(User.role_assignments).selectinload(UserRoleAssignment.role_profile),
-                selectinload(User.household),
-            )
-            .where(User.id == user.id)
+    result = await db.execute(
+        select(User)
+        .options(
+            selectinload(User.role_assignments).selectinload(UserRoleAssignment.role_profile),
+            selectinload(User.household),
         )
-        loaded = result.scalar_one_or_none()
-        if loaded is not None:
-            user = loaded
+        .where(User.id == user.id)
+    )
+    loaded = result.scalar_one_or_none()
+    if loaded is not None:
+        user = loaded
 
     permissions = sorted(await load_user_permissions(db, user))
     profiles = [
