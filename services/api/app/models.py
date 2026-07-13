@@ -14,10 +14,11 @@ class ScrobblerProvider(str, enum.Enum):
 
 class Household(Base):
     __tablename__ = "households"
+    __table_args__ = (UniqueConstraint("slug", name="uq_household_slug"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
-    slug: Mapped[str] = mapped_column(String(80), unique=True, nullable=False, index=True)
+    slug: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
     is_system: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

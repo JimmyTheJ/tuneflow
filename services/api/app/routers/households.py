@@ -9,9 +9,11 @@ from app.models import Household, User, UserRoleAssignment
 from app.schemas import HouseholdCreate, HouseholdPublicRead, HouseholdRead, HouseholdUpdate, UserRead
 from app.security import hash_password
 from app.services.households import (
-    ensure_unique_household_slug,
     ensure_unique_username_in_household,
+    flush_or_raise_slug_conflict,
     get_household_for_user,
+    update_household_slug,
+    validated_household_slug,
 )
 from app.services.roles import assign_role_profile, get_role_profile_by_slug
 from app.slugify import validate_household_slug
@@ -73,13 +75,7 @@ async def update_my_household(
     if household.is_system:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="System household slug cannot be changed")
 
-    household.slug = await ensure_unique_household_slug(
-        db,
-        payload.slug,
-        exclude_household_id=household.id,
-    )
-    await db.commit()
-    await db.refresh(household)
+    await update_household_slug(db, household, payload.slug)
     return await _household_read(db, household)
 
 
@@ -99,11 +95,11 @@ async def create_household(
     _: User = Depends(require_root_admin),
     db: AsyncSession = Depends(get_db),
 ) -> HouseholdRead:
-    slug = await ensure_unique_household_slug(db, payload.slug)
+    slug = validated_household_slug(payload.slug)
 
     household = Household(name=payload.name.strip(), slug=slug, is_system=False)
     db.add(household)
-    await db.flush()
+    await flush_or_raise_slug_conflict(db)
 
     username = await ensure_unique_username_in_household(
         db,
