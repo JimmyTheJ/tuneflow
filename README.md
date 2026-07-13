@@ -126,16 +126,37 @@ npm install
 npx expo start
 ```
 
-1. Set **API URL** in Settings (`http://192.168.x.x:8000` on LAN, or Tailscale).
+1. Set **API URL** in Settings (`http://192.168.x.x:8010` on LAN, or Tailscale).
 2. First launch walks through **parent account setup** (or sign in).
 3. Each family member signs in with their own username — playlists, history, and likes are per user.
+
+### Android dev APK
+
+Local debug builds use auto-incrementing versions stored under `%USERPROFILE%\.tuneflow-mobile-dev\` (same idea as [jellyfin-android](https://github.com/jellyfin/jellyfin-android)):
+
+| File | Purpose |
+|------|---------|
+| `version.properties` | Version for the **next** dev build (e.g. `0.1.0-dev.3`) |
+| `last-build.properties` | Metadata for the most recent APK (path, git commit, etc.) |
+
+Requires **Android Studio** (or Android SDK + JDK 17) with `ANDROID_HOME` set.
+
+```powershell
+cd apps\mobile
+npm install
+npm run dev:apk
+```
+
+Output: `apps\mobile\android\app\build\outputs\apk\debug\tuneflow-v<version>-debug.apk`
+
+Each successful build bumps the dev suffix (`0.1.0-dev.2` → `0.1.0-dev.3`) in your user profile, not in git.
 
 ### Phone ↔ server networking
 
 | Scenario | API URL example |
 |----------|-----------------|
-| Android emulator | `http://10.0.2.2:8000` |
-| Same Wi‑Fi | `http://192.168.1.50:8000` |
+| Android emulator | `http://10.0.2.2:8010` |
+| Same Wi‑Fi | `http://192.168.1.50:8010` |
 | Tailscale | `http://100.x.x.x:8000` |
 
 ## Family accounts

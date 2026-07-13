@@ -7,7 +7,8 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "dev:apk": "powershell -ExecutionPolicy Bypass -File ./scripts/build-dev-apk.ps1"
   },
   "dependencies": {
     "@expo/vector-icons": "^14.0.4",
