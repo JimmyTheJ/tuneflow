@@ -30,6 +30,13 @@ def _playlist_read(playlist: Playlist) -> PlaylistRead:
     )
 
 
+async def _load_playlist_with_tracks(db: AsyncSession, playlist_id: int) -> Playlist:
+    result = await db.execute(
+        select(Playlist).options(selectinload(Playlist.tracks)).where(Playlist.id == playlist_id)
+    )
+    return result.scalar_one()
+
+
 async def _get_owned_playlist(db: AsyncSession, playlist_id: int, user_id: int) -> Playlist:
     result = await db.execute(
         select(Playlist)
@@ -66,6 +73,7 @@ async def create_playlist(
     db.add(playlist)
     await db.commit()
     await db.refresh(playlist)
+    playlist = await _load_playlist_with_tracks(db, playlist.id)
     return _playlist_read(playlist)
 
 
@@ -95,7 +103,7 @@ async def update_playlist(
     if payload.description is not None:
         playlist.description = payload.description
     await db.commit()
-    await db.refresh(playlist)
+    playlist = await _get_owned_playlist(db, playlist_id, current_user.id)
     return _playlist_read(playlist)
 
 
