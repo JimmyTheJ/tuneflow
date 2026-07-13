@@ -127,6 +127,119 @@ async function loadAudioPlayback(
   return sound;
 }
 
+type PrefetchEntry = {
+  track: Track;
+  stream: StreamInfo;
+  selection: StreamSelection;
+  mediaUrl: string;
+  playbackKind: "audio" | "video";
+  sound: Audio.Sound | null;
+};
+
+let prefetchToken = 0;
+let prefetchEntry: PrefetchEntry | null = null;
+
+async function clearPrefetch(): Promise<void> {
+  if (!prefetchEntry) return;
+  await disposeSound(prefetchEntry.sound);
+  prefetchEntry = null;
+}
+
+function invalidatePrefetch(): void {
+  prefetchToken += 1;
+  void clearPrefetch();
+}
+
+function selectionMatches(a: StreamSelection, b: StreamSelection): boolean {
+  return a.video === b.video && a.audio === b.audio;
+}
+
+function getNextTrack(state: PlayerState): Track | null {
+  const { current, queue } = state;
+  if (!current || queue.length <= 1) return null;
+  const index = queue.findIndex((track) => track.video_id === current.video_id);
+  return queue[index + 1] ?? null;
+}
+
+function tryAdoptPrefetch(track: Track, selection: StreamSelection): PrefetchEntry | null {
+  if (!prefetchEntry || prefetchEntry.track.video_id !== track.video_id) return null;
+  if (!selectionMatches(prefetchEntry.selection, selection)) {
+    invalidatePrefetch();
+    return null;
+  }
+
+  const entry = prefetchEntry;
+  prefetchEntry = null;
+  prefetchToken += 1;
+  return entry;
+}
+
+async function prefetchNextTrack(get: () => PlayerState): Promise<void> {
+  const token = prefetchToken + 1;
+  prefetchToken = token;
+  await clearPrefetch();
+
+  const state = get();
+  const track = getNextTrack(state);
+  if (!track) return;
+
+  const selection = normalizeSelection(state.streamSelection, state.stream);
+
+  try {
+    const stream = await api.getStream(track.video_id, track);
+    if (token !== prefetchToken) return;
+
+    const resolvedSelection = normalizeSelection(selection, stream);
+    const mediaUrl = buildMediaUrl(stream, resolvedSelection);
+    const playbackKind = resolvedSelection.video ? "video" : "audio";
+
+    let sound: Audio.Sound | null = null;
+    if (playbackKind === "audio") {
+      const created = await withRetry(
+        () => Audio.Sound.createAsync({ uri: mediaUrl }, { shouldPlay: false }),
+        {
+          maxAttempts: 2,
+          shouldRetry: (error) => error instanceof Error,
+        },
+      );
+      if (token !== prefetchToken) {
+        await disposeSound(created.sound);
+        return;
+      }
+      sound = created.sound;
+    }
+
+    const latest = get();
+    const latestTrack = getNextTrack(latest);
+    if (!latestTrack || latestTrack.video_id !== track.video_id) {
+      await disposeSound(sound);
+      return;
+    }
+
+    const latestSelection = normalizeSelection(latest.streamSelection, latest.stream);
+    if (!selectionMatches(latestSelection, resolvedSelection)) {
+      await disposeSound(sound);
+      return;
+    }
+
+    prefetchEntry = {
+      track,
+      stream,
+      selection: resolvedSelection,
+      mediaUrl,
+      playbackKind,
+      sound,
+    };
+  } catch {
+    /* prefetch failure is non-fatal */
+  }
+}
+
+function schedulePrefetchNext(get: () => PlayerState): void {
+  if (!get().current) return;
+  void prefetchNextTrack(get);
+}
+
 export const usePlayerStore = create<PlayerState>((set, get) => ({
   current: null,
   stream: null,
@@ -147,6 +260,11 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     get().videoControls?.pause().catch(() => undefined);
 
     const selection = normalizeSelection(get().streamSelection, get().stream);
+    const adopted = tryAdoptPrefetch(track, selection);
+    if (!adopted) {
+      invalidatePrefetch();
+    }
+
     set({
       sound: null,
       mediaUrl: null,
@@ -155,21 +273,34 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       isPlaying: false,
       current: track,
       queue: queue.length ? queue : [track],
-      streamSelection: selection,
+      streamSelection: adopted?.selection ?? selection,
     });
 
     await configureAudio();
 
     try {
-      const stream = await api.getStream(track.video_id, track);
+      const stream = adopted?.stream ?? (await api.getStream(track.video_id, track));
       if (!isActiveGeneration(generation)) return;
 
-      const resolvedSelection = normalizeSelection(selection, stream);
-      const mediaUrl = buildMediaUrl(stream, resolvedSelection);
-      const playbackKind = resolvedSelection.video ? "video" : "audio";
+      const resolvedSelection = adopted?.selection ?? normalizeSelection(selection, stream);
+      const mediaUrl = adopted?.mediaUrl ?? buildMediaUrl(stream, resolvedSelection);
+      const playbackKind = adopted?.playbackKind ?? (resolvedSelection.video ? "video" : "audio");
 
       if (playbackKind === "audio") {
-        const sound = await loadAudioPlayback(mediaUrl, generation, set, get, true);
+        let sound = adopted?.sound ?? null;
+        if (!sound) {
+          sound = await loadAudioPlayback(mediaUrl, generation, set, get, true);
+        } else {
+          sound.setOnPlaybackStatusUpdate((status) => {
+            if (!isActiveGeneration(generation)) return;
+            if (!status.isLoaded) return;
+            set({ isPlaying: status.isPlaying });
+            if (status.didJustFinish) {
+              void get().playNext();
+            }
+          });
+          await sound.playAsync();
+        }
         if (!sound) return;
         set({
           sound,
@@ -195,6 +326,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       }
 
       void api.recordPlay(track).catch(() => undefined);
+      schedulePrefetchNext(get);
     } catch (error) {
       if (!isActiveGeneration(generation)) return;
       set({ isLoading: false, isPlaying: false });
@@ -215,6 +347,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     }
 
     const generation = ++playGeneration;
+    invalidatePrefetch();
     const resumeSec =
       get().playbackKind === "video"
         ? (videoControls?.getPositionSec() ?? 0)
@@ -246,6 +379,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
         }
         set({ sound: null, isLoading: false, isPlaying });
       }
+      schedulePrefetchNext(get);
     } catch {
       if (!isActiveGeneration(generation)) return;
       set({ isLoading: false, isPlaying: false });
@@ -285,6 +419,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
   stop: async () => {
     playGeneration += 1;
+    invalidatePrefetch();
     await disposeSound(get().sound);
     get().videoControls?.pause().catch(() => undefined);
     set({

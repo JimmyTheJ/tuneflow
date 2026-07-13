@@ -415,7 +415,126 @@ function createMediaElement(url: string, selection: StreamSelection): HTMLMediaE
     video.preload = "auto";
     return video;
   }
-  return new Audio(url);
+  const audio = new Audio(url);
+  audio.preload = "auto";
+  return audio;
+}
+
+type PrefetchEntry = {
+  track: Track;
+  stream: StreamInfo;
+  selection: StreamSelection;
+  media: HTMLMediaElement;
+};
+
+let prefetchToken = 0;
+let prefetchEntry: PrefetchEntry | null = null;
+
+function clearPrefetch(): void {
+  if (!prefetchEntry) return;
+  disposeMedia(prefetchEntry.media);
+  prefetchEntry = null;
+}
+
+function invalidatePrefetch(): void {
+  prefetchToken += 1;
+  clearPrefetch();
+}
+
+function selectionMatches(a: StreamSelection, b: StreamSelection): boolean {
+  return a.video === b.video && a.audio === b.audio;
+}
+
+function tryAdoptPrefetch(track: Track, selection: StreamSelection): PrefetchEntry | null {
+  if (!prefetchEntry || prefetchEntry.track.video_id !== track.video_id) return null;
+  if (!selectionMatches(prefetchEntry.selection, selection)) {
+    invalidatePrefetch();
+    return null;
+  }
+
+  const entry = prefetchEntry;
+  prefetchEntry = null;
+  prefetchToken += 1;
+  return entry;
+}
+
+async function preloadMediaElement(
+  stream: StreamInfo,
+  track: Track,
+  selection: StreamSelection,
+  isStale: () => boolean,
+): Promise<HTMLMediaElement | null> {
+  const mediaUrl = buildMediaUrl(stream, selection, track);
+  const media = createMediaElement(mediaUrl, selection);
+
+  try {
+    await withRetry(() => waitForMediaReady(media), {
+      maxAttempts: 2,
+      shouldRetry: isRetryablePlaybackFailure,
+    });
+  } catch {
+    disposeMedia(media);
+    return null;
+  }
+
+  if (isStale()) {
+    disposeMedia(media);
+    return null;
+  }
+
+  return media;
+}
+
+async function prefetchNextTrack(get: () => PlayerState): Promise<void> {
+  const token = prefetchToken + 1;
+  prefetchToken = token;
+  clearPrefetch();
+
+  const state = get();
+  const action = resolveNextAction(state);
+  if (action.type !== "track") return;
+
+  const track = state.queue[action.queueIndex];
+  if (!track) return;
+
+  const selection = normalizeSelection(state.streamSelection, state.stream);
+
+  try {
+    const stream = await api.getStream(track.video_id, track);
+    if (token !== prefetchToken) return;
+
+    const resolvedSelection = normalizeSelection(selection, stream);
+    const media = await preloadMediaElement(stream, track, resolvedSelection, () => token !== prefetchToken);
+    if (!media) return;
+
+    const latest = get();
+    const latestAction = resolveNextAction(latest);
+    if (latestAction.type !== "track") {
+      disposeMedia(media);
+      return;
+    }
+
+    const latestTrack = latest.queue[latestAction.queueIndex];
+    if (!latestTrack || latestTrack.video_id !== track.video_id) {
+      disposeMedia(media);
+      return;
+    }
+
+    const latestSelection = normalizeSelection(latest.streamSelection, latest.stream);
+    if (!selectionMatches(latestSelection, resolvedSelection)) {
+      disposeMedia(media);
+      return;
+    }
+
+    prefetchEntry = { track, stream, selection: resolvedSelection, media };
+  } catch {
+    /* prefetch failure is non-fatal; playNext falls back to a normal load */
+  }
+}
+
+function schedulePrefetchNext(get: () => PlayerState): void {
+  if (!get().current) return;
+  void prefetchNextTrack(get);
 }
 
 async function loadMediaAt(
@@ -491,12 +610,16 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
     if (state.shuffle) {
       set({ shuffle: false, shuffleOrder: [], shuffleStep: currentQueueIndex(state) });
+      invalidatePrefetch();
+      schedulePrefetchNext(get);
       return;
     }
 
     const queueIndex = currentQueueIndex(state);
     const shuffleOrder = buildShuffleOrder(state.queue.length, queueIndex >= 0 ? queueIndex : 0);
     set({ shuffle: true, shuffleOrder, shuffleStep: 0 });
+    invalidatePrefetch();
+    schedulePrefetchNext(get);
   },
 
   cycleRepeatMode: () => {
@@ -506,14 +629,21 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       one: "none",
     };
     set({ repeatMode: next[get().repeatMode] });
+    invalidatePrefetch();
+    schedulePrefetchNext(get);
   },
 
   playTrack: async (track, queue = [], options) => {
     const generation = nextPlayGeneration();
     disposeMedia(get().media);
 
-    const nextQueue = queue.length ? queue : [track];
     const selection = normalizeSelection(get().streamSelection, get().stream);
+    const adopted = tryAdoptPrefetch(track, selection);
+    if (!adopted) {
+      invalidatePrefetch();
+    }
+
+    const nextQueue = queue.length ? queue : [track];
     const queueIndex = nextQueue.findIndex((item) => item.video_id === track.video_id);
     const activeIndex = queueIndex >= 0 ? queueIndex : 0;
 
@@ -541,27 +671,42 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       queue: nextQueue,
       shuffleOrder,
       shuffleStep,
-      streamSelection: selection,
+      streamSelection: adopted?.selection ?? selection,
       error: null,
       positionSec: 0,
       durationSec: track.duration_sec ?? 0,
     });
 
-    let pendingMedia: HTMLMediaElement | null = null;
+    let pendingMedia: HTMLMediaElement | null = adopted?.media ?? null;
 
     try {
-      const stream = await api.getStream(track.video_id, track);
+      let stream = adopted?.stream ?? null;
+      if (!stream) {
+        stream = await api.getStream(track.video_id, track);
+      }
       if (!isActiveGeneration(generation)) return;
 
-      const resolvedSelection = normalizeSelection(selection, stream);
-      pendingMedia = await loadMediaAt(
-        stream,
-        track,
-        resolvedSelection,
-        generation,
-        set,
-        get,
-      );
+      const resolvedSelection = adopted?.selection ?? normalizeSelection(selection, stream);
+
+      if (!pendingMedia) {
+        pendingMedia = await loadMediaAt(
+          stream,
+          track,
+          resolvedSelection,
+          generation,
+          set,
+          get,
+        );
+      } else {
+        applyVolume(pendingMedia, get().volume, resolvedSelection);
+        attachMediaListeners(pendingMedia, track, generation, set, get);
+        await pendingMedia.play();
+        if (!isActiveGeneration(generation)) {
+          disposeMedia(pendingMedia);
+          return;
+        }
+        setRuntimeMedia(pendingMedia);
+      }
       if (!pendingMedia) return;
 
       set({
@@ -576,6 +721,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       persistSnapshot(get());
       pendingMedia = null;
       void api.recordPlay(track).catch(() => undefined);
+      schedulePrefetchNext(get);
     } catch (error) {
       if (pendingMedia) disposeMedia(pendingMedia);
       if (!isActiveGeneration(generation)) return;
@@ -598,6 +744,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     }
 
     const generation = nextPlayGeneration();
+    invalidatePrefetch();
     const resumeSec = media?.currentTime ?? positionSec;
     disposeMedia(media);
     set({ media: null, isLoading: true, streamSelection: nextSelection, error: null });
@@ -624,6 +771,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
         ...syncProgress(pendingMedia, current),
       });
       persistSnapshot(get());
+      schedulePrefetchNext(get);
     } catch (error) {
       if (pendingMedia) disposeMedia(pendingMedia);
       if (!isActiveGeneration(generation)) return;
@@ -817,6 +965,8 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
     set({ queue: nextQueue, shuffleOrder, shuffleStep });
     persistSnapshot(get());
+    invalidatePrefetch();
+    schedulePrefetchNext(get);
   },
 
   clearUpcoming: () => {
@@ -839,6 +989,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       shuffleStep: 0,
     });
     persistSnapshot(get());
+    invalidatePrefetch();
   },
 
   reorderQueue: (fromQueueIndex: number, toQueueIndex: number) => {
@@ -854,6 +1005,8 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       const nextOrder = moveInShuffleOrder(state.shuffleOrder, fromQueueIndex, toQueueIndex);
       set({ shuffleOrder: nextOrder });
       persistSnapshot(get());
+      invalidatePrefetch();
+      schedulePrefetchNext(get);
       return;
     }
 
@@ -869,6 +1022,8 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
     set({ queue: nextQueue, shuffleStep });
     persistSnapshot(get());
+    invalidatePrefetch();
+    schedulePrefetchNext(get);
   },
 
   addToQueue: (track: Track) => {
@@ -882,11 +1037,16 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     }
 
     set({ queue: nextQueue, shuffleOrder });
-    if (state.current) persistSnapshot(get());
+    if (state.current) {
+      persistSnapshot(get());
+      invalidatePrefetch();
+      schedulePrefetchNext(get);
+    }
   },
 
   stop: () => {
     nextPlayGeneration();
+    invalidatePrefetch();
     disposeMedia(get().media);
     clearPlayerSession();
     set({
