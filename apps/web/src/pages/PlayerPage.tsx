@@ -7,6 +7,7 @@ import { PlayerVideo } from "@/components/PlayerVideo";
 import { PlayerVolume } from "@/components/PlayerVolume";
 import { StreamModeToggle } from "@/components/StreamModeToggle";
 import { TrackThumb } from "@/components/TrackThumb";
+import { usePlayerPageHotkeys } from "@/hooks/usePlayerPageHotkeys";
 import {
   hasActivePlayback,
   hasOrphanedPlayback,
@@ -14,6 +15,7 @@ import {
 } from "@/stores/playerStore";
 
 export function PlayerPage() {
+  usePlayerPageHotkeys();
   const current = usePlayerStore((s) => s.current);
   const media = usePlayerStore((s) => s.media);
   const isLoading = usePlayerStore((s) => s.isLoading);
@@ -123,6 +125,9 @@ export function PlayerPage() {
         </button>
       </div>
       {queue.length > 0 ? <PlayerQueuePanel className="player-page-queue" /> : null}
+      <p className="player-hotkeys-hint muted">
+        Space play/pause · ←/→ seek · Shift+←/→ skip · ↑/↓ volume · M mute · L like · V video · S shuffle · R repeat
+      </p>
     </div>
   );
 }

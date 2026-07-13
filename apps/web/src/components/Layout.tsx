@@ -1,4 +1,5 @@
 import { NavLink, Outlet } from "react-router-dom";
+import { useGlobalPlayerHotkeys } from "@/hooks/useGlobalPlayerHotkeys";
 import { hasActivePlayback, usePlayerStore } from "@/stores/playerStore";
 
 const links = [
@@ -11,6 +12,7 @@ const links = [
 ];
 
 export function Layout() {
+  useGlobalPlayerHotkeys();
   const playbackActive = usePlayerStore((s) => hasActivePlayback(s));
 
   return (

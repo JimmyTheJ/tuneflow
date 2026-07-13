@@ -1,5 +1,4 @@
 import { Link, useLocation } from "react-router-dom";
-import { useState } from "react";
 import { LikeButton } from "@/components/LikeButton";
 import { PlayerProgress } from "@/components/PlayerProgress";
 import { PlayerQueueDrawer } from "@/components/PlayerQueueDrawer";
@@ -8,12 +7,14 @@ import { PlayerVolume } from "@/components/PlayerVolume";
 import { TrackThumb } from "@/components/TrackThumb";
 import { useAuthStore } from "@/stores/authStore";
 import { getQueueView, hasActivePlayback, usePlayerStore } from "@/stores/playerStore";
+import { usePlayerUiStore } from "@/stores/playerUiStore";
 
 const FULL_WIDTH_ROUTES = new Set(["/login", "/setup"]);
 
 export function MiniPlayer() {
   const location = useLocation();
-  const [queueOpen, setQueueOpen] = useState(false);
+  const queueOpen = usePlayerUiStore((s) => s.queueDrawerOpen);
+  const setQueueDrawerOpen = usePlayerUiStore((s) => s.setQueueDrawerOpen);
   const user = useAuthStore((s) => s.user);
   const current = usePlayerStore((s) => s.current);
   const media = usePlayerStore((s) => s.media);
@@ -38,7 +39,7 @@ export function MiniPlayer() {
 
   return (
     <>
-      <PlayerQueueDrawer open={queueOpen} onClose={() => setQueueOpen(false)} />
+      <PlayerQueueDrawer open={queueOpen} onClose={() => setQueueDrawerOpen(false)} />
       {error ? (
         <div className={errorClass}>
           <span>{error}</span>
@@ -75,7 +76,8 @@ export function MiniPlayer() {
               <button
                 type="button"
                 className="mini-player-queue-btn"
-                onClick={() => setQueueOpen(true)}
+                title="Open queue (Q)"
+                onClick={() => setQueueDrawerOpen(true)}
                 aria-label={`Open queue, ${upcomingCount} up next`}
               >
                 ☰{upcomingCount > 0 ? ` ${upcomingCount}` : ""}

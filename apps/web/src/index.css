@@ -947,6 +947,12 @@ textarea {
   margin-inline: auto;
 }
 
+.player-hotkeys-hint {
+  margin-top: 32px;
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
 .player-queue {
   display: flex;
   flex-direction: column;
