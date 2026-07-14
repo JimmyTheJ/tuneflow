@@ -1,6 +1,8 @@
 import type { Track } from "@/types";
 
 const TOPIC_ARTIST_RE = /\s*-\s*Topic\s*$/i;
+const LIVE_VERSION_RE =
+  /\blive\s+(at|from|in|on)\b|[\(\[][^)\]]*\blive\b[^)\]]*[)\]]|[-–—|:]\s*live\b|\blive\s*(version|recording|performance|session)\b|\bunplugged\b/i;
 
 const BADGE_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
   { pattern: /\blive\b/i, label: "Live" },
@@ -24,6 +26,19 @@ export function formatTrackArtist(artist?: string | null): string {
 
 export function isTopicUpload(artist?: string | null): boolean {
   return Boolean(artist && TOPIC_ARTIST_RE.test(artist.trim()));
+}
+
+export function looksLikeLiveVersion(title?: string | null): boolean {
+  return Boolean(title && LIVE_VERSION_RE.test(title));
+}
+
+/** Search subtitle: for live uploads, emphasize the YouTube channel to tell versions apart. */
+export function formatSearchSubtitle(track: Track): string {
+  const channel = formatTrackArtist(track.artist);
+  if (looksLikeLiveVersion(trackDisplayTitle(track))) {
+    return channel === "Unknown artist" ? channel : `via ${channel}`;
+  }
+  return channel;
 }
 
 export function extractTrackBadges(title: string, artist?: string | null): string[] {

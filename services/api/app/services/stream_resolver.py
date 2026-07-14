@@ -100,7 +100,9 @@ async def _find_playable_alternate(
                 score += 4
             if not artist_matches(artist, result.artist):
                 score += 2
-            if looks_like_live_version(result.title) and not looks_like_live_version(title):
+            if looks_like_live_version(result.source_title, result.title) and not looks_like_live_version(
+                title
+            ):
                 score += 3
             ranked_candidates.append((score, result.video_id))
     except httpx.HTTPError:

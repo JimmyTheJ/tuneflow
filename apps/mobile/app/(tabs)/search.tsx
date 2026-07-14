@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/Button";
 import { TrackRowSkeleton } from "@/components/ui/Skeleton";
 import { useSearchHistory } from "@/hooks/useSearchHistory";
 import { api } from "@/lib/api";
+import { formatSearchSubtitle } from "@/lib/tracks";
 import { usePlayerStore } from "@/stores/player";
 import type { ArtistSearchHit, Playlist, Track } from "@/types";
 
@@ -210,7 +211,7 @@ export default function SearchScreen() {
             subtitle={
               item.blocked_reason
                 ? `Blocked: ${item.blocked_reason}`
-                : (item.artist ?? "Unknown artist")
+                : formatSearchSubtitle(item)
             }
             disabled={Boolean(item.blocked_reason)}
             onPlay={() => void playTrack(item, playable)}

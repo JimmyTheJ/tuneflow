@@ -9,6 +9,7 @@ import { useLikedTracks } from "@/hooks/useLikedTracks";
 import { useSearchHistory } from "@/hooks/useSearchHistory";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/cn";
+import { formatSearchSubtitle } from "@/lib/tracks";
 import { usePlayerStore } from "@/stores/playerStore";
 import type { ArtistSearchHit, Playlist, Track } from "@/types";
 
@@ -296,7 +297,11 @@ export function SearchPage() {
             playlists={playlists}
             displayTitle={track.source_title ?? track.title}
             showBadges
-            subtitle={track.blocked_reason ? `Blocked: ${track.blocked_reason}` : undefined}
+            subtitle={
+              track.blocked_reason
+                ? `Blocked: ${track.blocked_reason}`
+                : formatSearchSubtitle(track)
+            }
             disabled={!!track.blocked_reason}
             onPlay={() => void playTrack(track, playable)}
             onLikedChange={() => void loadLibraryData()}
