@@ -76,7 +76,11 @@ class User(Base):
     parental_settings: Mapped["ParentalSettings | None"] = relationship(
         back_populates="child_user", uselist=False, cascade="all, delete-orphan"
     )
-    playlists: Mapped[list["Playlist"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    playlists: Mapped[list["Playlist"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+        foreign_keys="Playlist.user_id",
+    )
     play_history: Mapped[list["PlayHistory"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     likes: Mapped[list["Like"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     scrobbler_connections: Mapped[list["ScrobblerConnection"]] = relationship(
