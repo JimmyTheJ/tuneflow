@@ -9,6 +9,7 @@ from app.services.piped import (
     artist_matches,
     collect_video_playback_streams,
     is_topic_upload,
+    looks_like_live_version,
     matches_requested_track,
     piped_client,
     title_matches,
@@ -93,11 +94,14 @@ async def _find_playable_alternate(
             if result.video_id in seen or is_topic_upload(result.artist):
                 continue
             seen.add(result.video_id)
+            # Lower score wins. Prefer studio alternates unless the original is live.
             score = 0
             if not title_matches(title, result.title):
                 score += 4
             if not artist_matches(artist, result.artist):
                 score += 2
+            if looks_like_live_version(result.title) and not looks_like_live_version(title):
+                score += 3
             ranked_candidates.append((score, result.video_id))
     except httpx.HTTPError:
         pass

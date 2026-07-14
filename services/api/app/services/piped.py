@@ -10,6 +10,18 @@ from app.services.thumbnails import youtube_thumbnail_url
 _ARTIST_TITLE_RE = re.compile(
     r"^(?P<artist>.+?)\s*[-–—|:]\s*(?P<title>.+?)(?:\s*[\(\[].*[\)\]])?$"
 )
+_LIVE_QUERY_RE = re.compile(r"\blive\b", re.IGNORECASE)
+# Prefer markers that mean "live performance", not song titles like "Live and Let Die".
+_LIVE_VERSION_RE = re.compile(
+    r"("
+    r"\blive\s+(at|from|in|on)\b|"
+    r"[\(\[][^)\]]*\blive\b[^)\]]*[)\]]|"
+    r"[-–—|:]\s*live\b|"
+    r"\blive\s*(version|recording|performance|session)\b|"
+    r"\bunplugged\b"
+    r")",
+    re.IGNORECASE,
+)
 
 
 def parse_artist_title(raw_title: str) -> tuple[str | None, str]:
@@ -66,8 +78,25 @@ def is_topic_upload(artist: str | None) -> bool:
     return bool(artist and artist.rstrip().endswith("- Topic"))
 
 
-def _search_rank_key(result: SearchResult) -> tuple[int, str]:
-    return (1 if is_topic_upload(result.artist) else 0, result.title.lower())
+def query_requests_live(query: str | None) -> bool:
+    return bool(query and _LIVE_QUERY_RE.search(query))
+
+
+def looks_like_live_version(*parts: str | None) -> bool:
+    text = " ".join(part for part in parts if part)
+    return bool(text and _LIVE_VERSION_RE.search(text))
+
+
+def _search_rank_key(result: SearchResult, *, prefer_studio: bool) -> tuple[int, int, str]:
+    # Ascending sort. Default: studio before live, Topic before others.
+    # If the query asks for live, invert so live versions rank first.
+    is_live = looks_like_live_version(result.title)
+    if prefer_studio:
+        live_rank = 1 if is_live else 0
+    else:
+        live_rank = 0 if is_live else 1
+    non_topic = 0 if is_topic_upload(result.artist) else 1
+    return (live_rank, non_topic, result.title.lower())
 
 
 def collect_playable_audio_streams(payload: dict) -> list[dict]:
@@ -188,7 +217,8 @@ class PipedClient:
     async def search_piped(self, query: str, limit: int = 20) -> tuple[list[SearchResult], str | None]:
         payload = await self._request_json("/search", params={"q": query, "filter": "music_songs"})
         results = _parse_search_items(payload)
-        results.sort(key=_search_rank_key)
+        prefer_studio = not query_requests_live(query)
+        results.sort(key=lambda result: _search_rank_key(result, prefer_studio=prefer_studio))
         return results[:limit], _next_page_token(payload)
 
     async def search_piped_next(
@@ -202,6 +232,8 @@ class PipedClient:
             params={"q": query, "filter": "music_songs", "nextpage": next_page},
         )
         results = _parse_search_items(payload)
+        prefer_studio = not query_requests_live(query)
+        results.sort(key=lambda result: _search_rank_key(result, prefer_studio=prefer_studio))
         return results[:limit], _next_page_token(payload)
 
     async def search(self, query: str, limit: int = 20) -> list[SearchResult]:

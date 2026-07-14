@@ -15,6 +15,7 @@ from app.services.catalog_cache import (
 from app.services.piped import (
     artist_matches,
     is_topic_upload,
+    looks_like_live_version,
     matches_requested_track,
     piped_client,
     title_matches,
@@ -36,7 +37,15 @@ def _rank_catalog_match(
         candidate_title=candidate.title,
         candidate_artist=candidate.artist,
     ) else 0
-    return (exact_bonus + title_score + artist_score + topic_bonus, title_score, artist_score, candidate.title.lower())
+    # Prefer studio uploads unless the catalog title itself is a live recording.
+    prefer_studio = not looks_like_live_version(wanted_title)
+    studio_bonus = 0 if prefer_studio and looks_like_live_version(candidate.title) else 1
+    return (
+        exact_bonus + title_score + artist_score + topic_bonus + studio_bonus,
+        title_score,
+        artist_score,
+        candidate.title.lower(),
+    )
 
 
 def _serialize_resolution(resolution: TrackRead | None) -> str:
