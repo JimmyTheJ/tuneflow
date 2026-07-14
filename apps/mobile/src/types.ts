@@ -96,6 +96,18 @@ export type ArtistDetail = {
   singles: ReleaseSummary[];
 };
 
+export type ArtistStreamEvent =
+  | {
+      event: "profile";
+      data: Pick<ArtistDetail, "mbid" | "name" | "type" | "disambiguation" | "image_url">;
+    }
+  | {
+      event: "chunk";
+      data: Pick<ArtistDetail, "albums" | "eps" | "singles">;
+    }
+  | { event: "done"; data: { image_url?: string | null } }
+  | { event: "error"; data: { message: string } };
+
 export type AlbumDetail = {
   mbid: string;
   title: string;

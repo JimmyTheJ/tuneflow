@@ -113,6 +113,70 @@ def looks_like_live_version(*parts: str | None) -> bool:
     return bool(text and _LIVE_VERSION_RE.search(text))
 
 
+_LOOP_RE = re.compile(
+    r"\b(loop|hour|hours|straight|compilation|full album|mixtape|megamix)\b",
+    re.IGNORECASE,
+)
+_FAN_UPLOAD_RE = re.compile(
+    r"\b(cover|karaoke|tribute|nursery rhymes|wake up|reaction|reacts? to)\b",
+    re.IGNORECASE,
+)
+_OFFICIAL_AUDIO_RE = re.compile(r"\bofficial\s+audio\b", re.IGNORECASE)
+_OFFICIAL_RE = re.compile(r"\bofficial\b", re.IGNORECASE)
+_ALT_RECORDING_RE = re.compile(
+    r"\b(concert|broadway|in concert|anniversary|remix|acoustic|unplugged|on broadway)\b",
+    re.IGNORECASE,
+)
+_ANIMATED_RE = re.compile(r"\b(animated|animation)\b", re.IGNORECASE)
+
+
+def studio_quality_score(
+    result: SearchResult,
+    *,
+    wanted_title: str,
+    wanted_artist: str,
+    wanted_duration_ms: int | None = None,
+) -> int:
+    """Higher is better. Prefer Topic/official studio uploads over fan re-uploads."""
+    display = _result_display_title(result)
+    score = 0
+
+    if is_topic_upload(result.artist):
+        score += 6
+    if _OFFICIAL_AUDIO_RE.search(display):
+        score += 5
+    elif _OFFICIAL_RE.search(display):
+        score += 3
+
+    parsed_artist, parsed_title = parse_artist_title(display)
+    if artist_matches(wanted_artist, parsed_artist or result.artist):
+        score += 1
+    if title_matches(wanted_title, parsed_title or result.title):
+        score += 1
+
+    if _result_is_live(result):
+        score -= 4
+    if _ALT_RECORDING_RE.search(display):
+        score -= 3
+    if _LOOP_RE.search(display):
+        score -= 6
+    if _FAN_UPLOAD_RE.search(display):
+        score -= 5
+    if _ANIMATED_RE.search(display):
+        score -= 1
+
+    if wanted_duration_ms and result.duration_sec:
+        wanted_sec = wanted_duration_ms / 1000
+        if result.duration_sec > wanted_sec * 2.5:
+            score -= 6
+        elif result.duration_sec > wanted_sec * 1.8:
+            score -= 3
+        elif result.duration_sec < wanted_sec * 0.5:
+            score -= 4
+
+    return score
+
+
 def _result_display_title(result: SearchResult) -> str:
     return (result.source_title or result.title or "").strip()
 

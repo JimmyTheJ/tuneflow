@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models import AudioCacheAccess, AudioCacheEntry, PlayHistory, SystemSettings, User
+from app.schemas import StreamInfo
 from app.services.audio_cache import (
     _AUDIO_SUFFIXES,
     _cache_dir,
@@ -15,6 +16,8 @@ from app.services.audio_cache import (
     _guess_mime,
     download_audio_to_cache,
 )
+from app.services.stream_resolver import _apply_proxy_urls, resolve_stream
+from app.services.thumbnails import youtube_thumbnail_url
 
 
 @dataclass
@@ -39,6 +42,93 @@ def _apply_track_metadata(entry: AudioCacheEntry, *, title: str | None, artist: 
         entry.title = title.strip()
     if artist:
         entry.artist = artist.strip()
+
+
+def _entry_has_valid_file(entry: AudioCacheEntry) -> bool:
+    path = Path(entry.file_path)
+    return path.exists() and path.stat().st_size > 0
+
+
+def _is_metadata_fresh(entry: AudioCacheEntry, refresh_days: int) -> bool:
+    verified_at = entry.last_verified_at or entry.cached_at
+    if verified_at.tzinfo is None:
+        verified_at = verified_at.replace(tzinfo=UTC)
+    return verified_at >= datetime.now(UTC) - timedelta(days=refresh_days)
+
+
+def _stream_info_from_entry(
+    entry: AudioCacheEntry,
+    *,
+    title: str | None = None,
+    artist: str | None = None,
+) -> StreamInfo:
+    video_id = entry.video_id
+    return _apply_proxy_urls(
+        StreamInfo(
+            video_id=video_id,
+            title=entry.title or title or "Unknown",
+            artist=entry.artist or artist,
+            thumbnail_url=entry.thumbnail_url or youtube_thumbnail_url(video_id),
+            duration_sec=entry.duration_sec,
+            audio_url=f"/api/music/audio/{video_id}",
+            mime_type=entry.mime_type,
+            has_video=entry.has_video,
+            video_mime_type=entry.video_mime_type,
+        )
+    )
+
+
+def _apply_stream_metadata(entry: AudioCacheEntry, stream: StreamInfo) -> None:
+    entry.title = stream.title
+    entry.artist = stream.artist
+    entry.thumbnail_url = stream.thumbnail_url
+    entry.duration_sec = stream.duration_sec
+    entry.has_video = stream.has_video
+    entry.video_mime_type = stream.video_mime_type
+    entry.last_verified_at = datetime.now(UTC)
+
+
+async def resolve_stream_with_cache(
+    db: AsyncSession,
+    video_id: str,
+    *,
+    title: str | None = None,
+    artist: str | None = None,
+    user_id: int | None = None,
+) -> StreamInfo:
+    settings = await get_system_settings(db)
+    if settings.cache_enabled and settings.cache_retention_days != 0:
+        entry = await db.scalar(select(AudioCacheEntry).where(AudioCacheEntry.video_id == video_id))
+        if entry is not None and _entry_has_valid_file(entry):
+            refresh_days = settings.cache_refresh_days or 180
+            if _is_metadata_fresh(entry, refresh_days):
+                _apply_track_metadata(entry, title=title, artist=artist)
+                if user_id is not None:
+                    await _record_access(db, user_id=user_id, entry=entry, title=title, artist=artist)
+                elif title or artist:
+                    await db.commit()
+                return _stream_info_from_entry(entry, title=title, artist=artist)
+
+            try:
+                stream = await resolve_stream(
+                    video_id,
+                    title=title or entry.title,
+                    artist=artist or entry.artist,
+                )
+            except Exception:
+                if user_id is not None:
+                    await _record_access(db, user_id=user_id, entry=entry, title=title, artist=artist)
+                return _stream_info_from_entry(entry, title=title, artist=artist)
+
+            _apply_stream_metadata(entry, stream)
+            _apply_track_metadata(entry, title=title, artist=artist)
+            if user_id is not None:
+                await _record_access(db, user_id=user_id, entry=entry, title=title, artist=artist)
+            else:
+                await db.commit()
+            return stream
+
+    return await resolve_stream(video_id, title=title, artist=artist)
 
 
 async def backfill_missing_titles(db: AsyncSession) -> int:
@@ -129,6 +219,7 @@ async def resolve_audio(
     user_id: int,
     title: str | None = None,
     artist: str | None = None,
+    stream: StreamInfo | None = None,
 ) -> AudioResolution:
     settings = await get_system_settings(db)
     if not settings.cache_enabled or settings.cache_retention_days == 0:
@@ -154,6 +245,7 @@ async def resolve_audio(
             cached_by_user_id=user_id,
             title=title,
             artist=artist,
+            stream=stream,
         )
         await _record_access(db, user_id=user_id, entry=entry, title=title, artist=artist)
         return AudioResolution(path=existing_file, mime_type=entry.mime_type, stream=False)
@@ -166,6 +258,7 @@ async def resolve_audio(
         cached_by_user_id=user_id,
         title=title,
         artist=artist,
+        stream=stream,
     )
     await _record_access(db, user_id=user_id, entry=entry, title=title, artist=artist)
     return AudioResolution(path=path, mime_type=entry.mime_type, stream=False)
@@ -179,6 +272,7 @@ async def _upsert_entry_from_file(
     cached_by_user_id: int,
     title: str | None = None,
     artist: str | None = None,
+    stream: StreamInfo | None = None,
 ) -> AudioCacheEntry:
     now = datetime.now(UTC)
     size = path.stat().st_size
@@ -192,6 +286,7 @@ async def _upsert_entry_from_file(
             mime_type=mime,
             cached_at=now,
             last_accessed_at=now,
+            last_verified_at=now,
             cached_by_user_id=cached_by_user_id,
             title=title.strip() if title else None,
             artist=artist.strip() if artist else None,
@@ -205,6 +300,10 @@ async def _upsert_entry_from_file(
         if entry.cached_by_user_id is None:
             entry.cached_by_user_id = cached_by_user_id
         _apply_track_metadata(entry, title=title, artist=artist)
+    if stream is not None:
+        _apply_stream_metadata(entry, stream)
+    elif entry.last_verified_at is None:
+        entry.last_verified_at = now
     await db.commit()
     await db.refresh(entry)
     return entry

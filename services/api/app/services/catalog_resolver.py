@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 
-from app.schemas import SearchResult, StreamInfo, TrackRead
+from app.schemas import SearchResult, TrackRead
 from app.services.catalog_cache import (
     get_catalog_cache,
     get_catalog_cache_many,
@@ -17,9 +17,12 @@ from app.services.piped import (
     is_topic_upload,
     looks_like_live_version,
     matches_requested_track,
+    parse_artist_title,
     piped_client,
+    studio_quality_score,
     title_matches,
 )
+from app.services.thumbnails import youtube_thumbnail_url
 
 
 def _duration_score(wanted_ms: int | None, candidate_sec: int | None) -> int:
@@ -43,7 +46,7 @@ def _rank_catalog_match(
     wanted_artist: str,
     candidate: SearchResult,
     wanted_duration_ms: int | None = None,
-) -> tuple[int, int, int, int, str]:
+) -> tuple[int, int, int, int, int, str]:
     title_score = 2 if title_matches(wanted_title, candidate.title) else 0
     artist_score = 2 if artist_matches(wanted_artist, candidate.artist) else 0
     topic_bonus = 1 if is_topic_upload(candidate.artist) else 0
@@ -53,29 +56,50 @@ def _rank_catalog_match(
         candidate_title=candidate.title,
         candidate_artist=candidate.artist,
     ) else 0
-    # Prefer studio uploads unless the catalog title itself is a live recording.
     prefer_studio = not looks_like_live_version(wanted_title)
-    studio_bonus = (
+    live_penalty = (
         0
         if prefer_studio and looks_like_live_version(candidate.source_title, candidate.title)
         else 1
     )
     duration_bonus = _duration_score(wanted_duration_ms, candidate.duration_sec)
+    quality_bonus = studio_quality_score(
+        candidate,
+        wanted_title=wanted_title,
+        wanted_artist=wanted_artist,
+        wanted_duration_ms=wanted_duration_ms,
+    )
     return (
-        exact_bonus + title_score + artist_score + topic_bonus + studio_bonus + duration_bonus,
+        exact_bonus + title_score + artist_score + topic_bonus + live_penalty + duration_bonus + quality_bonus,
         title_score,
+        quality_bonus,
         duration_bonus,
         artist_score,
         candidate.title.lower(),
     )
 
 
-def _is_acceptable_match(rank: tuple[int, int, int, int, str], *, require_artist: bool = True) -> bool:
+def _is_acceptable_match(rank: tuple[int, int, int, int, int, str], *, require_artist: bool = True) -> bool:
     if rank[1] < 2:
         return False
-    if require_artist and rank[3] < 2:
+    if require_artist and rank[4] < 2:
         return False
     return True
+
+
+def _resolution_queries(artist_name: str, track_title: str, album_title: str | None = None) -> list[str]:
+    queries = [_build_search_query(artist_name, track_title, album_title)]
+    if album_title:
+        queries.append(_build_search_query(artist_name, track_title))
+    queries.append(f"{artist_name} {track_title} official audio")
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for query in queries:
+        normalized = query.strip().lower()
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            ordered.append(query.strip())
+    return ordered
 
 
 def _build_search_query(artist_name: str, track_title: str, album_title: str | None = None) -> str:
@@ -83,16 +107,6 @@ def _build_search_query(artist_name: str, track_title: str, album_title: str | N
     if album_title:
         parts.append(album_title)
     return " ".join(part for part in parts if part).strip()
-
-
-def _search_result_from_stream(stream: StreamInfo) -> SearchResult:
-    return SearchResult(
-        video_id=stream.video_id,
-        title=stream.title,
-        artist=stream.artist,
-        thumbnail_url=stream.thumbnail_url,
-        duration_sec=stream.duration_sec,
-    )
 
 
 def _dedupe_results(results: list[SearchResult]) -> list[SearchResult]:
@@ -126,68 +140,63 @@ def _pick_best_match(
         ),
         reverse=True,
     )
-    best = ranked[0]
-    rank = _rank_catalog_match(
-        wanted_title=wanted_title,
-        wanted_artist=wanted_artist,
-        candidate=best,
-        wanted_duration_ms=wanted_duration_ms,
-    )
-    if not _is_acceptable_match(rank):
-        return None
-    return best
+    for candidate in ranked:
+        rank = _rank_catalog_match(
+            wanted_title=wanted_title,
+            wanted_artist=wanted_artist,
+            candidate=candidate,
+            wanted_duration_ms=wanted_duration_ms,
+        )
+        if _is_acceptable_match(rank):
+            return candidate
+    return None
 
 
-async def _ytdlp_search_results(
-    query: str,
-    *,
-    limit: int = 10,
-    wanted_title: str,
-    wanted_artist: str,
-    wanted_duration_ms: int | None = None,
-) -> list[SearchResult]:
-    from app.services.ytdlp import get_stream_via_ytdlp, search_video_entries
+async def _ytdlp_search_stubs(query: str, *, limit: int = 15) -> list[SearchResult]:
+    from app.services.ytdlp import search_video_entries
 
     try:
         entries = await search_video_entries(query, limit=limit)
     except Exception:
         return []
 
-    candidates: list[SearchResult] = []
+    results: list[SearchResult] = []
     for entry in entries:
         video_id = entry.get("id")
         if not video_id:
             continue
-        title = entry.get("title") or ""
-        artist = entry.get("uploader") or entry.get("channel")
-        duration_sec = entry.get("duration")
-        stub = SearchResult(
-            video_id=video_id,
-            title=title,
-            artist=artist,
-            thumbnail_url=None,
-            duration_sec=duration_sec,
+        raw_title = (entry.get("title") or "").strip()
+        parsed_artist, parsed_title = parse_artist_title(raw_title)
+        uploader = entry.get("uploader") or entry.get("channel") or parsed_artist
+        results.append(
+            SearchResult(
+                video_id=video_id,
+                title=parsed_title or raw_title,
+                artist=uploader,
+                thumbnail_url=youtube_thumbnail_url(video_id),
+                duration_sec=entry.get("duration"),
+                source_title=raw_title or None,
+            )
         )
-        rank = _rank_catalog_match(
-            wanted_title=wanted_title,
-            wanted_artist=wanted_artist,
-            candidate=stub,
-            wanted_duration_ms=wanted_duration_ms,
-        )
-        if not _is_acceptable_match(rank):
-            continue
-        candidates.append((rank, stub))
+    return results
 
-    candidates.sort(key=lambda item: item[0], reverse=True)
 
-    results: list[SearchResult] = []
-    for _, stub in candidates[:5]:
+async def _search_all_sources(
+    query: str,
+    *,
+    wanted_title: str,
+    wanted_artist: str,
+) -> list[SearchResult]:
+    piped_task = asyncio.create_task(piped_client.search(query, limit=15))
+    ytdlp_task = asyncio.create_task(_ytdlp_search_stubs(query, limit=15))
+
+    collected: list[SearchResult] = []
+    for task in (piped_task, ytdlp_task):
         try:
-            stream = await get_stream_via_ytdlp(stub.video_id)
+            collected.extend(await task)
         except Exception:
             continue
-        results.append(_search_result_from_stream(stream))
-    return results
+    return collected
 
 
 def _serialize_resolution(resolution: TrackRead | None) -> str:
@@ -235,45 +244,19 @@ async def _resolve_catalog_track_uncached(
     duration_ms: int | None = None,
     album_title: str | None = None,
 ) -> TrackRead | None:
-    queries = [_build_search_query(artist_name, track_title, album_title)]
-    if album_title:
-        queries.append(_build_search_query(artist_name, track_title))
-
     collected: list[SearchResult] = []
-    for query in queries:
-        try:
-            collected.extend(await piped_client.search(query, limit=15))
-        except Exception:
-            continue
-        best = _pick_best_match(
-            collected,
-            wanted_title=track_title,
-            wanted_artist=artist_name,
-            wanted_duration_ms=duration_ms,
-        )
-        if best is not None:
-            return _to_track_read(best)
+    for query in _resolution_queries(artist_name, track_title, album_title):
+        collected.extend(await _search_all_sources(query, wanted_title=track_title, wanted_artist=artist_name))
 
-    for query in queries:
-        collected.extend(
-            await _ytdlp_search_results(
-                query,
-                limit=10,
-                wanted_title=track_title,
-                wanted_artist=artist_name,
-                wanted_duration_ms=duration_ms,
-            )
-        )
-        best = _pick_best_match(
-            collected,
-            wanted_title=track_title,
-            wanted_artist=artist_name,
-            wanted_duration_ms=duration_ms,
-        )
-        if best is not None:
-            return _to_track_read(best)
-
-    return None
+    best = _pick_best_match(
+        collected,
+        wanted_title=track_title,
+        wanted_artist=artist_name,
+        wanted_duration_ms=duration_ms,
+    )
+    if best is None:
+        return None
+    return _to_track_read(best)
 
 
 async def resolve_catalog_track(

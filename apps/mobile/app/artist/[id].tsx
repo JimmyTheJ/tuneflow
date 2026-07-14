@@ -1,18 +1,26 @@
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { Stack, router, useLocalSearchParams } from "expo-router";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Image, ScrollView, Text, View } from "react-native";
 
 import { MediaCard } from "@/components/ui/MediaCard";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import { MediaCardSkeleton, Skeleton } from "@/components/ui/Skeleton";
 import { api } from "@/lib/api";
-import { formatReleaseYear } from "@/lib/catalogUtils";
+import { formatReleaseYear, mergeArtistDiscography } from "@/lib/catalogUtils";
 import type { ArtistDetail, ReleaseSummary } from "@/types";
 
-function ReleaseSection({ title, releases }: { title: string; releases: ReleaseSummary[] }) {
-  if (releases.length === 0) return null;
+function ReleaseSection({
+  title,
+  releases,
+  loading,
+}: {
+  title: string;
+  releases: ReleaseSummary[];
+  loading: boolean;
+}) {
+  if (releases.length === 0 && !loading) return null;
 
   return (
     <View className="mb-8">
@@ -32,6 +40,13 @@ function ReleaseSection({ title, releases }: { title: string; releases: ReleaseS
             />
           </View>
         ))}
+        {loading
+          ? Array.from({ length: releases.length === 0 ? 4 : 2 }).map((_, i) => (
+              <View key={`loading-${i}`} className="w-[46%] sm:w-[30%]">
+                <MediaCardSkeleton />
+              </View>
+            ))
+          : null}
       </View>
     </View>
   );
@@ -41,26 +56,60 @@ export default function ArtistScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const [artist, setArtist] = useState<ArtistDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  const load = useCallback(async () => {
-    if (!id) return;
-    setLoading(true);
-    try {
-      setArtist(await api.getArtist(id));
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load artist");
-    } finally {
-      setLoading(false);
-    }
-  }, [id]);
+  const [loadingProfile, setLoadingProfile] = useState(true);
+  const [loadingDiscography, setLoadingDiscography] = useState(true);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    if (!id) return;
 
-  if (loading) {
+    let cancelled = false;
+    setArtist(null);
+    setError(null);
+    setLoadingProfile(true);
+    setLoadingDiscography(true);
+
+    void (async () => {
+      try {
+        for await (const event of api.streamArtist(id)) {
+          if (cancelled) return;
+
+          if (event.event === "profile") {
+            setArtist({
+              ...event.data,
+              albums: [],
+              eps: [],
+              singles: [],
+            });
+            setLoadingProfile(false);
+          } else if (event.event === "chunk") {
+            setArtist((current) => (current ? mergeArtistDiscography(current, event.data) : current));
+          } else if (event.event === "done") {
+            setArtist((current) =>
+              current
+                ? { ...current, image_url: event.data.image_url ?? current.image_url }
+                : current,
+            );
+            setLoadingDiscography(false);
+          } else if (event.event === "error") {
+            throw new Error(event.data.message);
+          }
+        }
+        if (!cancelled) setLoadingDiscography(false);
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "Failed to load artist");
+          setLoadingProfile(false);
+          setLoadingDiscography(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
+
+  if (loadingProfile && !artist) {
     return (
       <View className="flex-1 bg-base px-4 pt-4">
         <View className="flex-row gap-4">
@@ -81,10 +130,18 @@ export default function ArtistScreen() {
     );
   }
 
-  if (error || !artist) {
+  if (error && !artist) {
     return (
       <View className="flex-1 bg-base px-4 pt-6">
         <Text className="text-danger-fg">{error ?? "Artist not found"}</Text>
+      </View>
+    );
+  }
+
+  if (!artist) {
+    return (
+      <View className="flex-1 bg-base px-4 pt-6">
+        <Text className="text-text-muted">Artist not found</Text>
       </View>
     );
   }
@@ -111,17 +168,27 @@ export default function ArtistScreen() {
                 <Text className="mt-1 text-sm text-text-secondary">{artist.disambiguation}</Text>
               ) : null}
               <Text className="mt-2 text-sm text-text-secondary">
-                {totalReleases} {totalReleases === 1 ? "release" : "releases"}
+                {loadingDiscography && totalReleases === 0
+                  ? "Loading releases…"
+                  : `${totalReleases}${loadingDiscography ? "+" : ""} ${totalReleases === 1 ? "release" : "releases"}`}
               </Text>
             </View>
           </View>
         </LinearGradient>
 
         <View className="px-4">
-          <ReleaseSection title="Albums" releases={artist.albums} />
-          <ReleaseSection title="EPs" releases={artist.eps} />
-          <ReleaseSection title="Singles" releases={artist.singles} />
-          {totalReleases === 0 ? (
+          <ReleaseSection title="Albums" releases={artist.albums} loading={loadingDiscography} />
+          <ReleaseSection
+            title="EPs"
+            releases={artist.eps}
+            loading={loadingDiscography && artist.albums.length === 0}
+          />
+          <ReleaseSection
+            title="Singles"
+            releases={artist.singles}
+            loading={loadingDiscography && artist.albums.length === 0 && artist.eps.length === 0}
+          />
+          {!loadingDiscography && totalReleases === 0 ? (
             <Text className="text-text-muted">No releases found for this artist.</Text>
           ) : null}
         </View>

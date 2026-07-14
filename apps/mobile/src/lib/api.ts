@@ -22,6 +22,7 @@ import type {
   Track,
   User,
   ArtistDetail,
+  ArtistStreamEvent,
   AlbumDetail,
   AlbumResolveResult,
 } from "@/types";
@@ -75,6 +76,46 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   return withRetry(() => executeRequest<T>(path, options));
 }
 
+async function* streamArtistEvents(mbid: string): AsyncGenerator<ArtistStreamEvent> {
+  const baseUrl = await getApiUrl();
+  const headers: Record<string, string> = {};
+  const token = await getAccessToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  const response = await fetch(`${baseUrl}/api/music/artists/${mbid}/stream`, { headers });
+  if (!response.ok) {
+    let detail = await response.text();
+    try {
+      const parsed = JSON.parse(detail) as { detail?: string };
+      detail = parsed.detail ?? detail;
+    } catch {
+      // keep raw text
+    }
+    throw new ApiError(detail || `Request failed (${response.status})`, response.status);
+  }
+  if (!response.body) {
+    throw new ApiError("Empty artist stream response", response.status);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      yield JSON.parse(line) as ArtistStreamEvent;
+    }
+  }
+  if (buffer.trim()) {
+    yield JSON.parse(buffer) as ArtistStreamEvent;
+  }
+}
+
 export const api = {
   testConnection: () => executeRequest<SetupStatus>("/api/auth/setup-status", { auth: false }),
   setupStatus: () => request<SetupStatus>("/api/auth/setup-status", { auth: false }),
@@ -101,6 +142,7 @@ export const api = {
     return request<SearchResultsPage>(`/api/music/search?${params.toString()}`);
   },
   getArtist: (mbid: string) => request<ArtistDetail>(`/api/music/artists/${mbid}`),
+  streamArtist: streamArtistEvents,
   getAlbum: (mbid: string) => request<AlbumDetail>(`/api/music/albums/${mbid}`),
   resolveAlbum: (mbid: string) =>
     request<AlbumResolveResult>(`/api/music/albums/${mbid}/resolve`, { method: "POST" }),

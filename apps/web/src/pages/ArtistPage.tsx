@@ -1,15 +1,23 @@
 import { User } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { MediaCard } from "@/components/MediaCard";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import { MediaCardSkeleton, Skeleton } from "@/components/ui/Skeleton";
 import { api } from "@/lib/api";
-import { formatReleaseYear } from "@/lib/catalogUtils";
+import { formatReleaseYear, mergeArtistDiscography } from "@/lib/catalogUtils";
 import type { ArtistDetail, ReleaseSummary } from "@/types";
 
-function ReleaseGrid({ title, releases }: { title: string; releases: ReleaseSummary[] }) {
-  if (releases.length === 0) return null;
+function ReleaseGrid({
+  title,
+  releases,
+  loading,
+}: {
+  title: string;
+  releases: ReleaseSummary[];
+  loading: boolean;
+}) {
+  if (releases.length === 0 && !loading) return null;
 
   return (
     <section className="space-y-4">
@@ -28,6 +36,11 @@ function ReleaseGrid({ title, releases }: { title: string; releases: ReleaseSumm
             }
           />
         ))}
+        {loading
+          ? Array.from({ length: releases.length === 0 ? 6 : 2 }).map((_, i) => (
+              <MediaCardSkeleton key={`loading-${i}`} />
+            ))
+          : null}
       </div>
     </section>
   );
@@ -37,24 +50,62 @@ export function ArtistPage() {
   const { id } = useParams<{ id: string }>();
   const [artist, setArtist] = useState<ArtistDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    if (!id) return;
-    try {
-      setArtist(await api.getArtist(id));
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load artist");
-    }
-  }, [id]);
+  const [loadingProfile, setLoadingProfile] = useState(true);
+  const [loadingDiscography, setLoadingDiscography] = useState(true);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    if (!id) return;
+
+    let cancelled = false;
+    setArtist(null);
+    setError(null);
+    setLoadingProfile(true);
+    setLoadingDiscography(true);
+
+    void (async () => {
+      try {
+        for await (const event of api.streamArtist(id)) {
+          if (cancelled) return;
+
+          if (event.event === "profile") {
+            setArtist({
+              ...event.data,
+              albums: [],
+              eps: [],
+              singles: [],
+            });
+            setLoadingProfile(false);
+          } else if (event.event === "chunk") {
+            setArtist((current) => (current ? mergeArtistDiscography(current, event.data) : current));
+          } else if (event.event === "done") {
+            setArtist((current) =>
+              current
+                ? { ...current, image_url: event.data.image_url ?? current.image_url }
+                : current,
+            );
+            setLoadingDiscography(false);
+          } else if (event.event === "error") {
+            throw new Error(event.data.message);
+          }
+        }
+        if (!cancelled) setLoadingDiscography(false);
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "Failed to load artist");
+          setLoadingProfile(false);
+          setLoadingDiscography(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
 
   if (error && !artist) return <p className="text-danger-fg">{error}</p>;
 
-  if (!artist) {
+  if (loadingProfile && !artist) {
     return (
       <div className="space-y-6">
         <div className="flex gap-6">
@@ -72,6 +123,8 @@ export function ArtistPage() {
       </div>
     );
   }
+
+  if (!artist) return null;
 
   const totalReleases = artist.albums.length + artist.eps.length + artist.singles.length;
 
@@ -94,7 +147,9 @@ export function ArtistPage() {
               <p className="m-0 mt-1 text-sm text-text-secondary">{artist.disambiguation}</p>
             ) : null}
             <p className="m-0 mt-2 text-sm text-text-secondary">
-              {totalReleases} {totalReleases === 1 ? "release" : "releases"}
+              {loadingDiscography && totalReleases === 0
+                ? "Loading releases…"
+                : `${totalReleases}${loadingDiscography ? "+" : ""} ${totalReleases === 1 ? "release" : "releases"}`}
             </p>
           </div>
         </div>
@@ -102,11 +157,15 @@ export function ArtistPage() {
 
       {error ? <p className="text-danger-fg">{error}</p> : null}
 
-      <ReleaseGrid title="Albums" releases={artist.albums} />
-      <ReleaseGrid title="EPs" releases={artist.eps} />
-      <ReleaseGrid title="Singles" releases={artist.singles} />
+      <ReleaseGrid title="Albums" releases={artist.albums} loading={loadingDiscography} />
+      <ReleaseGrid title="EPs" releases={artist.eps} loading={loadingDiscography && artist.albums.length === 0} />
+      <ReleaseGrid
+        title="Singles"
+        releases={artist.singles}
+        loading={loadingDiscography && artist.albums.length === 0 && artist.eps.length === 0}
+      />
 
-      {totalReleases === 0 ? (
+      {!loadingDiscography && totalReleases === 0 ? (
         <p className="text-text-muted">No releases found for this artist.</p>
       ) : null}
     </div>
