@@ -37,6 +37,7 @@ export default function SearchScreen() {
   const [inputFocused, setInputFocused] = useState(false);
   const [lastQuery, setLastQuery] = useState<string | null>(null);
   const loadingMoreRef = useRef(false);
+  const endReachedGuardRef = useRef(false);
   const playTrack = usePlayerStore((state) => state.playTrack);
   const { suggestions, recordQuery, removeQuery, clearHistory } = useSearchHistory(query);
 
@@ -50,6 +51,7 @@ export default function SearchScreen() {
     setError(null);
     setNextPage(null);
     setLastQuery(trimmed);
+    endReachedGuardRef.current = false;
     try {
       const page = await api.search(trimmed);
       setResults(page.results);
@@ -189,8 +191,18 @@ export default function SearchScreen() {
             onPress={item.blocked_reason ? undefined : () => void playTrack(item, playable)}
           />
         )}
-        onEndReached={() => void loadMore()}
+        onEndReached={() => {
+          if (endReachedGuardRef.current || loadingMoreRef.current || loading || !nextPage) return;
+          endReachedGuardRef.current = true;
+          void loadMore();
+        }}
         onEndReachedThreshold={0.4}
+        onMomentumScrollBegin={() => {
+          endReachedGuardRef.current = false;
+        }}
+        onScrollBeginDrag={() => {
+          endReachedGuardRef.current = false;
+        }}
         ListFooterComponent={
           loadingMore ? (
             <Text className="my-4 text-center text-sm text-text-secondary">Loading more…</Text>

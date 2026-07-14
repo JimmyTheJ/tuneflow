@@ -36,6 +36,7 @@ export function SearchPage() {
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const loadMoreRef = useRef<HTMLDivElement>(null);
   const loadingMoreRef = useRef(false);
+  const wasIntersectingRef = useRef(false);
   const playTrack = usePlayerStore((s) => s.playTrack);
   const { suggestions, recordQuery, removeQuery, clearHistory } = useSearchHistory(query);
   const { likedVideoIds, refresh: refreshLikedTracks } = useLikedTracks();
@@ -102,6 +103,10 @@ export function SearchPage() {
     };
   }, [urlQuery, recordQuery]);
 
+  useEffect(() => {
+    wasIntersectingRef.current = false;
+  }, [urlQuery]);
+
   const loadMore = useCallback(async () => {
     const trimmed = urlQuery.trim();
     if (!trimmed || !nextPage || loadingMoreRef.current || loading) return;
@@ -124,20 +129,29 @@ export function SearchPage() {
 
   useEffect(() => {
     const node = loadMoreRef.current;
-    if (!node || !nextPage || loading) return;
+    if (!node || !nextPage || loading || loadingMore) return;
 
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0]?.isIntersecting) {
+        const isIntersecting = entries[0]?.isIntersecting ?? false;
+        if (isIntersecting && !wasIntersectingRef.current) {
           void loadMore();
         }
+        wasIntersectingRef.current = isIntersecting;
       },
       { rootMargin: "240px" },
     );
 
     observer.observe(node);
     return () => observer.disconnect();
-  }, [loadMore, nextPage, loading, results.length]);
+  }, [loadMore, nextPage, loading, loadingMore, results.length]);
+
+  useEffect(() => {
+    if (loading || loadingMore || !nextPage) return;
+    const doc = document.documentElement;
+    if (doc.scrollHeight > window.innerHeight) return;
+    void loadMore();
+  }, [results.length, loading, loadingMore, nextPage, loadMore]);
 
   const runSearch = (e: React.FormEvent) => {
     e.preventDefault();
