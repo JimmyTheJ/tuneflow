@@ -265,6 +265,7 @@ export type CatalogCacheStats = {
   total_size_bytes: number;
   artist_count: number;
   album_count: number;
+  track_resolve_count: number;
   api_response_count: number;
   oldest_cached_at: string | null;
   newest_cached_at: string | null;

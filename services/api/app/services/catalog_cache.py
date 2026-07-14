@@ -33,6 +33,35 @@ async def _purge_catalog_entries(db: AsyncSession, entries: list[CatalogCacheEnt
     return len(entries), freed
 
 
+def track_resolution_cache_key(
+    *,
+    artist_name: str,
+    track_title: str,
+    recording_mbid: str | None = None,
+) -> str:
+    if recording_mbid:
+        return f"track_resolve:recording:{recording_mbid}"
+    return f"track_resolve:query:{artist_name.strip().lower()}|{track_title.strip().lower()}"
+
+
+async def get_catalog_cache_many(keys: list[str]) -> dict[str, str]:
+    if not keys:
+        return {}
+    async with SessionLocal() as db:
+        from app.services.cache_manager import get_system_settings
+
+        settings = await get_system_settings(db)
+        retention_days = settings.catalog_cache_retention_days
+        entries = (
+            await db.execute(select(CatalogCacheEntry).where(CatalogCacheEntry.cache_key.in_(keys)))
+        ).scalars().all()
+        result: dict[str, str] = {}
+        for entry in entries:
+            if is_catalog_entry_fresh(entry.cached_at, retention_days):
+                result[entry.cache_key] = entry.payload_json
+        return result
+
+
 async def get_catalog_cache(key: str, *, retention_days: int | None = None) -> str | None:
     async with SessionLocal() as db:
         from app.services.cache_manager import get_system_settings
@@ -120,10 +149,15 @@ async def get_catalog_cache_stats(db: AsyncSession) -> dict:
                     0,
                 ).label("album_count"),
                 func.coalesce(
+                    func.sum(case((CatalogCacheEntry.cache_key.like("track_resolve:%"), 1), else_=0)),
+                    0,
+                ).label("track_resolve_count"),
+                func.coalesce(
                     func.sum(
                         case(
                             (CatalogCacheEntry.cache_key.like("artist_detail:%"), 0),
                             (CatalogCacheEntry.cache_key.like("album_detail:%"), 0),
+                            (CatalogCacheEntry.cache_key.like("track_resolve:%"), 0),
                             else_=1,
                         )
                     ),
@@ -139,6 +173,7 @@ async def get_catalog_cache_stats(db: AsyncSession) -> dict:
         "total_size_bytes": int(row.total_size_bytes or 0),
         "artist_count": int(row.artist_count or 0),
         "album_count": int(row.album_count or 0),
+        "track_resolve_count": int(row.track_resolve_count or 0),
         "api_response_count": int(row.api_response_count or 0),
         "oldest_cached_at": row.oldest_cached_at,
         "newest_cached_at": row.newest_cached_at,

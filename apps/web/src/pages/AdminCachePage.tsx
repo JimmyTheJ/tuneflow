@@ -281,7 +281,7 @@ export function AdminCachePage() {
             </p>
             <p className="muted">
               {stats.catalog.artist_count} artists · {stats.catalog.album_count} albums ·{" "}
-              {stats.catalog.api_response_count} API responses
+              {stats.catalog.track_resolve_count} track matches · {stats.catalog.api_response_count} API responses
             </p>
             <p className="muted">
               {stats.catalog.oldest_cached_at

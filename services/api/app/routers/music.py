@@ -1,4 +1,5 @@
 import httpx
+import json
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,11 +23,11 @@ from app.schemas import (
     SearchResultsPage,
     StreamInfo,
 )
-from app.services.cache_manager import resolve_audio
+from app.services.cache_manager import resolve_audio, resolve_stream_with_cache
 from app.services.catalog_resolver import resolve_catalog_tracks
 from app.services.musicbrainz import musicbrainz_client
 from app.services.piped import piped_client
-from app.services.stream_resolver import resolve_stream, stream_video_chunks
+from app.services.stream_resolver import stream_video_chunks
 from app.services.ytdlp import stream_audio_via_ytdlp
 from app.slugify import build_track_filename
 
@@ -176,6 +177,24 @@ async def get_artist(
     )
 
 
+@router.get("/artists/{mbid}/stream")
+async def stream_artist(
+    mbid: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> StreamingResponse:
+    await enforce_child_access(db, current_user)
+
+    async def event_stream():
+        try:
+            async for event in musicbrainz_client.stream_artist_detail(mbid):
+                yield json.dumps(event) + "\n"
+        except httpx.HTTPError as exc:
+            yield json.dumps({"event": "error", "data": {"message": str(exc)}}) + "\n"
+
+    return StreamingResponse(event_stream(), media_type="application/x-ndjson")
+
+
 @router.get("/albums/{mbid}", response_model=AlbumDetail)
 async def get_album(
     mbid: str,
@@ -219,7 +238,7 @@ async def _resolve_album_tracks(
         return tracks
 
     resolved_list = await resolve_catalog_tracks(
-        [(artist_name, t.title) for _, t in unresolved],
+        [(artist_name, t.title, t.recording_mbid) for _, t in unresolved],
         concurrency=3,
     )
 
@@ -271,7 +290,13 @@ async def get_stream(
     child_settings = await enforce_child_access(db, current_user)
 
     try:
-        stream = await resolve_stream(video_id, title=title, artist=artist)
+        stream = await resolve_stream_with_cache(
+            db,
+            video_id,
+            title=title,
+            artist=artist,
+            user_id=current_user.id,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except httpx.HTTPError as exc:
@@ -301,7 +326,13 @@ async def stream_audio(
     child_settings = await enforce_child_access(db, current_user)
 
     try:
-        stream = await resolve_stream(video_id, title=title, artist=artist)
+        stream = await resolve_stream_with_cache(
+            db,
+            video_id,
+            title=title,
+            artist=artist,
+            user_id=current_user.id,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except httpx.HTTPError as exc:
@@ -323,6 +354,7 @@ async def stream_audio(
             user_id=current_user.id,
             title=stream.title,
             artist=stream.artist,
+            stream=stream,
         )
     except (FileNotFoundError, ValueError) as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -366,7 +398,11 @@ async def stream_video(
     child_settings = await enforce_child_access(db, current_user)
 
     try:
-        stream = await resolve_stream(video_id)
+        stream = await resolve_stream_with_cache(
+            db,
+            video_id,
+            user_id=current_user.id,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except httpx.HTTPError as exc:

@@ -423,6 +423,7 @@ class CatalogCacheStats(BaseModel):
     total_size_bytes: int
     artist_count: int
     album_count: int
+    track_resolve_count: int
     api_response_count: int
     oldest_cached_at: datetime | None
     newest_cached_at: datetime | None
