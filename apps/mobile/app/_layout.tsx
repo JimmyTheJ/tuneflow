@@ -1,16 +1,20 @@
 import "../global.css";
-import { Stack, router, useSegments } from "expo-router";
-import { useEffect, useState } from "react";
+import { Stack, router, useSegments, type Href } from "expo-router";
+import { useEffect } from "react";
 import { ActivityIndicator, View } from "react-native";
 
-import { api } from "@/lib/api";
 import { useAuthStore } from "@/stores/auth";
+import { useBootstrapStore } from "@/stores/bootstrap";
+
+const SERVER_ROUTE = "/(auth)/server" as Href;
 
 export default function RootLayout() {
   const hydrate = useAuthStore((state) => state.hydrate);
   const user = useAuthStore((state) => state.user);
   const isReady = useAuthStore((state) => state.isReady);
-  const [needsSetup, setNeedsSetup] = useState<boolean | null>(null);
+  const serverCheck = useBootstrapStore((state) => state.serverCheck);
+  const needsSetup = useBootstrapStore((state) => state.needsSetup);
+  const runServerCheck = useBootstrapStore((state) => state.runServerCheck);
   const segments = useSegments();
 
   useEffect(() => {
@@ -18,22 +22,27 @@ export default function RootLayout() {
   }, [hydrate]);
 
   useEffect(() => {
-    void (async () => {
-      try {
-        const status = await api.setupStatus();
-        setNeedsSetup(status.needs_setup);
-      } catch {
-        setNeedsSetup(false);
-      }
-    })();
-  }, []);
+    void runServerCheck();
+  }, [runServerCheck]);
 
   useEffect(() => {
-    if (!isReady || needsSetup === null) {
+    if (!isReady || serverCheck === "pending") {
       return;
     }
 
     const inAuth = segments[0] === "(auth)";
+    const onServer = segments[1] === ("server" as typeof segments[1]);
+
+    if (serverCheck === "needs-config") {
+      if (!onServer) {
+        router.replace(SERVER_ROUTE);
+      }
+      return;
+    }
+
+    if (needsSetup === null) {
+      return;
+    }
 
     if (needsSetup && !inAuth) {
       router.replace("/(auth)/setup");
@@ -45,12 +54,12 @@ export default function RootLayout() {
       return;
     }
 
-    if (user && inAuth) {
+    if (user && inAuth && !onServer) {
       router.replace("/(tabs)");
     }
-  }, [isReady, needsSetup, user, segments]);
+  }, [isReady, serverCheck, needsSetup, user, segments]);
 
-  if (!isReady || needsSetup === null) {
+  if (!isReady || serverCheck === "pending") {
     return (
       <View className="flex-1 items-center justify-center bg-base">
         <ActivityIndicator color="#1db954" size="large" />

@@ -15,8 +15,9 @@ import {
   formatRoleProfiles,
   isChildProfile,
 } from "@/lib/permissions";
-import { getApiUrl, setApiUrl } from "@/lib/settings";
+import { getApiUrl, normalizeApiUrl, setApiUrl } from "@/lib/settings";
 import { useAuthStore } from "@/stores/auth";
+import { refreshPlayerMediaConfig } from "@/stores/player";
 import type { ParentalSettings, ScrobblerConnectionStatus, ScrobblerProviderInfo } from "@/types";
 
 function SettingsLink({
@@ -158,7 +159,14 @@ export default function SettingsScreen() {
   };
 
   const saveServer = async () => {
-    await setApiUrl(apiUrl);
+    const normalized = normalizeApiUrl(apiUrl);
+    if (!normalized) {
+      setError("Enter a valid server address");
+      return;
+    }
+    await setApiUrl(normalized);
+    await refreshPlayerMediaConfig();
+    setApiUrlState(normalized);
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   };

@@ -76,6 +76,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 }
 
 export const api = {
+  testConnection: () => executeRequest<SetupStatus>("/api/auth/setup-status", { auth: false }),
   setupStatus: () => request<SetupStatus>("/api/auth/setup-status", { auth: false }),
   setup: (username: string, password: string, displayName: string) =>
     request<TokenResponse>("/api/auth/setup", {

@@ -5,12 +5,26 @@ const ACCESS_TOKEN_KEY = "tuneflow.accessToken";
 
 const DEFAULT_API_URL = "http://localhost:8000";
 
+export function normalizeApiUrl(raw: string): string {
+  let url = raw.trim().replace(/\/$/, "");
+  if (!url) return "";
+  if (!/^https?:\/\//i.test(url)) {
+    url = `http://${url}`;
+  }
+  return url;
+}
+
+export async function hasConfiguredServer(): Promise<boolean> {
+  const stored = await AsyncStorage.getItem(API_URL_KEY);
+  return stored !== null && stored.length > 0;
+}
+
 export async function getApiUrl(): Promise<string> {
   return (await AsyncStorage.getItem(API_URL_KEY)) ?? DEFAULT_API_URL;
 }
 
 export async function setApiUrl(url: string): Promise<void> {
-  await AsyncStorage.setItem(API_URL_KEY, url.replace(/\/$/, ""));
+  await AsyncStorage.setItem(API_URL_KEY, normalizeApiUrl(url));
 }
 
 export async function getAccessToken(): Promise<string> {

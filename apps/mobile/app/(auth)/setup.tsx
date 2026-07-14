@@ -1,6 +1,7 @@
 import { LinearGradient } from "expo-linear-gradient";
+import { router, type Href } from "expo-router";
 import { useState } from "react";
-import { Text, TextInput, View } from "react-native";
+import { Pressable, Text, TextInput, View } from "react-native";
 
 import { Button } from "@/components/ui/Button";
 import { useAuthStore } from "@/stores/auth";
@@ -68,6 +69,9 @@ export default function SetupScreen() {
         <Button block loading={loading} onPress={() => void submit()} className="mt-2">
           Create account
         </Button>
+        <Pressable onPress={() => router.push("/(auth)/server" as Href)} className="mt-4 py-2">
+          <Text className="text-center text-sm text-text-secondary">Change server</Text>
+        </Pressable>
       </View>
     </View>
   );
