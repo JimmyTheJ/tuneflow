@@ -24,6 +24,16 @@ export function curveFromProfile(profile: { bands: EqBand[]; preamp_db: number }
   };
 }
 
+export function formatGainDb(gainDb: number): string {
+  if (gainDb === 0) return "0 dB";
+  const sign = gainDb > 0 ? "+" : "";
+  return `${sign}${gainDb.toFixed(1)} dB`;
+}
+
+export function gainDbToPercent(gainDb: number): number {
+  return ((gainDb + 12) / 24) * 100;
+}
+
 export function formatBandLabel(freq: number): string {
   if (freq >= 1000) {
     const value = freq / 1000;

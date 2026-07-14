@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { EqBandSlider } from "@/components/EqBandSlider";
 import { EqProfilePickerModal } from "@/components/EqProfilePickerModal";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
@@ -7,6 +8,7 @@ import {
   cloneBands,
   createFlatBands,
   formatBandLabel,
+  formatGainDb,
 } from "@/lib/eqBands";
 import { applyEqPreview, getResolvedEqForCurrentTrack } from "@/lib/eqSync";
 import { useEqStore } from "@/stores/eqStore";
@@ -16,6 +18,10 @@ import type { EqBand } from "@/types";
 type Props = {
   className?: string;
 };
+
+type DragHint =
+  | { kind: "band"; freq: number; gainDb: number }
+  | { kind: "preamp"; gainDb: number };
 
 export function EqualizerPanel({ className }: Props) {
   const current = usePlayerStore((s) => s.current);
@@ -47,6 +53,7 @@ export function EqualizerPanel({ className }: Props) {
   const [trackPickerOpen, setTrackPickerOpen] = useState(false);
   const [playlistPickerOpen, setPlaylistPickerOpen] = useState(false);
   const [queuePickerOpen, setQueuePickerOpen] = useState(false);
+  const [dragHint, setDragHint] = useState<DragHint | null>(null);
 
   const resolved = useMemo(() => getResolvedEqForCurrentTrack(), [
     current?.video_id,
@@ -145,6 +152,23 @@ export function EqualizerPanel({ className }: Props) {
     void applyEqPreview(nextBands, nextPreampDb);
   };
 
+  const handleResetBands = () => {
+    const flat = createFlatBands();
+    setBands(flat);
+    setPreampDb(0);
+    handleApplyLive(flat, 0);
+    showStatus("All bands reset to 0 dB");
+  };
+
+  const updateBand = (index: number, gainDb: number) => {
+    const nextBands = bands.map((item, itemIndex) =>
+      itemIndex === index ? { ...item, gainDb } : item,
+    );
+    setBands(nextBands);
+    setDragHint({ kind: "band", freq: nextBands[index]!.freq, gainDb });
+    handleApplyLive(nextBands, preampDb);
+  };
+
   const handleDelete = async () => {
     if (!selectedProfile || busy || profiles.length <= 1) return;
     setBusy(true);
@@ -167,7 +191,20 @@ export function EqualizerPanel({ className }: Props) {
 
   return (
     <section id="equalizer" className={className}>
-      <div className="rounded-2xl border border-border/80 bg-elevated/80 p-5 shadow-card backdrop-blur-sm">
+      <div className="relative rounded-2xl border border-border/80 bg-elevated/80 p-5 shadow-card backdrop-blur-sm">
+        {dragHint ? (
+          <div
+            className="pointer-events-none absolute inset-x-0 top-3 z-20 flex justify-center"
+            role="status"
+            aria-live="polite"
+          >
+            <span className="rounded-full bg-base/95 px-3 py-1 text-sm font-semibold text-text shadow-elevated ring-1 ring-border">
+              {dragHint.kind === "preamp"
+                ? `Preamp ${formatGainDb(dragHint.gainDb)}`
+                : `${formatBandLabel(dragHint.freq)} ${formatGainDb(dragHint.gainDb)}`}
+            </span>
+          </div>
+        ) : null}
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h2 className="m-0 text-lg font-bold">Equalizer</h2>
@@ -209,43 +246,42 @@ export function EqualizerPanel({ className }: Props) {
           </label>
         </div>
 
-        <div className="mt-5 flex items-end justify-between gap-3 overflow-x-auto pb-1">
+        <div className="mt-5 flex items-center justify-between gap-3">
+          <p className="m-0 text-xs text-text-muted">Drag up to boost, down to cut</p>
+          <Button size="sm" variant="ghost" disabled={busy} onClick={handleResetBands}>
+            Reset to 0
+          </Button>
+        </div>
+
+        <div className="mt-3 flex items-end justify-between gap-3 overflow-x-auto pb-1">
           {bands.map((band, index) => (
-            <label key={band.freq} className="flex min-w-[42px] flex-col items-center gap-2 text-xs text-text-muted">
-              <input
-                type="range"
-                min={-12}
-                max={12}
-                step={0.5}
-                value={band.gainDb}
-                className="h-28 w-8 [appearance:slider-vertical] [writing-mode:vertical-lr]"
-                style={{ writingMode: "vertical-lr" }}
-                onChange={(event) => {
-                  const gainDb = Number(event.target.value);
-                  const nextBands = bands.map((item, itemIndex) =>
-                    itemIndex === index ? { ...item, gainDb } : item,
-                  );
-                  setBands(nextBands);
-                  handleApplyLive(nextBands, preampDb);
-                }}
-              />
-              <span>{formatBandLabel(band.freq)}</span>
-            </label>
+            <EqBandSlider
+              key={band.freq}
+              band={band}
+              onChange={(gainDb) => updateBand(index, gainDb)}
+              onDragStart={() => setDragHint({ kind: "band", freq: band.freq, gainDb: band.gainDb })}
+              onDragEnd={() => setDragHint(null)}
+            />
           ))}
         </div>
 
         <label className="mt-4 block text-sm text-text-secondary">
-          Preamp ({preampDb.toFixed(1)} dB)
+          Preamp ({formatGainDb(preampDb)})
           <input
             type="range"
             min={-12}
             max={12}
             step={0.5}
             value={preampDb}
-            className="mt-2 w-full"
+            className="tf-slider mt-2 w-full"
+            onPointerDown={() => setDragHint({ kind: "preamp", gainDb: preampDb })}
+            onPointerUp={() => setDragHint(null)}
+            onPointerCancel={() => setDragHint(null)}
+            onBlur={() => setDragHint(null)}
             onChange={(event) => {
               const nextPreamp = Number(event.target.value);
               setPreampDb(nextPreamp);
+              setDragHint({ kind: "preamp", gainDb: nextPreamp });
               handleApplyLive(bands, nextPreamp);
             }}
           />
