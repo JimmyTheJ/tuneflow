@@ -1,6 +1,7 @@
 import { Heart, Plus, Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { MediaCard } from "@/components/MediaCard";
+import { CreatePlaylistDialog } from "@/components/CreatePlaylistDialog";
 import { TrackRowWithActions } from "@/components/TrackRowWithActions";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
@@ -8,7 +9,7 @@ import { SectionHeader } from "@/components/ui/SectionHeader";
 import { MediaCardSkeleton, TrackRowSkeleton } from "@/components/ui/Skeleton";
 import { useLikedTracks } from "@/hooks/useLikedTracks";
 import { api } from "@/lib/api";
-import { filterPlaylists } from "@/lib/playlistUtils";
+import { filterPlaylists, suggestedPlaylistName } from "@/lib/playlistUtils";
 import { usePlayerStore } from "@/stores/playerStore";
 import type { LikeEntry, Playlist } from "@/types";
 
@@ -18,6 +19,9 @@ export function LibraryPage() {
   const [playlistQuery, setPlaylistQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createBusy, setCreateBusy] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
   const playTrack = usePlayerStore((s) => s.playTrack);
   const { likedVideoIds, refresh: refreshLikedTracks } = useLikedTracks();
 
@@ -44,12 +48,17 @@ export function LibraryPage() {
     [playlists, playlistQuery],
   );
 
-  const createPlaylist = async () => {
+  const createPlaylist = async (name: string) => {
+    setCreateBusy(true);
+    setCreateError(null);
     try {
-      await api.createPlaylist(`Playlist ${playlists.length + 1}`);
+      await api.createPlaylist(name);
+      setCreateOpen(false);
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not create playlist");
+      setCreateError(err instanceof Error ? err.message : "Could not create playlist");
+    } finally {
+      setCreateBusy(false);
     }
   };
 
@@ -57,7 +66,14 @@ export function LibraryPage() {
     <div className="space-y-8">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="m-0 text-3xl font-bold tracking-tight md:text-4xl">Your library</h1>
-        <Button variant="secondary" size="sm" onClick={() => void createPlaylist()}>
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() => {
+            setCreateError(null);
+            setCreateOpen(true);
+          }}
+        >
           <Plus className="size-4" />
           New playlist
         </Button>
@@ -146,6 +162,19 @@ export function LibraryPage() {
           ))}
         </div>
       ) : null}
+
+      <CreatePlaylistDialog
+        visible={createOpen}
+        defaultName={suggestedPlaylistName(playlists.length)}
+        busy={createBusy}
+        error={createError}
+        onConfirm={createPlaylist}
+        onCancel={() => {
+          if (createBusy) return;
+          setCreateOpen(false);
+          setCreateError(null);
+        }}
+      />
     </div>
   );
 }

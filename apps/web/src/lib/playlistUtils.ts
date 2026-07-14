@@ -7,6 +7,10 @@ export function filterPlaylists(playlists: Playlist[], query: string): Playlist[
   return playlists.filter((playlist) => playlist.name.toLowerCase().includes(normalized));
 }
 
+export function suggestedPlaylistName(existingCount: number): string {
+  return `Playlist ${existingCount + 1}`;
+}
+
 export type BulkAddResult = {
   added: number;
   skipped: number;
