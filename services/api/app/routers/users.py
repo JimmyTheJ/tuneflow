@@ -68,12 +68,19 @@ async def list_users(
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Household membership required")
         query = query.where(User.household_id == current_user.household_id)
 
-    result = await db.execute(
-        query.options(
-            selectinload(User.role_assignments).selectinload(UserRoleAssignment.role_profile),
-            selectinload(User.household),
-        ).order_by(User.created_at.asc())
+    query = query.options(
+        selectinload(User.role_assignments).selectinload(UserRoleAssignment.role_profile),
+        selectinload(User.household),
     )
+    if current_user.is_root_admin:
+        query = query.outerjoin(Household, User.household_id == Household.id).order_by(
+            func.coalesce(Household.name, "").asc(),
+            User.created_at.asc(),
+        )
+    else:
+        query = query.order_by(User.created_at.asc())
+
+    result = await db.execute(query)
     return [await build_user_read(db, user) for user in result.scalars().all()]
 
 

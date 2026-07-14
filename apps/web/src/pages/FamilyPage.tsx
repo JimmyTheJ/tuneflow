@@ -26,6 +26,32 @@ function assignableProfiles(profiles: RoleProfile[]) {
   return profiles.filter((profile) => profile.slug !== "household_admin");
 }
 
+type HouseholdMemberGroup = {
+  key: string;
+  householdName: string;
+  householdSlug: string | null;
+  members: User[];
+};
+
+function groupMembersByHousehold(members: User[]): HouseholdMemberGroup[] {
+  const groups = new Map<string, HouseholdMemberGroup>();
+  for (const member of members) {
+    const key = member.household_id?.toString() ?? "none";
+    let group = groups.get(key);
+    if (!group) {
+      group = {
+        key,
+        householdName: member.household_name ?? "No household",
+        householdSlug: member.household_slug ?? null,
+        members: [],
+      };
+      groups.set(key, group);
+    }
+    group.members.push(member);
+  }
+  return Array.from(groups.values()).sort((a, b) => a.householdName.localeCompare(b.householdName));
+}
+
 export function FamilyPage() {
   const user = useAuthStore((s) => s.user);
   const hydrate = useAuthStore((s) => s.hydrate);
@@ -176,11 +202,50 @@ export function FamilyPage() {
     }
   };
 
+  const memberGroups = user.is_root_admin ? groupMembersByHousehold(members) : null;
+
+  const renderMemberRow = (m: User) => (
+    <div key={m.id} className={m.is_active ? "member-row" : "member-row member-row-disabled"}>
+      <div>
+        <div className="track-title">
+          {m.display_name}
+          {!m.is_active ? <span className="status-badge status-disabled">Disabled</span> : null}
+        </div>
+        <div className="track-subtitle">
+          @{m.username} · {formatRoleProfiles(m.role_profiles)}
+        </div>
+      </div>
+      <div className="member-actions">
+        {canEditUser(user, m) ? (
+          <button type="button" className="btn-secondary" onClick={() => openEdit(m)}>
+            Edit
+          </button>
+        ) : null}
+        {canToggleActive(user, m) ? (
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={() => setToggleTarget({ user: m, enable: !m.is_active })}
+          >
+            {m.is_active ? "Disable" : "Enable"}
+          </button>
+        ) : null}
+        {canSoftDelete(user, m) ? (
+          <button type="button" className="btn-danger" onClick={() => setDeleteTarget(m)}>
+            Delete
+          </button>
+        ) : null}
+      </div>
+    </div>
+  );
+
   return (
     <div className="page">
       <h1>Household members</h1>
       <p className="muted">
-        Manage accounts in {user.household_name ?? "your household"}. Assign one or more role profiles to each member.
+        {user.is_root_admin
+          ? "Manage household members across all households. Members are grouped by household."
+          : `Manage accounts in ${user.household_name ?? "your household"}. Assign one or more role profiles to each member.`}
       </p>
       {user.is_root_admin ? (
         <Link to="/admin/users/deleted" className="accent">
@@ -215,40 +280,19 @@ export function FamilyPage() {
       </form>
 
       <h2 className="section-label">Members</h2>
-      {members.map((m) => (
-        <div key={m.id} className={m.is_active ? "member-row" : "member-row member-row-disabled"}>
-          <div>
-            <div className="track-title">
-              {m.display_name}
-              {!m.is_active ? <span className="status-badge status-disabled">Disabled</span> : null}
-            </div>
-            <div className="track-subtitle">
-              @{m.username} · {formatRoleProfiles(m.role_profiles)}
-            </div>
-          </div>
-          <div className="member-actions">
-            {canEditUser(user, m) ? (
-              <button type="button" className="btn-secondary" onClick={() => openEdit(m)}>
-                Edit
-              </button>
+      {memberGroups ? (
+        memberGroups.map((group) => (
+          <section key={group.key} className="household-group">
+            <h3 className="household-group-title">{group.householdName}</h3>
+            {group.householdSlug ? (
+              <p className="muted household-group-subtitle">/h/{group.householdSlug}/login</p>
             ) : null}
-            {canToggleActive(user, m) ? (
-              <button
-                type="button"
-                className="btn-secondary"
-                onClick={() => setToggleTarget({ user: m, enable: !m.is_active })}
-              >
-                {m.is_active ? "Disable" : "Enable"}
-              </button>
-            ) : null}
-            {canSoftDelete(user, m) ? (
-              <button type="button" className="btn-danger" onClick={() => setDeleteTarget(m)}>
-                Delete
-              </button>
-            ) : null}
-          </div>
-        </div>
-      ))}
+            {group.members.map(renderMemberRow)}
+          </section>
+        ))
+      ) : (
+        members.map(renderMemberRow)
+      )}
 
       {canManageParentalControls(user) ? (
         <Link to="/parental" className="accent">

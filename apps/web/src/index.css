@@ -390,6 +390,25 @@
     margin: 1.5rem 0 0.5rem;
   }
 
+  .household-group {
+    margin-top: 1.5rem;
+  }
+
+  .household-group:first-of-type {
+    margin-top: 0.5rem;
+  }
+
+  .household-group-title {
+    font-size: 1rem;
+    font-weight: 600;
+    margin: 0;
+  }
+
+  .household-group-subtitle {
+    font-size: 0.85rem;
+    margin: 0.2rem 0 0.5rem;
+  }
+
   .chip-row {
     display: flex;
     flex-wrap: wrap;
