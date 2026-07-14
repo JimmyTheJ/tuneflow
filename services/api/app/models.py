@@ -194,6 +194,7 @@ class SystemSettings(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
     cache_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     cache_retention_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cache_refresh_days: Mapped[int] = mapped_column(Integer, nullable=False, default=180)
     cache_max_size_mb: Mapped[int | None] = mapped_column(Integer, nullable=True)
     cache_cleanup_interval_hours: Mapped[int] = mapped_column(Integer, nullable=False, default=24)
     updated_at: Mapped[datetime] = mapped_column(
@@ -211,14 +212,28 @@ class AudioCacheEntry(Base):
     mime_type: Mapped[str] = mapped_column(String(80), nullable=False, default="application/octet-stream")
     cached_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     last_accessed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+    last_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     cached_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     title: Mapped[str | None] = mapped_column(String(500), nullable=True)
     artist: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    thumbnail_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    duration_sec: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    has_video: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    video_mime_type: Mapped[str | None] = mapped_column(String(80), nullable=True)
 
     cached_by_user: Mapped[User | None] = relationship()
     access_records: Mapped[list["AudioCacheAccess"]] = relationship(
         back_populates="cache_entry", cascade="all, delete-orphan"
     )
+
+
+class CatalogCacheEntry(Base):
+    __tablename__ = "catalog_cache_entries"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    cache_key: Mapped[str] = mapped_column(String(500), unique=True, nullable=False, index=True)
+    payload_json: Mapped[str] = mapped_column(Text, nullable=False)
+    cached_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
 
 
 class AudioCacheAccess(Base):
