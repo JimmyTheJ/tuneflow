@@ -7,10 +7,10 @@ import {
   useRef,
   useState,
 } from "react";
+import { PlaylistPickerModal } from "@/components/PlaylistPickerModal";
 import { IconButton } from "@/components/ui/IconButton";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/cn";
-import { ApiError } from "@/lib/retry";
 import { canPickDownloadDirectory, downloadTrack } from "@/lib/playlistDownload";
 import { usePlayerStore } from "@/stores/playerStore";
 import type { Playlist, Track } from "@/types";
@@ -61,6 +61,7 @@ export const TrackActionsMenu = forwardRef<TrackActionsMenuHandle, Props>(functi
   const buttonRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [position, setPosition] = useState<MenuPosition | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -152,40 +153,9 @@ export const TrackActionsMenu = forwardRef<TrackActionsMenuHandle, Props>(functi
     }
   };
 
-  const handleAddToPlaylist = async (playlistId: number, playlistName: string) => {
-    if (busy) return;
-    setBusy(true);
-    try {
-      await api.addPlaylistTrack(playlistId, track);
-      showStatus(`Added to ${playlistName}`);
-      onPlaylistsChange();
-      close();
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 409) {
-        showStatus(`Already in ${playlistName}`);
-        close();
-        return;
-      }
-      showStatus(err instanceof Error ? err.message : "Could not add to playlist");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const handleCreatePlaylist = async () => {
-    if (busy) return;
-    setBusy(true);
-    try {
-      const playlist = await api.createPlaylist(`Playlist ${playlists.length + 1}`);
-      await api.addPlaylistTrack(playlist.id, track);
-      showStatus(`Added to ${playlist.name}`);
-      onPlaylistsChange();
-      close();
-    } catch (err) {
-      showStatus(err instanceof Error ? err.message : "Could not create playlist");
-    } finally {
-      setBusy(false);
-    }
+  const handleAddToPlaylist = () => {
+    close();
+    setPickerOpen(true);
   };
 
   const handleDownload = async () => {
@@ -255,33 +225,14 @@ export const TrackActionsMenu = forwardRef<TrackActionsMenuHandle, Props>(functi
             Download
           </button>
           <div className="my-1.5 border-t border-border" role="separator" />
-          <div className="px-3 pb-1 pt-1.5 text-[0.7rem] font-semibold uppercase tracking-wide text-text-muted">
-            Add to playlist
-          </div>
-          {playlists.length === 0 ? (
-            <div className="px-3 py-2 text-sm text-text-muted">No playlists yet</div>
-          ) : (
-            playlists.map((playlist) => (
-              <button
-                key={playlist.id}
-                type="button"
-                className={cn(itemClass, "pl-5 text-text-secondary")}
-                role="menuitem"
-                disabled={busy}
-                onClick={() => void handleAddToPlaylist(playlist.id, playlist.name)}
-              >
-                {playlist.name}
-              </button>
-            ))
-          )}
           <button
             type="button"
-            className={cn(itemClass, "pl-5 text-text-secondary")}
+            className={itemClass}
             role="menuitem"
             disabled={busy}
-            onClick={() => void handleCreatePlaylist()}
+            onClick={handleAddToPlaylist}
           >
-            New playlist…
+            Add to playlist…
           </button>
           {status ? (
             <div
@@ -294,6 +245,15 @@ export const TrackActionsMenu = forwardRef<TrackActionsMenuHandle, Props>(functi
           ) : null}
         </div>
       ) : null}
+      <PlaylistPickerModal
+        visible={pickerOpen}
+        title="Add to playlist"
+        tracks={[track]}
+        playlists={playlists}
+        onClose={() => setPickerOpen(false)}
+        onComplete={showStatus}
+        onPlaylistsChange={onPlaylistsChange}
+      />
     </>
   );
 });

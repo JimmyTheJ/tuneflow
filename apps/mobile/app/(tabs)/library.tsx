@@ -1,21 +1,23 @@
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   FlatList,
   RefreshControl,
   Text,
+  TextInput,
   View,
   useWindowDimensions,
 } from "react-native";
 
-import { TrackRow } from "@/components/TrackRow";
+import { TrackRowWithActions } from "@/components/TrackRowWithActions";
 import { Button } from "@/components/ui/Button";
 import { MediaCard } from "@/components/ui/MediaCard";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import { MediaCardSkeleton, TrackRowSkeleton } from "@/components/ui/Skeleton";
 import { api } from "@/lib/api";
+import { filterPlaylists } from "@/lib/playlistUtils";
 import { usePlayerStore } from "@/stores/player";
 import type { LikeEntry, Playlist } from "@/types";
 
@@ -24,6 +26,7 @@ export default function LibraryScreen() {
   const cardWidth = (width - 32 - 12) / 2;
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [likes, setLikes] = useState<LikeEntry[]>([]);
+  const [playlistQuery, setPlaylistQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const playTrack = usePlayerStore((state) => state.playTrack);
@@ -45,6 +48,11 @@ export default function LibraryScreen() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const filteredPlaylists = useMemo(
+    () => filterPlaylists(playlists, playlistQuery),
+    [playlists, playlistQuery],
+  );
 
   const createPlaylist = async () => {
     try {
@@ -90,6 +98,23 @@ export default function LibraryScreen() {
           ListHeaderComponent={
             <View className="mb-4">
               <SectionHeader title="Playlists" />
+              {playlists.length > 0 ? (
+                <View className="relative mb-4">
+                  <Ionicons
+                    name="search"
+                    size={18}
+                    color="#6a6a6a"
+                    style={{ position: "absolute", left: 14, top: 14, zIndex: 1 }}
+                  />
+                  <TextInput
+                    value={playlistQuery}
+                    onChangeText={setPlaylistQuery}
+                    placeholder="Search playlists"
+                    placeholderTextColor="#6a6a6a"
+                    className="rounded-xl border border-border bg-elevated py-3 pl-11 pr-4 text-base text-text"
+                  />
+                </View>
+              ) : null}
               <View className="flex-row flex-wrap gap-3">
                 <View style={{ width: cardWidth }}>
                   <MediaCard
@@ -107,7 +132,7 @@ export default function LibraryScreen() {
                     }
                   />
                 </View>
-                {playlists.map((playlist) => (
+                {filteredPlaylists.map((playlist) => (
                   <View key={playlist.id} style={{ width: cardWidth }}>
                     <MediaCard
                       title={playlist.name}
@@ -117,6 +142,9 @@ export default function LibraryScreen() {
                   </View>
                 ))}
               </View>
+              {playlists.length > 0 && filteredPlaylists.length === 0 ? (
+                <Text className="mt-3 text-sm text-text-muted">No playlists match your search.</Text>
+              ) : null}
               <View className="mt-6">
                 <SectionHeader title="Liked songs" subtitle={`${likes.length} songs`} />
               </View>
@@ -125,11 +153,13 @@ export default function LibraryScreen() {
               ) : null}
             </View>
           }
-          renderItem={({ item, index }) => (
-            <TrackRow
+          renderItem={({ item }) => (
+            <TrackRowWithActions
               track={item}
-              index={index + 1}
-              onPress={() => void playTrack(item, likes)}
+              playQueue={likes}
+              playlists={playlists}
+              onPlay={() => void playTrack(item, likes)}
+              onPlaylistsChange={() => void load()}
             />
           )}
         />

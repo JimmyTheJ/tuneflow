@@ -1,10 +1,13 @@
 import { GripVertical, ListStart, X } from "lucide-react";
-import { useState, type DragEvent } from "react";
+import { useCallback, useState, type DragEvent } from "react";
+import { PlaylistPickerModal } from "@/components/PlaylistPickerModal";
 import { TrackRow } from "@/components/TrackRow";
 import { Button } from "@/components/ui/Button";
 import { IconButton } from "@/components/ui/IconButton";
+import { api } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { getQueueView, usePlayerStore } from "@/stores/playerStore";
+import type { Playlist } from "@/types";
 
 type Props = {
   onClose?: () => void;
@@ -26,8 +29,34 @@ export function PlayerQueuePanel({ onClose, className }: Props) {
 
   const [draggedQueueIndex, setDraggedQueueIndex] = useState<number | null>(null);
   const [dropTargetQueueIndex, setDropTargetQueueIndex] = useState<number | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [playlists, setPlaylists] = useState<Playlist[]>([]);
+  const [status, setStatus] = useState<string | null>(null);
+
+  const showStatus = useCallback((message: string) => {
+    setStatus(message);
+    window.setTimeout(() => setStatus(null), 2200);
+  }, []);
+
+  const openSaveToPlaylist = async () => {
+    try {
+      setPlaylists(await api.listPlaylists());
+      setPickerOpen(true);
+    } catch (err) {
+      showStatus(err instanceof Error ? err.message : "Could not load playlists");
+    }
+  };
+
+  const reloadPlaylists = async () => {
+    try {
+      setPlaylists(await api.listPlaylists());
+    } catch {
+      /* ignore */
+    }
+  };
 
   const items = getQueueView({ current, queue, shuffle, shuffleOrder, shuffleStep });
+  const queueTracks = items.map((item) => item.track);
   const upcomingCount = items.filter((item) => item.status === "upcoming").length;
   const firstUpcomingItem = items.find((item) => item.status === "upcoming");
 
@@ -87,6 +116,11 @@ export function PlayerQueuePanel({ onClose, className }: Props) {
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          {queueTracks.length > 0 ? (
+            <Button variant="ghost" size="sm" onClick={() => void openSaveToPlaylist()}>
+              Save to playlist
+            </Button>
+          ) : null}
           {upcomingCount > 0 ? (
             <Button variant="ghost" size="sm" onClick={clearUpcoming} title="Remove all upcoming tracks">
               Clear upcoming
@@ -170,6 +204,20 @@ export function PlayerQueuePanel({ onClose, className }: Props) {
           );
         })}
       </div>
+      {status ? (
+        <p className="m-0 text-sm text-accent" role="status" aria-live="polite">
+          {status}
+        </p>
+      ) : null}
+      <PlaylistPickerModal
+        visible={pickerOpen}
+        title="Save queue to playlist"
+        tracks={queueTracks}
+        playlists={playlists}
+        onClose={() => setPickerOpen(false)}
+        onComplete={showStatus}
+        onPlaylistsChange={() => void reloadPlaylists()}
+      />
     </section>
   );
 }

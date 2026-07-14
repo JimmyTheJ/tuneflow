@@ -1,18 +1,21 @@
-import { Heart, Plus } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { Heart, Plus, Search } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { MediaCard } from "@/components/MediaCard";
 import { TrackRowWithActions } from "@/components/TrackRowWithActions";
 import { Button } from "@/components/ui/Button";
+import { Input } from "@/components/ui/Input";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import { MediaCardSkeleton, TrackRowSkeleton } from "@/components/ui/Skeleton";
 import { useLikedTracks } from "@/hooks/useLikedTracks";
 import { api } from "@/lib/api";
+import { filterPlaylists } from "@/lib/playlistUtils";
 import { usePlayerStore } from "@/stores/playerStore";
 import type { LikeEntry, Playlist } from "@/types";
 
 export function LibraryPage() {
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [likes, setLikes] = useState<LikeEntry[]>([]);
+  const [playlistQuery, setPlaylistQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const playTrack = usePlayerStore((s) => s.playTrack);
@@ -35,6 +38,11 @@ export function LibraryPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const filteredPlaylists = useMemo(
+    () => filterPlaylists(playlists, playlistQuery),
+    [playlists, playlistQuery],
+  );
 
   const createPlaylist = async () => {
     try {
@@ -67,6 +75,18 @@ export function LibraryPage() {
         <>
           <section>
             <SectionHeader title="Playlists" />
+            {playlists.length > 0 ? (
+              <div className="relative mb-4 max-w-md">
+                <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-text-muted" />
+                <Input
+                  value={playlistQuery}
+                  onChange={(event) => setPlaylistQuery(event.target.value)}
+                  placeholder="Search playlists"
+                  className="pl-10"
+                  aria-label="Search playlists"
+                />
+              </div>
+            ) : null}
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
               <MediaCard
                 title="Liked Songs"
@@ -81,7 +101,7 @@ export function LibraryPage() {
                   </div>
                 }
               />
-              {playlists.map((p) => (
+              {filteredPlaylists.map((p) => (
                 <MediaCard
                   key={p.id}
                   title={p.name}
@@ -90,6 +110,9 @@ export function LibraryPage() {
                 />
               ))}
             </div>
+            {playlists.length > 0 && filteredPlaylists.length === 0 ? (
+              <p className="mt-3 text-sm text-text-muted">No playlists match your search.</p>
+            ) : null}
           </section>
 
           <section>

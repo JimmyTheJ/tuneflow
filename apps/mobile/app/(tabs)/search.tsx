@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   FlatList,
   Pressable,
@@ -8,13 +8,13 @@ import {
   View,
 } from "react-native";
 
-import { TrackRow } from "@/components/TrackRow";
+import { TrackRowWithActions } from "@/components/TrackRowWithActions";
 import { Button } from "@/components/ui/Button";
 import { TrackRowSkeleton } from "@/components/ui/Skeleton";
 import { useSearchHistory } from "@/hooks/useSearchHistory";
 import { api } from "@/lib/api";
 import { usePlayerStore } from "@/stores/player";
-import type { Track } from "@/types";
+import type { Playlist, Track } from "@/types";
 
 function mergeTracks(existing: Track[], incoming: Track[]): Track[] {
   const seen = new Set(existing.map((track) => track.video_id));
@@ -30,6 +30,7 @@ function mergeTracks(existing: Track[], incoming: Track[]): Track[] {
 export default function SearchScreen() {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Track[]>([]);
+  const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [nextPage, setNextPage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -40,6 +41,18 @@ export default function SearchScreen() {
   const endReachedGuardRef = useRef(false);
   const playTrack = usePlayerStore((state) => state.playTrack);
   const { suggestions, recordQuery, removeQuery, clearHistory } = useSearchHistory(query);
+
+  const loadPlaylists = useCallback(async () => {
+    try {
+      setPlaylists(await api.listPlaylists());
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadPlaylists();
+  }, [loadPlaylists]);
 
   const runSearch = async (searchText?: string) => {
     const trimmed = (searchText ?? query).trim();
@@ -179,8 +192,10 @@ export default function SearchScreen() {
         data={results}
         keyExtractor={(item) => item.video_id}
         renderItem={({ item }) => (
-          <TrackRow
+          <TrackRowWithActions
             track={item}
+            playQueue={playable}
+            playlists={playlists}
             displayTitle={item.source_title ?? item.title}
             showBadges
             subtitle={
@@ -188,7 +203,9 @@ export default function SearchScreen() {
                 ? `Blocked: ${item.blocked_reason}`
                 : (item.artist ?? "Unknown artist")
             }
-            onPress={item.blocked_reason ? undefined : () => void playTrack(item, playable)}
+            disabled={Boolean(item.blocked_reason)}
+            onPlay={() => void playTrack(item, playable)}
+            onPlaylistsChange={() => void loadPlaylists()}
           />
         )}
         onEndReached={() => {

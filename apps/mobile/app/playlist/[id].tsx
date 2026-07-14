@@ -2,10 +2,12 @@ import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, Stack } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
-import { FlatList, Image, Text, View } from "react-native";
+import { FlatList, Image, Pressable, Text, View } from "react-native";
 
+import { EditablePlaylistTitle } from "@/components/EditablePlaylistTitle";
 import { TrackRow } from "@/components/TrackRow";
 import { Button } from "@/components/ui/Button";
+import { IconButton } from "@/components/ui/IconButton";
 import { Skeleton, TrackRowSkeleton } from "@/components/ui/Skeleton";
 import { api } from "@/lib/api";
 import { trackThumbnailUrl } from "@/lib/thumbnails";
@@ -35,6 +37,43 @@ export default function PlaylistScreen() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const handleRename = async (name: string) => {
+    if (!playlist) return;
+    const updated = await api.updatePlaylist(playlist.id, { name });
+    setPlaylist({ ...playlist, name: updated.name });
+  };
+
+  const handleRemoveTrack = async (trackId: number) => {
+    if (!playlist) return;
+    const previous = playlist.tracks;
+    const nextTracks = previous.filter((track) => track.id !== trackId);
+    setPlaylist({ ...playlist, tracks: nextTracks, track_count: nextTracks.length });
+    try {
+      await api.removePlaylistTrack(playlist.id, trackId);
+    } catch (err) {
+      setPlaylist({ ...playlist, tracks: previous, track_count: previous.length });
+      setError(err instanceof Error ? err.message : "Could not remove track");
+    }
+  };
+
+  const reorderTracks = async (fromIndex: number, toIndex: number) => {
+    if (!playlist || fromIndex === toIndex) return;
+    const previous = playlist.tracks;
+    const nextTracks = [...previous];
+    const [moved] = nextTracks.splice(fromIndex, 1);
+    nextTracks.splice(toIndex, 0, moved);
+    setPlaylist({ ...playlist, tracks: nextTracks });
+    try {
+      await api.reorderPlaylistTracks(
+        playlist.id,
+        nextTracks.map((track) => track.id),
+      );
+    } catch (err) {
+      setPlaylist({ ...playlist, tracks: previous });
+      setError(err instanceof Error ? err.message : "Could not reorder tracks");
+    }
+  };
 
   if (loading) {
     return (
@@ -97,9 +136,7 @@ export default function PlaylistScreen() {
                   <Text className="text-xs font-bold uppercase tracking-widest text-text-secondary">
                     Playlist
                   </Text>
-                  <Text className="mt-1 text-3xl font-extrabold tracking-tight text-text" numberOfLines={2}>
-                    {playlist.name}
-                  </Text>
+                  <EditablePlaylistTitle name={playlist.name} onSave={handleRename} />
                   <Text className="mt-1 text-sm text-text-secondary">
                     {playlist.tracks.length} {playlist.tracks.length === 1 ? "track" : "tracks"}
                   </Text>
@@ -119,18 +156,50 @@ export default function PlaylistScreen() {
                 </Button>
               </View>
             </LinearGradient>
+            {error ? <Text className="px-4 py-2 text-danger-fg">{error}</Text> : null}
             <View className="h-2" />
           </View>
         }
-        renderItem={({ item, index }) => (
-          <View className="px-3">
-            <TrackRow
-              track={item}
-              index={index + 1}
-              onPress={() => void playTrack(item, playlist.tracks)}
-            />
-          </View>
-        )}
+        renderItem={({ item, index }) => {
+          const canMoveUp = index > 0;
+          const canMoveDown = index < playlist.tracks.length - 1;
+
+          return (
+            <View className="flex-row items-center px-3">
+              <View className="min-w-0 flex-1">
+                <TrackRow
+                  track={item}
+                  index={index + 1}
+                  onPress={() => void playTrack(item, playlist.tracks)}
+                />
+              </View>
+              <View className="flex-row items-center">
+                <Pressable
+                  disabled={!canMoveUp}
+                  className={`p-1.5 ${canMoveUp ? "" : "opacity-25"}`}
+                  onPress={() => void reorderTracks(index, index - 1)}
+                  hitSlop={6}
+                >
+                  <Ionicons name="chevron-up" size={16} color="#b3b3b3" />
+                </Pressable>
+                <Pressable
+                  disabled={!canMoveDown}
+                  className={`p-1.5 ${canMoveDown ? "" : "opacity-25"}`}
+                  onPress={() => void reorderTracks(index, index + 1)}
+                  hitSlop={6}
+                >
+                  <Ionicons name="chevron-down" size={16} color="#b3b3b3" />
+                </Pressable>
+                <IconButton
+                  name="close"
+                  label={`Remove ${item.title}`}
+                  size="sm"
+                  onPress={() => void handleRemoveTrack(item.id)}
+                />
+              </View>
+            </View>
+          );
+        }}
       />
     </View>
   );

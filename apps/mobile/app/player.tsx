@@ -9,14 +9,18 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { LikeButton } from "@/components/ui/LikeButton";
 import { IconButton } from "@/components/ui/IconButton";
+import { PlaylistPickerModal } from "@/components/PlaylistPickerModal";
 import { formatDuration } from "@/lib/time";
 import { trackThumbnailUrl } from "@/lib/thumbnails";
+import { api } from "@/lib/api";
 import {
   canPlayNext,
   canPlayPrevious,
+  getQueueView,
   usePlayerStore,
   type RepeatMode,
 } from "@/stores/player";
+import type { Playlist } from "@/types";
 
 export default function PlayerScreen() {
   const insets = useSafeAreaInsets();
@@ -31,6 +35,8 @@ export default function PlayerScreen() {
   const durationSec = usePlayerStore((state) => state.durationSec);
   const volume = usePlayerStore((state) => state.volume);
   const shuffle = usePlayerStore((state) => state.shuffle);
+  const shuffleOrder = usePlayerStore((state) => state.shuffleOrder);
+  const shuffleStep = usePlayerStore((state) => state.shuffleStep);
   const repeatMode = usePlayerStore((state) => state.repeatMode);
   const queue = usePlayerStore((state) => state.queue);
   const canPrevious = usePlayerStore((state) => canPlayPrevious(state));
@@ -51,6 +57,9 @@ export default function PlayerScreen() {
   const [artFailed, setArtFailed] = useState(false);
   const [seeking, setSeeking] = useState(false);
   const [seekValue, setSeekValue] = useState(0);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [playlists, setPlaylists] = useState<Playlist[]>([]);
+  const [status, setStatus] = useState<string | null>(null);
 
   useEffect(() => {
     registerVideoControls({
@@ -104,6 +113,29 @@ export default function PlayerScreen() {
   const repeatIcon: keyof typeof Ionicons.glyphMap =
     repeatMode === "one" ? "repeat" : "repeat";
   const repeatActive = repeatMode !== "none";
+
+  const queueItems = getQueueView({
+    current,
+    queue,
+    shuffle,
+    shuffleOrder,
+    shuffleStep,
+  });
+  const queueTracks = queueItems.map((item) => item.track);
+
+  const showStatus = (message: string) => {
+    setStatus(message);
+    setTimeout(() => setStatus(null), 2200);
+  };
+
+  const openSaveToPlaylist = async () => {
+    try {
+      setPlaylists(await api.listPlaylists());
+      setPickerOpen(true);
+    } catch (err) {
+      showStatus(err instanceof Error ? err.message : "Could not load playlists");
+    }
+  };
 
   return (
     <View className="flex-1 bg-base" style={{ paddingTop: insets.top }}>
@@ -284,6 +316,14 @@ export default function PlayerScreen() {
             thumbTintColor="#fff"
             onValueChange={(value) => void setVolume(value)}
           />
+          {queueTracks.length > 0 ? (
+            <IconButton
+              name="bookmark-outline"
+              label="Save queue to playlist"
+              color="#fff"
+              onPress={() => void openSaveToPlaylist()}
+            />
+          ) : null}
           <IconButton
             name="list"
             label="Open queue"
@@ -291,7 +331,28 @@ export default function PlayerScreen() {
             onPress={() => router.push("/queue")}
           />
         </View>
+        {status ? (
+          <Text className="mt-2 text-center text-sm text-accent" role="status">
+            {status}
+          </Text>
+        ) : null}
       </View>
+
+      <PlaylistPickerModal
+        visible={pickerOpen}
+        title="Save queue to playlist"
+        tracks={queueTracks}
+        playlists={playlists}
+        onClose={() => setPickerOpen(false)}
+        onComplete={showStatus}
+        onPlaylistsChange={async () => {
+          try {
+            setPlaylists(await api.listPlaylists());
+          } catch {
+            /* ignore */
+          }
+        }}
+      />
     </View>
   );
 }

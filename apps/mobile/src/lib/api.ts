@@ -109,6 +109,15 @@ export const api = {
     request<Playlist>("/api/playlists", { method: "POST", body: { name, description } }),
   addTrackToPlaylist: (playlistId: number, track: Track) =>
     request(`/api/playlists/${playlistId}/tracks`, { method: "POST", body: track }),
+  updatePlaylist: (id: number, payload: { name?: string; description?: string }) =>
+    request<Playlist>(`/api/playlists/${id}`, { method: "PATCH", body: payload }),
+  removePlaylistTrack: (playlistId: number, trackId: number) =>
+    request<void>(`/api/playlists/${playlistId}/tracks/${trackId}`, { method: "DELETE" }),
+  reorderPlaylistTracks: (playlistId: number, trackIds: number[]) =>
+    request<PlaylistDetail["tracks"]>(`/api/playlists/${playlistId}/tracks/reorder`, {
+      method: "POST",
+      body: { track_ids: trackIds },
+    }),
   listHistory: () => request<PlayHistoryEntry[]>("/api/history"),
   recordPlay: (track: Track, listenedSec?: number) =>
     request<PlayHistoryEntry>("/api/history", {

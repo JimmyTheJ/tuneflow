@@ -1,10 +1,14 @@
 import { Ionicons } from "@expo/vector-icons";
+import { useCallback, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 
+import { PlaylistPickerModal } from "@/components/PlaylistPickerModal";
 import { TrackRow } from "@/components/TrackRow";
 import { Button } from "@/components/ui/Button";
 import { IconButton } from "@/components/ui/IconButton";
+import { api } from "@/lib/api";
 import { getQueueView, usePlayerStore } from "@/stores/player";
+import type { Playlist } from "@/types";
 
 export default function QueueScreen() {
   const current = usePlayerStore((s) => s.current);
@@ -19,7 +23,34 @@ export default function QueueScreen() {
   const reorderQueue = usePlayerStore((s) => s.reorderQueue);
   const moveQueueToTop = usePlayerStore((s) => s.moveQueueToTop);
 
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [playlists, setPlaylists] = useState<Playlist[]>([]);
+  const [status, setStatus] = useState<string | null>(null);
+
+  const showStatus = useCallback((message: string) => {
+    setStatus(message);
+    setTimeout(() => setStatus(null), 2200);
+  }, []);
+
+  const openSaveToPlaylist = async () => {
+    try {
+      setPlaylists(await api.listPlaylists());
+      setPickerOpen(true);
+    } catch (err) {
+      showStatus(err instanceof Error ? err.message : "Could not load playlists");
+    }
+  };
+
+  const reloadPlaylists = async () => {
+    try {
+      setPlaylists(await api.listPlaylists());
+    } catch {
+      /* ignore */
+    }
+  };
+
   const items = getQueueView({ current, queue, shuffle, shuffleOrder, shuffleStep });
+  const queueTracks = items.map((item) => item.track);
   const upcomingCount = items.filter((item) => item.status === "upcoming").length;
   const firstUpcomingItem = items.find((item) => item.status === "upcoming");
 
@@ -43,12 +74,25 @@ export default function QueueScreen() {
             {repeatMode === "all" ? " · Repeat all" : repeatMode === "one" ? " · Repeat one" : ""}
           </Text>
         </View>
-        {upcomingCount > 0 ? (
-          <Button variant="ghost" size="sm" onPress={clearUpcoming}>
-            Clear upcoming
-          </Button>
-        ) : null}
+        <View className="flex-row items-center gap-2">
+          {queueTracks.length > 0 ? (
+            <Button variant="ghost" size="sm" onPress={() => void openSaveToPlaylist()}>
+              Save to playlist
+            </Button>
+          ) : null}
+          {upcomingCount > 0 ? (
+            <Button variant="ghost" size="sm" onPress={clearUpcoming}>
+              Clear upcoming
+            </Button>
+          ) : null}
+        </View>
       </View>
+
+      {status ? (
+        <Text className="px-4 pt-2 text-sm text-accent" role="status">
+          {status}
+        </Text>
+      ) : null}
 
       <ScrollView className="mt-3 flex-1 px-3" contentContainerStyle={{ paddingBottom: 40 }}>
         {items.map((item, visualIndex) => {
@@ -126,6 +170,16 @@ export default function QueueScreen() {
           );
         })}
       </ScrollView>
+
+      <PlaylistPickerModal
+        visible={pickerOpen}
+        title="Save queue to playlist"
+        tracks={queueTracks}
+        playlists={playlists}
+        onClose={() => setPickerOpen(false)}
+        onComplete={showStatus}
+        onPlaylistsChange={() => void reloadPlaylists()}
+      />
     </View>
   );
 }
