@@ -1,4 +1,6 @@
 import { create } from "zustand";
+import { disconnectEq } from "@/lib/eqAudioGraph";
+import { getResolvedEqForCurrentTrack, syncEqPlayback } from "@/lib/eqSync";
 import { api } from "@/lib/api";
 import {
   clearPlayerSession,
@@ -15,7 +17,7 @@ import {
 } from "@/lib/playerRuntime";
 import { getAccessToken, getApiUrl } from "@/lib/settings";
 import { isRetryablePlaybackFailure, withRetry } from "@/lib/retry";
-import type { StreamInfo, StreamSelection, Track } from "@/types";
+import type { EqCurve, QueueSource, StreamInfo, StreamSelection, Track } from "@/types";
 
 export type RepeatMode = "none" | "one" | "all";
 
@@ -35,7 +37,15 @@ type PlayerState = {
   volume: number;
   media: HTMLMediaElement | null;
   error: string | null;
-  playTrack: (track: Track, queue?: Track[], options?: { fromNavigation?: boolean }) => Promise<void>;
+  queueSource: QueueSource | null;
+  queueEqProfileId: number | null;
+  eqBroadcastActive: boolean;
+  eqBroadcastSnapshot: EqCurve | null;
+  playTrack: (
+    track: Track,
+    queue?: Track[],
+    options?: { fromNavigation?: boolean; queueSource?: QueueSource | null },
+  ) => Promise<void>;
   togglePlayback: () => void;
   setStreamSelection: (selection: Partial<StreamSelection>) => Promise<void>;
   playPrevious: () => Promise<void>;
@@ -56,6 +66,9 @@ type PlayerState = {
   addToQueue: (track: Track) => void;
   queueInsertIndex: number | null;
   clearError: () => void;
+  setQueueSource: (source: QueueSource | null) => void;
+  setQueueEqProfile: (profileId: number | null) => void;
+  toggleEqBroadcast: () => void;
 };
 
 const DEFAULT_SELECTION: StreamSelection = { video: false, audio: true };
@@ -114,15 +127,16 @@ function applyVolume(
   volume: number,
   selection: StreamSelection,
 ): void {
-  const clamped = Math.max(0, Math.min(1, volume));
-  media.volume = clamped;
+  void syncEqPlayback(media);
   if (media instanceof HTMLVideoElement) {
+    const clamped = Math.max(0, Math.min(1, volume));
     media.muted = selection.video && !selection.audio ? true : clamped === 0;
   }
 }
 
 function disposeMedia(media: HTMLMediaElement | null): void {
   if (!media) return;
+  disconnectEq(media);
   const tagged = media as MediaWithListeners;
   tagged.__tuneflowListeners?.abort();
   tagged.__tuneflowListeners = undefined;
@@ -670,6 +684,7 @@ async function loadMediaAt(
   }
 
   setRuntimeMedia(media);
+  void syncEqPlayback(media);
   return media;
 }
 
@@ -690,15 +705,50 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   volume: getStoredVolume(),
   media: null,
   error: null,
+  queueSource: null,
+  queueEqProfileId: null,
+  eqBroadcastActive: false,
+  eqBroadcastSnapshot: null,
 
   clearError: () => set({ error: null }),
+
+  setQueueSource: (queueSource) => {
+    set({ queueSource });
+    void syncEqPlayback();
+  },
+
+  setQueueEqProfile: (queueEqProfileId) => {
+    set({ queueEqProfileId });
+    void syncEqPlayback();
+  },
+
+  toggleEqBroadcast: () => {
+    const state = get();
+    if (state.eqBroadcastActive) {
+      set({ eqBroadcastActive: false, eqBroadcastSnapshot: null });
+      void syncEqPlayback();
+      return;
+    }
+
+    const resolved = getResolvedEqForCurrentTrack();
+    if (!resolved) return;
+
+    set({
+      eqBroadcastActive: true,
+      eqBroadcastSnapshot: {
+        bands: resolved.bands.map((band) => ({ ...band })),
+        preampDb: resolved.preampDb,
+      },
+    });
+    void syncEqPlayback();
+  },
 
   setVolume: (volume) => {
     const clamped = Math.max(0, Math.min(1, volume));
     localStorage.setItem(VOLUME_KEY, String(clamped));
+    set({ volume: clamped });
     const { media, streamSelection } = get();
     if (media) applyVolume(media, clamped, streamSelection);
-    set({ volume: clamped });
   },
 
   toggleShuffle: () => {
@@ -760,6 +810,13 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
     let shuffleOrder = get().shuffleOrder;
     let shuffleStep = get().shuffleStep;
+    const nextQueueSource =
+      options?.queueSource !== undefined
+        ? options.queueSource
+        : options?.fromNavigation
+          ? get().queueSource
+          : null;
+
     if (get().shuffle && nextQueue.length > 1) {
       if (options?.fromNavigation && shuffleOrder.length === nextQueue.length) {
         shuffleStep = shuffleOrder.indexOf(activeIndex);
@@ -783,6 +840,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       queueInsertIndex: activeIndex + 1,
       shuffleOrder,
       shuffleStep,
+      queueSource: nextQueueSource,
       streamSelection: adopted?.selection ?? selection,
       error: null,
       positionSec: 0,
@@ -818,6 +876,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
           return;
         }
         setRuntimeMedia(pendingMedia);
+        void syncEqPlayback(pendingMedia);
       }
       if (!pendingMedia) return;
 
@@ -830,6 +889,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
         isLoading: false,
         ...syncProgress(pendingMedia, track),
       });
+      void syncEqPlayback(pendingMedia);
       persistSnapshot(get());
       pendingMedia = null;
       void api.recordPlay(track).catch(() => undefined);
@@ -882,6 +942,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
         isPlaying,
         ...syncProgress(pendingMedia, current),
       });
+      void syncEqPlayback(pendingMedia);
       persistSnapshot(get());
       schedulePrefetchNext(get);
     } catch (error) {
@@ -1002,6 +1063,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     };
     set(nextState);
     persistSnapshot({ ...get(), ...nextState } as PlayerState);
+    void syncEqPlayback(orphan);
     return true;
   },
 
@@ -1221,6 +1283,10 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       shuffleOrder: [],
       shuffleStep: 0,
       streamSelection: DEFAULT_SELECTION,
+      queueSource: null,
+      queueEqProfileId: null,
+      eqBroadcastActive: false,
+      eqBroadcastSnapshot: null,
     });
   },
 }));

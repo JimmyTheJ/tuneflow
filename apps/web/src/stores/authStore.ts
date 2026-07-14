@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { api } from "@/lib/api";
 import { clearAccessToken, setAccessToken } from "@/lib/settings";
+import { useEqStore } from "@/stores/eqStore";
 import { usePlayerStore } from "@/stores/playerStore";
 import type { User } from "@/types";
 
@@ -24,9 +25,12 @@ export const useAuthStore = create<AuthState>((set) => ({
       return;
     }
     try {
-      set({ user: await api.me(), isReady: true });
+      const user = await api.me();
+      set({ user, isReady: true });
+      void useEqStore.getState().load();
     } catch {
       clearAccessToken();
+      useEqStore.getState().reset();
       set({ user: null, isReady: true });
     }
   },
@@ -35,16 +39,19 @@ export const useAuthStore = create<AuthState>((set) => ({
     const res = await api.login(householdSlug, username, password);
     setAccessToken(res.access_token);
     set({ user: res.user });
+    void useEqStore.getState().load();
   },
 
   setup: async (username, password, displayName) => {
     const res = await api.setup(username, password, displayName);
     setAccessToken(res.access_token);
     set({ user: res.user });
+    void useEqStore.getState().load();
   },
 
   logout: () => {
     usePlayerStore.getState().stop();
+    useEqStore.getState().reset();
     clearAccessToken();
     set({ user: null });
   },

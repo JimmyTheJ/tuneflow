@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { EqualizerPanel } from "@/components/EqualizerPanel";
 import { LikeButton } from "@/components/LikeButton";
 import { PlayerProgress } from "@/components/PlayerProgress";
 import { PlayerQueuePanel } from "@/components/PlayerQueuePanel";
@@ -139,6 +140,7 @@ export function PlayerPage() {
         <div className="mt-10 flex w-full max-w-md flex-col items-center gap-5">
           <StreamModeToggle />
           <PlayerTransport size="large" showQueueControls />
+          <EqualizerPanel className="w-full max-w-xl text-left" />
           <PlayerProgress className="w-full" />
           <PlayerVolume className="w-full max-w-[280px]" />
           <Button variant="secondary" size="sm" onClick={() => stop()}>

@@ -1,4 +1,4 @@
-import { Repeat, Repeat1, Shuffle } from "lucide-react";
+import { AudioLines, Repeat, Repeat1, Shuffle } from "lucide-react";
 import { usePlayerStore } from "@/stores/playerStore";
 import type { RepeatMode } from "@/stores/playerStore";
 import { IconButton } from "@/components/ui/IconButton";
@@ -9,6 +9,7 @@ type Props = {
   compact?: boolean;
   showShuffle?: boolean;
   showRepeat?: boolean;
+  showEqBroadcast?: boolean;
 };
 
 const REPEAT_LABELS: Record<RepeatMode, string> = {
@@ -22,12 +23,15 @@ export function PlayerQueueControls({
   compact = false,
   showShuffle = true,
   showRepeat = true,
+  showEqBroadcast = true,
 }: Props) {
   const queue = usePlayerStore((s) => s.queue);
   const shuffle = usePlayerStore((s) => s.shuffle);
   const repeatMode = usePlayerStore((s) => s.repeatMode);
+  const eqBroadcastActive = usePlayerStore((s) => s.eqBroadcastActive);
   const toggleShuffle = usePlayerStore((s) => s.toggleShuffle);
   const cycleRepeatMode = usePlayerStore((s) => s.cycleRepeatMode);
+  const toggleEqBroadcast = usePlayerStore((s) => s.toggleEqBroadcast);
 
   const canShuffle = queue.length > 1;
   const repeatActive = repeatMode !== "none";
@@ -58,6 +62,21 @@ export function PlayerQueueControls({
           ) : (
             <Repeat className={iconClass} />
           )}
+        </IconButton>
+      ) : null}
+      {showEqBroadcast ? (
+        <IconButton
+          label={
+            eqBroadcastActive
+              ? "EQ broadcast on — current EQ applies to the rest of the queue"
+              : "EQ broadcast off — apply current EQ to the rest of the queue temporarily"
+          }
+          active={eqBroadcastActive}
+          size={compact ? "sm" : "md"}
+          disabled={queue.length <= 1}
+          onClick={() => toggleEqBroadcast()}
+        >
+          <AudioLines className={iconClass} />
         </IconButton>
       ) : null}
     </div>

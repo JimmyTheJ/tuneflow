@@ -306,3 +306,43 @@ export type CachePurgeResult = {
   deleted_entries: number;
   freed_bytes: number;
 };
+
+export type EqBand = {
+  freq: number;
+  gainDb: number;
+};
+
+export type EqProfile = {
+  id: number;
+  name: string;
+  bands: EqBand[];
+  preamp_db: number;
+  is_default: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type EqAssignment = {
+  eq_profile_id: number | null;
+  profile: EqProfile | null;
+};
+
+export type EqBulkTrackResult = {
+  updated: number;
+  cleared: number;
+};
+
+export type EqResolveResult = {
+  profile: EqProfile | null;
+  source: string;
+};
+
+export type QueueSource = {
+  type: "playlist";
+  id: number;
+};
+
+export type EqCurve = {
+  bands: EqBand[];
+  preampDb: number;
+};

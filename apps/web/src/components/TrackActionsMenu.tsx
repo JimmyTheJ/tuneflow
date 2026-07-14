@@ -8,10 +8,12 @@ import {
   useState,
 } from "react";
 import { PlaylistPickerModal } from "@/components/PlaylistPickerModal";
+import { EqProfilePickerModal } from "@/components/EqProfilePickerModal";
 import { IconButton } from "@/components/ui/IconButton";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { canPickDownloadDirectory, downloadTrack } from "@/lib/playlistDownload";
+import { useEqStore } from "@/stores/eqStore";
 import { usePlayerStore } from "@/stores/playerStore";
 import type { Playlist, Track } from "@/types";
 
@@ -58,15 +60,27 @@ export const TrackActionsMenu = forwardRef<TrackActionsMenuHandle, Props>(functi
 ) {
   const playTrack = usePlayerStore((s) => s.playTrack);
   const addToQueue = usePlayerStore((s) => s.addToQueue);
+  const profiles = useEqStore((s) => s.profiles);
+  const trackAssignments = useEqStore((s) => s.trackAssignments);
+  const loaded = useEqStore((s) => s.loaded);
+  const assignTrack = useEqStore((s) => s.assignTrack);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [eqPickerOpen, setEqPickerOpen] = useState(false);
   const [position, setPosition] = useState<MenuPosition | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const isLiked = likedVideoIds.has(track.video_id);
+  const hasTrackEq = trackAssignments[track.video_id] != null;
+
+  useEffect(() => {
+    if (!loaded) {
+      void useEqStore.getState().load();
+    }
+  }, [loaded]);
 
   const showStatus = useCallback((message: string) => {
     setStatus(message);
@@ -158,6 +172,25 @@ export const TrackActionsMenu = forwardRef<TrackActionsMenuHandle, Props>(functi
     setPickerOpen(true);
   };
 
+  const handleAssignEq = () => {
+    close();
+    setEqPickerOpen(true);
+  };
+
+  const handleClearTrackEq = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await assignTrack(track.video_id, null);
+      showStatus("Track EQ cleared");
+      close();
+    } catch (err) {
+      showStatus(err instanceof Error ? err.message : "Could not clear track EQ");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const handleDownload = async () => {
     if (busy) return;
     setBusy(true);
@@ -230,6 +263,27 @@ export const TrackActionsMenu = forwardRef<TrackActionsMenuHandle, Props>(functi
             className={itemClass}
             role="menuitem"
             disabled={busy}
+            onClick={handleAssignEq}
+          >
+            Assign EQ profile…
+          </button>
+          {hasTrackEq ? (
+            <button
+              type="button"
+              className={itemClass}
+              role="menuitem"
+              disabled={busy}
+              onClick={() => void handleClearTrackEq()}
+            >
+              Clear track EQ
+            </button>
+          ) : null}
+          <div className="my-1.5 border-t border-border" role="separator" />
+          <button
+            type="button"
+            className={itemClass}
+            role="menuitem"
+            disabled={busy}
             onClick={handleAddToPlaylist}
           >
             Add to playlist…
@@ -253,6 +307,18 @@ export const TrackActionsMenu = forwardRef<TrackActionsMenuHandle, Props>(functi
         onClose={() => setPickerOpen(false)}
         onComplete={showStatus}
         onPlaylistsChange={onPlaylistsChange}
+      />
+      <EqProfilePickerModal
+        visible={eqPickerOpen}
+        title="Assign EQ to track"
+        profiles={profiles}
+        selectedProfileId={trackAssignments[track.video_id] ?? null}
+        onClose={() => setEqPickerOpen(false)}
+        onSelect={async (profileId) => {
+          if (profileId == null) return;
+          await assignTrack(track.video_id, profileId);
+          showStatus("Track EQ assigned");
+        }}
       />
     </>
   );

@@ -1,11 +1,15 @@
 import { GripVertical, ListStart, X } from "lucide-react";
-import { useCallback, useState, type DragEvent } from "react";
+import { useCallback, useEffect, useState, type DragEvent } from "react";
+import { EqBulkWarningModal } from "@/components/EqBulkWarningModal";
+import { EqProfilePickerModal } from "@/components/EqProfilePickerModal";
 import { PlaylistPickerModal } from "@/components/PlaylistPickerModal";
+import { PlayerQueueControls } from "@/components/PlayerQueueControls";
 import { TrackRow } from "@/components/TrackRow";
 import { Button } from "@/components/ui/Button";
 import { IconButton } from "@/components/ui/IconButton";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/cn";
+import { useEqStore } from "@/stores/eqStore";
 import { getQueueView, usePlayerStore } from "@/stores/playerStore";
 import type { Playlist } from "@/types";
 
@@ -21,6 +25,8 @@ export function PlayerQueuePanel({ onClose, className }: Props) {
   const shuffleOrder = usePlayerStore((s) => s.shuffleOrder);
   const shuffleStep = usePlayerStore((s) => s.shuffleStep);
   const repeatMode = usePlayerStore((s) => s.repeatMode);
+  const queueEqProfileId = usePlayerStore((s) => s.queueEqProfileId);
+  const setQueueEqProfile = usePlayerStore((s) => s.setQueueEqProfile);
   const playQueueIndex = usePlayerStore((s) => s.playQueueIndex);
   const removeQueueIndex = usePlayerStore((s) => s.removeQueueIndex);
   const clearUpcoming = usePlayerStore((s) => s.clearUpcoming);
@@ -30,13 +36,25 @@ export function PlayerQueuePanel({ onClose, className }: Props) {
   const [draggedQueueIndex, setDraggedQueueIndex] = useState<number | null>(null);
   const [dropTargetQueueIndex, setDropTargetQueueIndex] = useState<number | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [eqPickerOpen, setEqPickerOpen] = useState(false);
+  const [applyWarningOpen, setApplyWarningOpen] = useState(false);
+  const [clearWarningOpen, setClearWarningOpen] = useState(false);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [status, setStatus] = useState<string | null>(null);
+  const profiles = useEqStore((s) => s.profiles);
+  const loaded = useEqStore((s) => s.loaded);
+  const bulkAssignTracks = useEqStore((s) => s.bulkAssignTracks);
 
   const showStatus = useCallback((message: string) => {
     setStatus(message);
     window.setTimeout(() => setStatus(null), 2200);
   }, []);
+
+  useEffect(() => {
+    if (!loaded) {
+      void useEqStore.getState().load();
+    }
+  }, [loaded]);
 
   const openSaveToPlaylist = async () => {
     try {
@@ -57,8 +75,10 @@ export function PlayerQueuePanel({ onClose, className }: Props) {
 
   const items = getQueueView({ current, queue, shuffle, shuffleOrder, shuffleStep });
   const queueTracks = items.map((item) => item.track);
+  const queueVideoIds = Array.from(new Set(queueTracks.map((track) => track.video_id)));
   const upcomingCount = items.filter((item) => item.status === "upcoming").length;
   const firstUpcomingItem = items.find((item) => item.status === "upcoming");
+  const queueEqProfile = profiles.find((profile) => profile.id === queueEqProfileId) ?? null;
 
   const handleDragStart = (event: DragEvent<HTMLButtonElement>, queueIndex: number) => {
     event.dataTransfer.effectAllowed = "move";
@@ -113,9 +133,11 @@ export function PlayerQueuePanel({ onClose, className }: Props) {
             {upcomingCount > 0 ? `${upcomingCount} up next` : "Last track"}
             {shuffle ? " · Shuffle on" : ""}
             {repeatMode === "all" ? " · Repeat all" : repeatMode === "one" ? " · Repeat one" : ""}
+            {queueEqProfile ? ` · Queue EQ: ${queueEqProfile.name}` : ""}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          <PlayerQueueControls compact showShuffle={false} showRepeat={false} />
           {queueTracks.length > 0 ? (
             <Button variant="ghost" size="sm" onClick={() => void openSaveToPlaylist()}>
               Save to playlist
@@ -133,6 +155,28 @@ export function PlayerQueuePanel({ onClose, className }: Props) {
           ) : null}
         </div>
       </header>
+      <div className="flex flex-wrap gap-2">
+        <Button variant="secondary" size="sm" onClick={() => setEqPickerOpen(true)}>
+          {queueEqProfile ? `Queue EQ: ${queueEqProfile.name}` : "Set queue EQ"}
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          disabled={!queueEqProfile || queueVideoIds.length === 0}
+          onClick={() => setApplyWarningOpen(true)}
+        >
+          Apply queue EQ to every track
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="text-danger-fg"
+          disabled={queueVideoIds.length === 0}
+          onClick={() => setClearWarningOpen(true)}
+        >
+          Clear individual track EQs
+        </Button>
+      </div>
       <div className="flex flex-col gap-0.5">
         {items.map((item) => {
           const isUpcoming = item.status === "upcoming";
@@ -217,6 +261,45 @@ export function PlayerQueuePanel({ onClose, className }: Props) {
         onClose={() => setPickerOpen(false)}
         onComplete={showStatus}
         onPlaylistsChange={() => void reloadPlaylists()}
+      />
+      <EqProfilePickerModal
+        visible={eqPickerOpen}
+        title="Set queue EQ"
+        profiles={profiles}
+        selectedProfileId={queueEqProfileId}
+        clearLabel="Clear queue EQ"
+        onClose={() => setEqPickerOpen(false)}
+        onSelect={async (profileId) => {
+          setQueueEqProfile(profileId);
+          showStatus(profileId == null ? "Queue EQ cleared" : "Queue EQ set");
+        }}
+      />
+      <EqBulkWarningModal
+        visible={applyWarningOpen}
+        title="Apply queue EQ to every track?"
+        description={`This will permanently assign the queue EQ profile "${queueEqProfile?.name ?? "profile"}" to every track currently in the queue. Existing per-track EQ assignments will be overwritten.`}
+        trackCount={queueVideoIds.length}
+        confirmLabel="Apply to every track"
+        confirmPhrase="APPLY"
+        onClose={() => setApplyWarningOpen(false)}
+        onConfirm={async () => {
+          if (!queueEqProfileId) return;
+          const result = await bulkAssignTracks(queueVideoIds, queueEqProfileId);
+          showStatus(`Updated EQ on ${result.updated} tracks`);
+        }}
+      />
+      <EqBulkWarningModal
+        visible={clearWarningOpen}
+        title="Remove all individual track EQs in queue?"
+        description="This permanently deletes per-track EQ assignments for every track in the current queue. Those tracks will fall back to playlist, queue, or default EQ instead."
+        trackCount={queueVideoIds.length}
+        confirmLabel="Clear all track EQs"
+        confirmPhrase="REMOVE"
+        onClose={() => setClearWarningOpen(false)}
+        onConfirm={async () => {
+          const result = await bulkAssignTracks(queueVideoIds, null);
+          showStatus(`Cleared EQ on ${result.cleared} tracks`);
+        }}
       />
     </section>
   );

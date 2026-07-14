@@ -1,7 +1,7 @@
 import enum
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, DateTime, Enum, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -80,6 +80,13 @@ class User(Base):
     play_history: Mapped[list["PlayHistory"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     likes: Mapped[list["Like"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     scrobbler_connections: Mapped[list["ScrobblerConnection"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+    eq_profiles: Mapped[list["EqProfile"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    eq_track_assignments: Mapped[list["EqTrackAssignment"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+    eq_playlist_assignments: Mapped[list["EqPlaylistAssignment"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
 
@@ -236,6 +243,58 @@ class CatalogCacheEntry(Base):
     cache_key: Mapped[str] = mapped_column(String(500), unique=True, nullable=False, index=True)
     payload_json: Mapped[str] = mapped_column(Text, nullable=False)
     cached_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+class EqProfile(Base):
+    __tablename__ = "eq_profiles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    bands_json: Mapped[str] = mapped_column(Text, nullable=False)
+    preamp_db: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    user: Mapped[User] = relationship(back_populates="eq_profiles")
+    track_assignments: Mapped[list["EqTrackAssignment"]] = relationship(back_populates="eq_profile")
+    playlist_assignments: Mapped[list["EqPlaylistAssignment"]] = relationship(back_populates="eq_profile")
+
+
+class EqTrackAssignment(Base):
+    __tablename__ = "eq_track_assignments"
+    __table_args__ = (UniqueConstraint("user_id", "video_id", name="uq_eq_track_user_video"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    video_id: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    eq_profile_id: Mapped[int] = mapped_column(ForeignKey("eq_profiles.id", ondelete="CASCADE"), index=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    user: Mapped[User] = relationship(back_populates="eq_track_assignments")
+    eq_profile: Mapped[EqProfile] = relationship(back_populates="track_assignments")
+
+
+class EqPlaylistAssignment(Base):
+    __tablename__ = "eq_playlist_assignments"
+    __table_args__ = (UniqueConstraint("user_id", "playlist_id", name="uq_eq_playlist_user_playlist"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    playlist_id: Mapped[int] = mapped_column(ForeignKey("playlists.id", ondelete="CASCADE"), index=True)
+    eq_profile_id: Mapped[int] = mapped_column(ForeignKey("eq_profiles.id", ondelete="CASCADE"), index=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    user: Mapped[User] = relationship(back_populates="eq_playlist_assignments")
+    playlist: Mapped[Playlist] = relationship()
+    eq_profile: Mapped[EqProfile] = relationship(back_populates="playlist_assignments")
 
 
 class AudioCacheAccess(Base):

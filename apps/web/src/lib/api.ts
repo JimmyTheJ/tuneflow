@@ -31,6 +31,11 @@ import type {
   ArtistStreamEvent,
   AlbumDetail,
   AlbumResolveResult,
+  EqAssignment,
+  EqBand,
+  EqBulkTrackResult,
+  EqProfile,
+  EqResolveResult,
 } from "@/types";
 import { getAccessToken, getApiUrl } from "./settings";
 import { ApiError, withRetry } from "./retry";
@@ -268,4 +273,44 @@ export const api = {
       method: "POST",
       body: { video_ids: videoIds },
     }),
+  listEqProfiles: () => request<EqProfile[]>("/api/eq/profiles"),
+  createEqProfile: (payload: { name: string; bands: EqBand[]; preamp_db?: number }) =>
+    request<EqProfile>("/api/eq/profiles", { method: "POST", body: payload }),
+  getEqProfile: (profileId: number) => request<EqProfile>(`/api/eq/profiles/${profileId}`),
+  updateEqProfile: (
+    profileId: number,
+    payload: { name?: string; bands?: EqBand[]; preamp_db?: number },
+  ) => request<EqProfile>(`/api/eq/profiles/${profileId}`, { method: "PATCH", body: payload }),
+  deleteEqProfile: (profileId: number) =>
+    request<void>(`/api/eq/profiles/${profileId}`, { method: "DELETE" }),
+  setDefaultEqProfile: (profileId: number) =>
+    request<EqProfile>(`/api/eq/profiles/${profileId}/set-default`, { method: "POST" }),
+  getEqTrackAssignment: (videoId: string) =>
+    request<EqAssignment>(`/api/eq/tracks/${encodeURIComponent(videoId)}`),
+  setEqTrackAssignment: (videoId: string, eqProfileId: number | null) =>
+    request<EqAssignment>(`/api/eq/tracks/${encodeURIComponent(videoId)}`, {
+      method: "PUT",
+      body: { eq_profile_id: eqProfileId },
+    }),
+  bulkEqTrackAssignment: (videoIds: string[], eqProfileId: number | null) =>
+    request<EqBulkTrackResult>("/api/eq/tracks/bulk", {
+      method: "POST",
+      body: { video_ids: videoIds, eq_profile_id: eqProfileId },
+    }),
+  getEqPlaylistAssignment: (playlistId: number) =>
+    request<EqAssignment>(`/api/eq/playlists/${playlistId}`),
+  setEqPlaylistAssignment: (playlistId: number, eqProfileId: number | null) =>
+    request<EqAssignment>(`/api/eq/playlists/${playlistId}`, {
+      method: "PUT",
+      body: { eq_profile_id: eqProfileId },
+    }),
+  applyPlaylistEqToTracks: (playlistId: number) =>
+    request<EqBulkTrackResult>(`/api/eq/playlists/${playlistId}/apply-to-tracks`, { method: "POST" }),
+  clearPlaylistTrackEqs: (playlistId: number) =>
+    request<EqBulkTrackResult>(`/api/eq/playlists/${playlistId}/clear-track-eqs`, { method: "POST" }),
+  resolveEq: (videoId: string, playlistId?: number) => {
+    const params = new URLSearchParams({ video_id: videoId });
+    if (playlistId != null) params.set("playlist_id", String(playlistId));
+    return request<EqResolveResult>(`/api/eq/resolve?${params.toString()}`);
+  },
 };

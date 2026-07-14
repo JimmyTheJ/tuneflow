@@ -467,3 +467,62 @@ class CachePurgeResult(BaseModel):
 
 class CacheBulkDelete(BaseModel):
     video_ids: list[str] = Field(min_length=1, max_length=200)
+
+
+class EqBand(BaseModel):
+    freq: int = Field(ge=20, le=20000)
+    gain_db: float = Field(ge=-12, le=12, alias="gainDb")
+
+    model_config = {"populate_by_name": True}
+
+
+class EqProfileCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    bands: list[EqBand] = Field(min_length=10, max_length=10)
+    preamp_db: float = Field(default=0.0, ge=-12, le=12)
+
+
+class EqProfileUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    bands: list[EqBand] | None = Field(default=None, min_length=10, max_length=10)
+    preamp_db: float | None = Field(default=None, ge=-12, le=12)
+
+
+class EqProfileRead(BaseModel):
+    id: int
+    name: str
+    bands: list[EqBand]
+    preamp_db: float
+    is_default: bool
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class EqAssignmentRead(BaseModel):
+    eq_profile_id: int | None
+    profile: EqProfileRead | None = None
+
+
+class EqTrackAssignmentUpdate(BaseModel):
+    eq_profile_id: int | None = None
+
+
+class EqPlaylistAssignmentUpdate(BaseModel):
+    eq_profile_id: int | None = None
+
+
+class EqBulkTrackAssignment(BaseModel):
+    video_ids: list[str] = Field(min_length=1, max_length=500)
+    eq_profile_id: int | None = None
+
+
+class EqBulkTrackResult(BaseModel):
+    updated: int
+    cleared: int
+
+
+class EqResolveResult(BaseModel):
+    profile: EqProfileRead | None
+    source: str

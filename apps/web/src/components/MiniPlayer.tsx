@@ -1,5 +1,5 @@
 import { Link, useLocation } from "react-router-dom";
-import { ListMusic, X } from "lucide-react";
+import { ListMusic, SlidersHorizontal, X } from "lucide-react";
 import { LikeButton } from "@/components/LikeButton";
 import { PlayerProgress } from "@/components/PlayerProgress";
 import { PlayerQueueDrawer } from "@/components/PlayerQueueDrawer";
@@ -112,6 +112,13 @@ export function MiniPlayer() {
 
         {/* Right: queue + volume (desktop) */}
         <div className="hidden items-center justify-end gap-2 md:flex">
+          {current ? (
+            <Link to="/player#equalizer" title="Open equalizer">
+              <IconButton label="Open equalizer" size="sm">
+                <SlidersHorizontal className="size-4" />
+              </IconButton>
+            </Link>
+          ) : null}
           {current && queue.length > 0 ? (
             <IconButton
               label={`Open queue, ${upcomingCount} up next`}
@@ -136,6 +143,13 @@ export function MiniPlayer() {
 
         {/* Mobile extras */}
         <div className="flex items-center justify-end gap-1 md:hidden">
+          {current ? (
+            <Link to="/player#equalizer" title="Open equalizer">
+              <IconButton label="Open equalizer" size="sm">
+                <SlidersHorizontal className="size-4" />
+              </IconButton>
+            </Link>
+          ) : null}
           {current && queue.length > 0 ? (
             <IconButton
               label={`Open queue, ${upcomingCount} up next`}
