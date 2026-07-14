@@ -25,7 +25,13 @@ from app.services.cache_manager import (
     purge_videos,
     run_retention_cleanup,
 )
-from app.services.catalog_cache import get_catalog_cache_stats, purge_all_catalog_cache
+from app.services.catalog_cache import (
+    clear_catalog_memory_cache,
+    get_catalog_cache_stats,
+    purge_all_catalog_cache,
+    purge_older_than_catalog_cache,
+    run_catalog_retention_cleanup,
+)
 
 router = APIRouter(prefix="/admin/cache", tags=["admin"])
 
@@ -117,10 +123,25 @@ async def clear_cache(
 
 @router.delete("/catalog", response_model=CachePurgeResult)
 async def clear_catalog_cache(
+    older_than_days: int | None = Query(default=None, ge=1),
     _: User = Depends(require_root_admin),
     db: AsyncSession = Depends(get_db),
 ) -> CachePurgeResult:
-    deleted, freed = await purge_all_catalog_cache(db)
+    if older_than_days is not None:
+        deleted, freed = await purge_older_than_catalog_cache(db, older_than_days)
+    else:
+        deleted, freed = await purge_all_catalog_cache(db)
+    clear_catalog_memory_cache()
+    return CachePurgeResult(deleted_entries=deleted, freed_bytes=freed)
+
+
+@router.post("/catalog/cleanup", response_model=CachePurgeResult)
+async def run_catalog_cleanup(
+    _: User = Depends(require_root_admin),
+    db: AsyncSession = Depends(get_db),
+) -> CachePurgeResult:
+    deleted, freed = await run_catalog_retention_cleanup(db)
+    clear_catalog_memory_cache()
     return CachePurgeResult(deleted_entries=deleted, freed_bytes=freed)
 
 

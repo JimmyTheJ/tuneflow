@@ -197,6 +197,8 @@ class SystemSettings(Base):
     cache_refresh_days: Mapped[int] = mapped_column(Integer, nullable=False, default=180)
     cache_max_size_mb: Mapped[int | None] = mapped_column(Integer, nullable=True)
     cache_cleanup_interval_hours: Mapped[int] = mapped_column(Integer, nullable=False, default=24)
+    catalog_cache_retention_days: Mapped[int | None] = mapped_column(Integer, nullable=True, default=7)
+    catalog_cache_max_size_mb: Mapped[int | None] = mapped_column(Integer, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )

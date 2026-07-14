@@ -12,14 +12,14 @@ from typing import Any
 import httpx
 
 from app.config import settings
-from app.services.catalog_cache import CATALOG_CACHE_TTL_SEC, get_catalog_cache, set_catalog_cache
+from app.services.catalog_cache import DEFAULT_CATALOG_RETENTION_DAYS, get_catalog_cache, set_catalog_cache
 
 MB_BASE_URL = "https://musicbrainz.org/ws/2"
 CAA_BASE_URL = "https://coverartarchive.org"
 
 _USER_AGENT = "TuneFlow/0.3.0 ( https://github.com/tuneflow )"
 _RATE_LIMIT_SEC = 1.05
-_CACHE_TTL_SEC = CATALOG_CACHE_TTL_SEC
+_CACHE_TTL_SEC = DEFAULT_CATALOG_RETENTION_DAYS * 24 * 3600
 
 
 @dataclass
@@ -127,6 +127,9 @@ class MusicBrainzClient:
         self._lock = asyncio.Lock()
         self._last_request_at = 0.0
         self._memory_cache: dict[str, tuple[float, Any]] = {}
+
+    def clear_memory_cache(self) -> None:
+        self._memory_cache.clear()
 
     async def _cache_get(self, key: str) -> Any | None:
         entry = self._memory_cache.get(key)

@@ -211,7 +211,14 @@ export const api = {
     const query = params.toString();
     return request<CachePurgeResult>(`/api/admin/cache${query ? `?${query}` : ""}`, { method: "DELETE" });
   },
-  clearCatalogCache: () => request<CachePurgeResult>("/api/admin/cache/catalog", { method: "DELETE" }),
+  clearCatalogCache: (options?: { olderThanDays?: number }) => {
+    const params = new URLSearchParams();
+    if (options?.olderThanDays != null) params.set("older_than_days", String(options.olderThanDays));
+    const query = params.toString();
+    return request<CachePurgeResult>(`/api/admin/cache/catalog${query ? `?${query}` : ""}`, { method: "DELETE" });
+  },
+  runCatalogCacheCleanup: () =>
+    request<CachePurgeResult>("/api/admin/cache/catalog/cleanup", { method: "POST" }),
   clearCacheEntry: (videoId: string) =>
     request<CachePurgeResult>(`/api/admin/cache/${videoId}`, { method: "DELETE" }),
   clearCacheEntries: (videoIds: string[]) =>

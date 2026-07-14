@@ -24,6 +24,9 @@ export function AdminCachePage() {
   const [filterUserId, setFilterUserId] = useState("");
   const [purgeUserId, setPurgeUserId] = useState("");
   const [purgeOlderDays, setPurgeOlderDays] = useState("");
+  const [catalogRetentionDays, setCatalogRetentionDays] = useState("7");
+  const [catalogMaxSizeMb, setCatalogMaxSizeMb] = useState("");
+  const [purgeCatalogOlderDays, setPurgeCatalogOlderDays] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [selectedVideoIds, setSelectedVideoIds] = useState<Set<string>>(new Set());
@@ -46,6 +49,14 @@ export function AdminCachePage() {
     setRefreshDays(String(nextSettings.cache_refresh_days));
     setMaxSizeMb(nextSettings.cache_max_size_mb == null ? "" : String(nextSettings.cache_max_size_mb));
     setCleanupHours(String(nextSettings.cache_cleanup_interval_hours));
+    setCatalogRetentionDays(
+      nextSettings.catalog_cache_retention_days == null
+        ? ""
+        : String(nextSettings.catalog_cache_retention_days),
+    );
+    setCatalogMaxSizeMb(
+      nextSettings.catalog_cache_max_size_mb == null ? "" : String(nextSettings.catalog_cache_max_size_mb),
+    );
   }, [filterUserId]);
 
   useEffect(() => {
@@ -74,6 +85,9 @@ export function AdminCachePage() {
         cache_refresh_days: Number(refreshDays),
         cache_max_size_mb: maxSizeMb.trim() === "" ? null : Number(maxSizeMb),
         cache_cleanup_interval_hours: Number(cleanupHours),
+        catalog_cache_retention_days:
+          catalogRetentionDays.trim() === "" ? null : Number(catalogRetentionDays),
+        catalog_cache_max_size_mb: catalogMaxSizeMb.trim() === "" ? null : Number(catalogMaxSizeMb),
       });
       setSettings(updated);
       setMessage("Cache settings saved");
@@ -116,6 +130,35 @@ export function AdminCachePage() {
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not clear catalog cache");
+    }
+  };
+
+  const clearCatalogOlderThan = async () => {
+    const days = Number(purgeCatalogOlderDays);
+    if (!days || days < 1) return;
+    if (!window.confirm(`Delete catalog metadata cached more than ${days} days ago?`)) return;
+    setError(null);
+    try {
+      const result = await api.clearCatalogCache({ olderThanDays: days });
+      setMessage(
+        `Removed ${result.deleted_entries} catalog entr${result.deleted_entries === 1 ? "y" : "ies"} (${formatBytes(result.freed_bytes)} freed)`,
+      );
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not clear old catalog cache");
+    }
+  };
+
+  const runCatalogCleanup = async () => {
+    setError(null);
+    try {
+      const result = await api.runCatalogCacheCleanup();
+      setMessage(
+        `Catalog cleanup removed ${result.deleted_entries} entr${result.deleted_entries === 1 ? "y" : "ies"} (${formatBytes(result.freed_bytes)} freed)`,
+      );
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Catalog cleanup failed");
     }
   };
 
@@ -242,15 +285,56 @@ export function AdminCachePage() {
             </p>
             <p className="muted">
               {stats.catalog.oldest_cached_at
-                ? `Cached from ${new Date(stats.catalog.oldest_cached_at).toLocaleString()} to ${new Date(stats.catalog.newest_cached_at ?? stats.catalog.oldest_cached_at).toLocaleString()} · expires after 7 days`
+                ? `Cached from ${new Date(stats.catalog.oldest_cached_at).toLocaleString()} to ${new Date(stats.catalog.newest_cached_at ?? stats.catalog.oldest_cached_at).toLocaleString()}${
+                    settings?.catalog_cache_retention_days == null
+                      ? " · kept until manually cleared"
+                      : ` · auto-expires after ${settings.catalog_cache_retention_days} days`
+                  }`
                 : "No catalog metadata cached yet"}
             </p>
-            <button type="button" className="btn-secondary btn-block" onClick={() => void clearCatalogCache()}>
-              Clear catalog metadata
-            </button>
           </div>
         </>
       ) : null}
+
+      {settings ? (
+        <div className="card">
+          <h2>Catalog metadata settings</h2>
+          <input
+            className="input"
+            placeholder="Retention days (empty = permanent)"
+            value={catalogRetentionDays}
+            onChange={(e) => setCatalogRetentionDays(e.target.value)}
+          />
+          <input
+            className="input"
+            placeholder="Max cache size MB (empty = unlimited)"
+            value={catalogMaxSizeMb}
+            onChange={(e) => setCatalogMaxSizeMb(e.target.value)}
+          />
+          <button type="button" className="btn-primary btn-block" onClick={() => void saveSettings()}>
+            Save settings
+          </button>
+          <button type="button" className="btn-secondary btn-block" onClick={() => void runCatalogCleanup()}>
+            Run catalog retention cleanup now
+          </button>
+        </div>
+      ) : null}
+
+      <div className="card">
+        <h2>Clear catalog metadata</h2>
+        <button type="button" className="btn-secondary btn-block" onClick={() => void clearCatalogCache()}>
+          Clear entire catalog cache
+        </button>
+        <input
+          className="input"
+          placeholder="Older than N days"
+          value={purgeCatalogOlderDays}
+          onChange={(e) => setPurgeCatalogOlderDays(e.target.value)}
+        />
+        <button type="button" className="btn-secondary btn-block" onClick={() => void clearCatalogOlderThan()}>
+          Clear entries older than N days
+        </button>
+      </div>
 
       {settings ? (
         <div className="card">

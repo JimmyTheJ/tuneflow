@@ -40,6 +40,14 @@ async def run_migrations() -> None:
             await conn.execute(
                 text("ALTER TABLE system_settings ADD COLUMN cache_refresh_days INTEGER NOT NULL DEFAULT 180")
             )
+        if settings_cols and "catalog_cache_retention_days" not in settings_cols:
+            await conn.execute(
+                text("ALTER TABLE system_settings ADD COLUMN catalog_cache_retention_days INTEGER DEFAULT 7")
+            )
+        if settings_cols and "catalog_cache_max_size_mb" not in settings_cols:
+            await conn.execute(
+                text("ALTER TABLE system_settings ADD COLUMN catalog_cache_max_size_mb INTEGER")
+            )
 
         cache_entry_columns = await conn.execute(text("PRAGMA table_info(audio_cache_entries)"))
         cache_entry_cols = {row[1] for row in cache_entry_columns.fetchall()}

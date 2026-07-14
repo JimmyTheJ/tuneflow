@@ -255,6 +255,8 @@ export type CacheSettings = {
   cache_refresh_days: number;
   cache_max_size_mb: number | null;
   cache_cleanup_interval_hours: number;
+  catalog_cache_retention_days: number | null;
+  catalog_cache_max_size_mb: number | null;
   updated_at: string;
 };
 

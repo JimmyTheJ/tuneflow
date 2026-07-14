@@ -12,7 +12,7 @@ from app.routers import admin, ai, auth, history, households, likes, music, pare
 
 async def _cache_cleanup_worker() -> None:
     from app.services.cache_manager import backfill_orphaned_files, get_system_settings, run_retention_cleanup
-    from app.services.catalog_cache import purge_expired_catalog_cache
+    from app.services.catalog_cache import run_catalog_retention_cleanup
 
     while True:
         interval_hours = 24
@@ -20,7 +20,7 @@ async def _cache_cleanup_worker() -> None:
             async with SessionLocal() as db:
                 await backfill_orphaned_files(db)
                 await run_retention_cleanup(db)
-                await purge_expired_catalog_cache()
+                await run_catalog_retention_cleanup(db)
                 system_settings = await get_system_settings(db)
                 interval_hours = system_settings.cache_cleanup_interval_hours
         except Exception:

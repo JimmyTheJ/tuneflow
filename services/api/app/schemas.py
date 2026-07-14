@@ -401,6 +401,8 @@ class CacheSettingsRead(BaseModel):
     cache_refresh_days: int = Field(default=180, ge=1)
     cache_max_size_mb: int | None = Field(default=None, ge=1)
     cache_cleanup_interval_hours: int = Field(ge=1, le=24 * 7)
+    catalog_cache_retention_days: int | None = Field(default=7, ge=0)
+    catalog_cache_max_size_mb: int | None = Field(default=None, ge=1)
     updated_at: datetime
 
     model_config = {"from_attributes": True}
@@ -412,6 +414,8 @@ class CacheSettingsUpdate(BaseModel):
     cache_refresh_days: int | None = Field(default=None, ge=1)
     cache_max_size_mb: int | None = Field(default=None, ge=1)
     cache_cleanup_interval_hours: int | None = Field(default=None, ge=1, le=24 * 7)
+    catalog_cache_retention_days: int | None = Field(default=None, ge=0)
+    catalog_cache_max_size_mb: int | None = Field(default=None, ge=1)
 
 
 class CatalogCacheStats(BaseModel):
