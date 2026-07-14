@@ -48,6 +48,23 @@ async def run_migrations() -> None:
             await conn.execute(
                 text("ALTER TABLE system_settings ADD COLUMN catalog_cache_max_size_mb INTEGER")
             )
+        if settings_cols and "playlist_retention_days" not in settings_cols:
+            await conn.execute(
+                text("ALTER TABLE system_settings ADD COLUMN playlist_retention_days INTEGER NOT NULL DEFAULT 90")
+            )
+
+        playlist_columns = await conn.execute(text("PRAGMA table_info(playlists)"))
+        playlist_cols = {row[1] for row in playlist_columns.fetchall()}
+        if playlist_cols:
+            if "deleted_at" not in playlist_cols:
+                await conn.execute(text("ALTER TABLE playlists ADD COLUMN deleted_at DATETIME"))
+            if "deleted_by_user_id" not in playlist_cols:
+                await conn.execute(
+                    text("ALTER TABLE playlists ADD COLUMN deleted_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL")
+                )
+            await conn.execute(
+                text("CREATE INDEX IF NOT EXISTS ix_playlists_deleted_at ON playlists (deleted_at)")
+            )
 
         cache_entry_columns = await conn.execute(text("PRAGMA table_info(audio_cache_entries)"))
         cache_entry_cols = {row[1] for row in cache_entry_columns.fetchall()}

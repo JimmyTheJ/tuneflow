@@ -16,6 +16,7 @@ import type {
   PlayHistoryEntry,
   Playlist,
   PlaylistDetail,
+  DeletedPlaylist,
   RoleProfile,
   ScrobblerConnection,
   ScrobblerConnectionStatus,
@@ -172,6 +173,10 @@ export const api = {
       method: "POST",
       body: { track_ids: trackIds },
     }),
+  deletePlaylist: (id: number) => request<void>(`/api/playlists/${id}`, { method: "DELETE" }),
+  listDeletedPlaylists: () => request<DeletedPlaylist[]>("/api/playlists/deleted"),
+  restorePlaylist: (id: number) =>
+    request<Playlist>(`/api/playlists/${id}/restore`, { method: "POST" }),
   listHistory: () => request<PlayHistoryEntry[]>("/api/history"),
   recordPlay: (track: Track) => request<PlayHistoryEntry>("/api/history", { method: "POST", body: track }),
   listLikes: () => request<LikeEntry[]>("/api/likes"),

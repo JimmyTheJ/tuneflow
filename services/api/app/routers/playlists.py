@@ -1,12 +1,15 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from datetime import UTC, datetime, timedelta
+
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.auth import get_current_user
+from app.auth import assert_same_household, get_current_user, require_playlist_recovery_admin
 from app.database import get_db
 from app.models import Playlist, PlaylistTrack, User
 from app.schemas import (
+    DeletedPlaylistRead,
     PlaylistCreate,
     PlaylistDetail,
     PlaylistRead,
@@ -15,6 +18,7 @@ from app.schemas import (
     PlaylistUpdate,
     ReorderTracksRequest,
 )
+from app.services.cache_manager import get_system_settings
 
 router = APIRouter(prefix="/playlists", tags=["playlists"])
 
@@ -30,9 +34,15 @@ def _playlist_read(playlist: Playlist) -> PlaylistRead:
     )
 
 
+def _active_playlist_filter():
+    return Playlist.deleted_at.is_(None)
+
+
 async def _load_playlist_with_tracks(db: AsyncSession, playlist_id: int) -> Playlist:
     result = await db.execute(
-        select(Playlist).options(selectinload(Playlist.tracks)).where(Playlist.id == playlist_id)
+        select(Playlist)
+        .options(selectinload(Playlist.tracks))
+        .where(Playlist.id == playlist_id, _active_playlist_filter())
     )
     return result.scalar_one()
 
@@ -41,12 +51,51 @@ async def _get_owned_playlist(db: AsyncSession, playlist_id: int, user_id: int) 
     result = await db.execute(
         select(Playlist)
         .options(selectinload(Playlist.tracks))
-        .where(Playlist.id == playlist_id, Playlist.user_id == user_id)
+        .where(Playlist.id == playlist_id, Playlist.user_id == user_id, _active_playlist_filter())
     )
     playlist = result.scalar_one_or_none()
     if playlist is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Playlist not found")
     return playlist
+
+
+async def _get_deleted_playlist_for_recovery(
+    db: AsyncSession,
+    playlist_id: int,
+    actor: User,
+) -> Playlist:
+    result = await db.execute(
+        select(Playlist)
+        .options(
+            selectinload(Playlist.tracks),
+            selectinload(Playlist.user),
+            selectinload(Playlist.deleted_by),
+        )
+        .where(Playlist.id == playlist_id, Playlist.deleted_at.isnot(None))
+    )
+    playlist = result.scalar_one_or_none()
+    if playlist is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Deleted playlist not found")
+    await assert_same_household(actor, playlist.user)
+    return playlist
+
+
+def _deleted_playlist_read(playlist: Playlist, retention_days: int) -> DeletedPlaylistRead:
+    expires_at = None
+    if retention_days > 0 and playlist.deleted_at is not None:
+        expires_at = playlist.deleted_at + timedelta(days=retention_days)
+    return DeletedPlaylistRead(
+        id=playlist.id,
+        name=playlist.name,
+        description=playlist.description,
+        track_count=len(playlist.tracks),
+        deleted_at=playlist.deleted_at,
+        deleted_by_display_name=playlist.deleted_by.display_name if playlist.deleted_by else None,
+        owner_id=playlist.user.id,
+        owner_display_name=playlist.user.display_name,
+        owner_username=playlist.user.username,
+        expires_at=expires_at,
+    )
 
 
 @router.get("", response_model=list[PlaylistRead])
@@ -57,10 +106,37 @@ async def list_playlists(
     result = await db.execute(
         select(Playlist)
         .options(selectinload(Playlist.tracks))
-        .where(Playlist.user_id == current_user.id)
+        .where(Playlist.user_id == current_user.id, _active_playlist_filter())
         .order_by(Playlist.updated_at.desc())
     )
     return [_playlist_read(playlist) for playlist in result.scalars().all()]
+
+
+@router.get("/deleted", response_model=list[DeletedPlaylistRead])
+async def list_deleted_playlists(
+    current_user: User = Depends(require_playlist_recovery_admin),
+    db: AsyncSession = Depends(get_db),
+) -> list[DeletedPlaylistRead]:
+    settings = await get_system_settings(db)
+    query = (
+        select(Playlist)
+        .options(
+            selectinload(Playlist.tracks),
+            selectinload(Playlist.user),
+            selectinload(Playlist.deleted_by),
+        )
+        .where(Playlist.deleted_at.isnot(None))
+        .order_by(Playlist.deleted_at.desc())
+    )
+    if not current_user.is_root_admin:
+        query = query.join(User, Playlist.user_id == User.id).where(
+            User.household_id == current_user.household_id
+        )
+    result = await db.execute(query)
+    return [
+        _deleted_playlist_read(playlist, settings.playlist_retention_days)
+        for playlist in result.scalars().unique().all()
+    ]
 
 
 @router.post("", response_model=PlaylistRead, status_code=status.HTTP_201_CREATED)
@@ -114,8 +190,23 @@ async def delete_playlist(
     db: AsyncSession = Depends(get_db),
 ) -> None:
     playlist = await _get_owned_playlist(db, playlist_id, current_user.id)
-    await db.delete(playlist)
+    playlist.deleted_at = datetime.now(UTC)
+    playlist.deleted_by_user_id = current_user.id
     await db.commit()
+
+
+@router.post("/{playlist_id}/restore", response_model=PlaylistRead)
+async def restore_playlist(
+    playlist_id: int,
+    current_user: User = Depends(require_playlist_recovery_admin),
+    db: AsyncSession = Depends(get_db),
+) -> PlaylistRead:
+    playlist = await _get_deleted_playlist_for_recovery(db, playlist_id, current_user)
+    playlist.deleted_at = None
+    playlist.deleted_by_user_id = None
+    await db.commit()
+    playlist = await _load_playlist_with_tracks(db, playlist.id)
+    return _playlist_read(playlist)
 
 
 @router.post("/{playlist_id}/tracks", response_model=PlaylistTrackRead, status_code=status.HTTP_201_CREATED)

@@ -20,6 +20,7 @@ import { SearchPage } from "@/pages/SearchPage";
 import { AdminCachePage } from "@/pages/AdminCachePage";
 import { AdminIntegrationsPage } from "@/pages/AdminIntegrationsPage";
 import { DeletedUsersPage } from "@/pages/DeletedUsersPage";
+import { DeletedPlaylistsPage } from "@/pages/DeletedPlaylistsPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 
 function Protected({ children }: { children: React.ReactNode }) {
@@ -91,6 +92,7 @@ export function App() {
           <Route path="admin/cache" element={<AdminCachePage />} />
           <Route path="admin/integrations" element={<AdminIntegrationsPage />} />
           <Route path="admin/users/deleted" element={<DeletedUsersPage />} />
+          <Route path="admin/playlists/deleted" element={<DeletedPlaylistsPage />} />
           <Route path="family" element={<FamilyPage />} />
           <Route path="parental" element={<ParentalPage />} />
           <Route path="playlist/:id" element={<PlaylistPage />} />

@@ -26,6 +26,7 @@ export function AdminCachePage() {
   const [purgeOlderDays, setPurgeOlderDays] = useState("");
   const [catalogRetentionDays, setCatalogRetentionDays] = useState("7");
   const [catalogMaxSizeMb, setCatalogMaxSizeMb] = useState("");
+  const [playlistRetentionDays, setPlaylistRetentionDays] = useState("90");
   const [purgeCatalogOlderDays, setPurgeCatalogOlderDays] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -57,6 +58,7 @@ export function AdminCachePage() {
     setCatalogMaxSizeMb(
       nextSettings.catalog_cache_max_size_mb == null ? "" : String(nextSettings.catalog_cache_max_size_mb),
     );
+    setPlaylistRetentionDays(String(nextSettings.playlist_retention_days));
   }, [filterUserId]);
 
   useEffect(() => {
@@ -88,6 +90,7 @@ export function AdminCachePage() {
         catalog_cache_retention_days:
           catalogRetentionDays.trim() === "" ? null : Number(catalogRetentionDays),
         catalog_cache_max_size_mb: catalogMaxSizeMb.trim() === "" ? null : Number(catalogMaxSizeMb),
+        playlist_retention_days: Number(playlistRetentionDays),
       });
       setSettings(updated);
       setMessage("Cache settings saved");
@@ -370,6 +373,12 @@ export function AdminCachePage() {
             placeholder="Cleanup interval (hours)"
             value={cleanupHours}
             onChange={(e) => setCleanupHours(e.target.value)}
+          />
+          <input
+            className="input"
+            placeholder="Deleted playlist retention (days, 0 = never purge)"
+            value={playlistRetentionDays}
+            onChange={(e) => setPlaylistRetentionDays(e.target.value)}
           />
           <button type="button" className="btn-primary btn-block" onClick={() => void saveSettings()}>
             Save settings

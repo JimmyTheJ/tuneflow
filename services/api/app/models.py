@@ -117,12 +117,17 @@ class Playlist(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    deleted_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
-    user: Mapped[User] = relationship(back_populates="playlists")
+    user: Mapped[User] = relationship(back_populates="playlists", foreign_keys=[user_id])
+    deleted_by: Mapped["User | None"] = relationship(foreign_keys=[deleted_by_user_id])
     tracks: Mapped[list["PlaylistTrack"]] = relationship(
         back_populates="playlist", cascade="all, delete-orphan", order_by="PlaylistTrack.position"
     )
@@ -206,6 +211,7 @@ class SystemSettings(Base):
     cache_cleanup_interval_hours: Mapped[int] = mapped_column(Integer, nullable=False, default=24)
     catalog_cache_retention_days: Mapped[int | None] = mapped_column(Integer, nullable=True, default=7)
     catalog_cache_max_size_mb: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    playlist_retention_days: Mapped[int] = mapped_column(Integer, nullable=False, default=90)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )

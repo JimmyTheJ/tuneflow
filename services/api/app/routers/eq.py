@@ -122,7 +122,11 @@ async def _get_owned_playlist(db: AsyncSession, playlist_id: int, user_id: int) 
     result = await db.execute(
         select(Playlist)
         .options(selectinload(Playlist.tracks))
-        .where(Playlist.id == playlist_id, Playlist.user_id == user_id)
+        .where(
+            Playlist.id == playlist_id,
+            Playlist.user_id == user_id,
+            Playlist.deleted_at.is_(None),
+        )
     )
     playlist = result.scalar_one_or_none()
     if playlist is None:

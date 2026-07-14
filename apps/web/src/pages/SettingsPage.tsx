@@ -260,6 +260,9 @@ export function SettingsPage() {
               <SettingsLink to="/admin/users/deleted" icon={Trash2}>
                 Deleted accounts
               </SettingsLink>
+              <SettingsLink to="/admin/playlists/deleted" icon={Trash2}>
+                Deleted playlists
+              </SettingsLink>
             </>
           ) : null}
           {canManageMembers(user) ? (
@@ -270,6 +273,11 @@ export function SettingsPage() {
           {canManageParentalControls(user) ? (
             <SettingsLink to="/parental" icon={Shield}>
               Parental controls
+            </SettingsLink>
+          ) : null}
+          {isHouseholdAdmin ? (
+            <SettingsLink to="/admin/playlists/deleted" icon={Trash2}>
+              Deleted playlists
             </SettingsLink>
           ) : null}
         </section>

@@ -151,6 +151,19 @@ export type PlaylistDetail = Playlist & {
   tracks: Array<Track & { id: number; position: number; added_at: string }>;
 };
 
+export type DeletedPlaylist = {
+  id: number;
+  name: string;
+  description?: string | null;
+  track_count: number;
+  deleted_at: string;
+  deleted_by_display_name?: string | null;
+  owner_id: number;
+  owner_display_name: string;
+  owner_username: string;
+  expires_at?: string | null;
+};
+
 export type StreamSelection = {
   video: boolean;
   audio: boolean;
@@ -257,6 +270,7 @@ export type CacheSettings = {
   cache_cleanup_interval_hours: number;
   catalog_cache_retention_days: number | null;
   catalog_cache_max_size_mb: number | null;
+  playlist_retention_days: number;
   updated_at: string;
 };
 

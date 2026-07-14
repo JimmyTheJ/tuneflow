@@ -226,6 +226,19 @@ class PlaylistDetail(PlaylistRead):
     tracks: list[PlaylistTrackRead] = []
 
 
+class DeletedPlaylistRead(BaseModel):
+    id: int
+    name: str
+    description: str | None
+    track_count: int = 0
+    deleted_at: datetime
+    deleted_by_display_name: str | None = None
+    owner_id: int
+    owner_display_name: str
+    owner_username: str
+    expires_at: datetime | None = None
+
+
 class PlayHistoryCreate(TrackBase):
     listened_sec: int | None = Field(default=None, ge=0)
 
@@ -403,6 +416,7 @@ class CacheSettingsRead(BaseModel):
     cache_cleanup_interval_hours: int = Field(ge=1, le=24 * 7)
     catalog_cache_retention_days: int | None = Field(default=7, ge=0)
     catalog_cache_max_size_mb: int | None = Field(default=None, ge=1)
+    playlist_retention_days: int = Field(default=90, ge=0)
     updated_at: datetime
 
     model_config = {"from_attributes": True}
@@ -416,6 +430,7 @@ class CacheSettingsUpdate(BaseModel):
     cache_cleanup_interval_hours: int | None = Field(default=None, ge=1, le=24 * 7)
     catalog_cache_retention_days: int | None = Field(default=None, ge=0)
     catalog_cache_max_size_mb: int | None = Field(default=None, ge=1)
+    playlist_retention_days: int | None = Field(default=None, ge=0)
 
 
 class CatalogCacheStats(BaseModel):

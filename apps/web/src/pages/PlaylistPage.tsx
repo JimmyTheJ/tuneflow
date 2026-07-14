@@ -1,6 +1,7 @@
-import { GripVertical, Play, X } from "lucide-react";
+import { GripVertical, Play, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useState, type DragEvent } from "react";
-import { useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { EditablePlaylistTitle } from "@/components/EditablePlaylistTitle";
 import { EqBulkWarningModal } from "@/components/EqBulkWarningModal";
 import { EqProfilePickerModal } from "@/components/EqProfilePickerModal";
@@ -18,6 +19,7 @@ import type { PlaylistDetail } from "@/types";
 
 export function PlaylistPage() {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const [playlist, setPlaylist] = useState<PlaylistDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
@@ -25,6 +27,8 @@ export function PlaylistPage() {
   const [eqPickerOpen, setEqPickerOpen] = useState(false);
   const [applyWarningOpen, setApplyWarningOpen] = useState(false);
   const [clearWarningOpen, setClearWarningOpen] = useState(false);
+  const [deleteWarningOpen, setDeleteWarningOpen] = useState(false);
+  const [deleteBusy, setDeleteBusy] = useState(false);
   const [eqStatus, setEqStatus] = useState<string | null>(null);
   const playTrack = usePlayerStore((s) => s.playTrack);
   const profiles = useEqStore((s) => s.profiles);
@@ -69,6 +73,21 @@ export function PlaylistPage() {
     if (!playlist) return;
     const updated = await api.updatePlaylist(playlist.id, { name });
     setPlaylist({ ...playlist, name: updated.name });
+  };
+
+  const handleDeletePlaylist = async () => {
+    if (!playlist) return;
+    setDeleteBusy(true);
+    setError(null);
+    try {
+      await api.deletePlaylist(playlist.id);
+      navigate("/library", { replace: true });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not delete playlist");
+      setDeleteWarningOpen(false);
+    } finally {
+      setDeleteBusy(false);
+    }
   };
 
   const handleRemoveTrack = async (trackId: number) => {
@@ -217,6 +236,15 @@ export function PlaylistPage() {
               >
                 Clear all track EQs
               </Button>
+              <Button
+                variant="ghost"
+                size="lg"
+                className="!rounded-full gap-2 text-danger-fg"
+                onClick={() => setDeleteWarningOpen(true)}
+              >
+                <Trash2 className="size-4" />
+                Delete playlist
+              </Button>
             </div>
           </div>
         </div>
@@ -316,6 +344,16 @@ export function PlaylistPage() {
           const result = await clearPlaylistTrackEqs(playlist.id);
           showEqStatus(`Cleared EQ on ${result.cleared} tracks`);
         }}
+      />
+      <ConfirmDialog
+        visible={deleteWarningOpen}
+        title="Delete playlist?"
+        message={`Delete "${playlist.name}"?\n\nIt will be removed from your library. A household administrator can restore it within 90 days. After that it will be permanently deleted along with its tracks.`}
+        confirmLabel="Delete playlist"
+        danger
+        busy={deleteBusy}
+        onConfirm={() => void handleDeletePlaylist()}
+        onCancel={() => setDeleteWarningOpen(false)}
       />
     </div>
   );
