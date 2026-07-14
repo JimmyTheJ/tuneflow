@@ -10,14 +10,14 @@ import {
   View,
 } from "react-native";
 
-import { TrackRow } from "@/components/TrackRow";
+import { TrackRowWithActions } from "@/components/TrackRowWithActions";
 import { MediaCard } from "@/components/ui/MediaCard";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import { MediaCardSkeleton, TrackRowSkeleton } from "@/components/ui/Skeleton";
 import { api } from "@/lib/api";
 import { useAuthStore } from "@/stores/auth";
 import { usePlayerStore } from "@/stores/player";
-import type { PlayHistoryEntry } from "@/types";
+import type { PlayHistoryEntry, Playlist } from "@/types";
 
 function greeting(): string {
   const hour = new Date().getHours();
@@ -29,9 +29,18 @@ function greeting(): string {
 export default function HomeScreen() {
   const user = useAuthStore((state) => state.user);
   const [history, setHistory] = useState<PlayHistoryEntry[]>([]);
+  const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const playTrack = usePlayerStore((state) => state.playTrack);
+
+  const loadPlaylists = useCallback(async () => {
+    try {
+      setPlaylists(await api.listPlaylists());
+    } catch {
+      /* playlist actions are optional on home */
+    }
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -47,7 +56,8 @@ export default function HomeScreen() {
 
   useEffect(() => {
     void load();
-  }, [load]);
+    void loadPlaylists();
+  }, [load, loadPlaylists]);
 
   const name = user?.display_name?.split(" ")[0];
 
@@ -120,7 +130,13 @@ export default function HomeScreen() {
             </View>
           }
           renderItem={({ item }) => (
-            <TrackRow track={item} onPress={() => void playTrack(item, history)} />
+            <TrackRowWithActions
+              track={item}
+              playQueue={history}
+              playlists={playlists}
+              onPlay={() => void playTrack(item, history)}
+              onPlaylistsChange={() => void loadPlaylists()}
+            />
           )}
         />
       )}

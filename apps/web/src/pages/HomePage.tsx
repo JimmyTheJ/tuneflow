@@ -2,13 +2,14 @@ import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Music2, Search } from "lucide-react";
 import { MediaCard } from "@/components/MediaCard";
-import { TrackRow } from "@/components/TrackRow";
+import { TrackRowWithActions } from "@/components/TrackRowWithActions";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import { Skeleton, TrackRowSkeleton } from "@/components/ui/Skeleton";
+import { useLikedTracks } from "@/hooks/useLikedTracks";
 import { api } from "@/lib/api";
 import { useAuthStore } from "@/stores/authStore";
 import { usePlayerStore } from "@/stores/playerStore";
-import type { PlayHistoryEntry } from "@/types";
+import type { PlayHistoryEntry, Playlist } from "@/types";
 
 function greeting(): string {
   const hour = new Date().getHours();
@@ -20,9 +21,19 @@ function greeting(): string {
 export function HomePage() {
   const user = useAuthStore((s) => s.user);
   const [history, setHistory] = useState<PlayHistoryEntry[]>([]);
+  const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const playTrack = usePlayerStore((s) => s.playTrack);
+  const { likedVideoIds, refresh: refreshLikedTracks } = useLikedTracks();
+
+  const loadPlaylists = useCallback(async () => {
+    try {
+      setPlaylists(await api.listPlaylists());
+    } catch {
+      /* playlist actions are optional on home */
+    }
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -38,7 +49,8 @@ export function HomePage() {
 
   useEffect(() => {
     void load();
-  }, [load]);
+    void loadPlaylists();
+  }, [load, loadPlaylists]);
 
   const name = user?.display_name?.split(" ")[0];
 
@@ -110,7 +122,16 @@ export function HomePage() {
               <SectionHeader title="Jump back in" />
               <div className="space-y-0.5">
                 {history.map((item) => (
-                  <TrackRow key={item.id} track={item} onClick={() => void playTrack(item, history)} />
+                  <TrackRowWithActions
+                    key={item.id}
+                    track={item}
+                    playQueue={history}
+                    likedVideoIds={likedVideoIds}
+                    playlists={playlists}
+                    onPlay={() => void playTrack(item, history)}
+                    onLikedChange={() => void refreshLikedTracks()}
+                    onPlaylistsChange={() => void loadPlaylists()}
+                  />
                 ))}
               </div>
             </section>
