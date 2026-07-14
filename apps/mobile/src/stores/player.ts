@@ -50,7 +50,9 @@ type PlayerState = {
   removeQueueIndex: (queueIndex: number) => Promise<void>;
   clearUpcoming: () => void;
   reorderQueue: (fromQueueIndex: number, toQueueIndex: number) => void;
+  moveQueueToTop: (queueIndex: number) => void;
   addToQueue: (track: Track) => void;
+  queueInsertIndex: number | null;
   stop: () => Promise<void>;
   clearError: () => void;
   reportProgress: (positionSec: number, durationSec?: number) => void;
@@ -302,6 +304,38 @@ function moveInQueue(queue: Track[], fromIndex: number, toIndex: number): Track[
   return next;
 }
 
+function resolveQueueInsertIndex(
+  state: Pick<PlayerState, "current" | "queue" | "queueInsertIndex">,
+): number {
+  const currentIndex = currentQueueIndex(state);
+  if (currentIndex < 0) return state.queue.length;
+
+  const nextSlot = currentIndex + 1;
+  if (state.queueInsertIndex == null || state.queueInsertIndex < nextSlot) {
+    return nextSlot;
+  }
+  return Math.min(state.queueInsertIndex, state.queue.length);
+}
+
+function insertIndexIntoShuffleOrder(
+  shuffleOrder: number[],
+  shuffleStep: number,
+  insertAt: number,
+): number[] {
+  const next = shuffleOrder.map((index) => (index >= insertAt ? index + 1 : index));
+  next.splice(shuffleStep + 1, 0, insertAt);
+  return next;
+}
+
+function adjustQueueInsertIndexAfterRemoval(
+  queueInsertIndex: number | null,
+  removedIndex: number,
+): number | null {
+  if (queueInsertIndex == null) return null;
+  if (removedIndex < queueInsertIndex) return queueInsertIndex - 1;
+  return queueInsertIndex;
+}
+
 function expectedNextTrack(state: PlayerState): Track | null {
   const action = resolveNextAction(state);
   if (action.type !== "track") return null;
@@ -491,6 +525,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   durationSec: 0,
   volume: storedVolume,
   queue: [],
+  queueInsertIndex: null,
   shuffle: false,
   shuffleOrder: [],
   shuffleStep: 0,
@@ -609,6 +644,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       isPlaying: false,
       current: track,
       queue: nextQueue,
+      queueInsertIndex: activeIndex + 1,
       shuffleOrder,
       shuffleStep,
       streamSelection: adopted?.selection ?? selection,
@@ -857,7 +893,11 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       return;
     }
 
-    set({ queue: nextQueue, shuffleOrder, shuffleStep });
+    const queueInsertIndex = adjustQueueInsertIndexAfterRemoval(
+      state.queueInsertIndex,
+      queueIndex,
+    );
+    set({ queue: nextQueue, shuffleOrder, shuffleStep, queueInsertIndex });
     syncPrefetchWithQueue(get);
   },
 
@@ -876,11 +916,34 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     const nextQueue = [state.queue[currentIndex]];
     set({
       queue: nextQueue,
+      queueInsertIndex: 1,
       shuffle: false,
       shuffleOrder: [],
       shuffleStep: 0,
     });
     syncPrefetchWithQueue(get);
+  },
+
+  moveQueueToTop: (queueIndex) => {
+    const state = get();
+    const currentIndex = currentQueueIndex(state);
+    if (currentIndex < 0) return;
+    if (queueIndex === currentIndex) return;
+
+    if (state.shuffle && state.shuffleOrder.length > 1) {
+      const fromStep = state.shuffleOrder.indexOf(queueIndex);
+      const targetStep = state.shuffleStep + 1;
+      if (fromStep < 0 || fromStep === targetStep) return;
+      const toQueueIndex = state.shuffleOrder[targetStep];
+      if (toQueueIndex == null) return;
+      get().reorderQueue(queueIndex, toQueueIndex);
+      return;
+    }
+
+    const targetIndex = currentIndex + 1;
+    if (queueIndex <= currentIndex || queueIndex === targetIndex) return;
+
+    get().reorderQueue(queueIndex, targetIndex);
   },
 
   reorderQueue: (fromQueueIndex, toQueueIndex) => {
@@ -894,7 +957,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
     if (state.shuffle && state.shuffleOrder.length > 1) {
       const nextOrder = moveInShuffleOrder(state.shuffleOrder, fromQueueIndex, toQueueIndex);
-      set({ shuffleOrder: nextOrder });
+      set({ shuffleOrder: nextOrder, queueInsertIndex: null });
       syncPrefetchWithQueue(get);
       return;
     }
@@ -909,21 +972,45 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       shuffleStep += 1;
     }
 
-    set({ queue: nextQueue, shuffleStep });
+    set({ queue: nextQueue, shuffleStep, queueInsertIndex: null });
     syncPrefetchWithQueue(get);
   },
 
   addToQueue: (track) => {
     const state = get();
-    const nextQueue = [...state.queue, track];
-    const nextIndex = nextQueue.length - 1;
+    const currentIndex = currentQueueIndex(state);
 
-    let shuffleOrder = state.shuffleOrder;
-    if (state.shuffle) {
-      shuffleOrder = shuffleOrder.length > 0 ? [...shuffleOrder, nextIndex] : [nextIndex];
+    if (currentIndex < 0) {
+      const nextQueue = [...state.queue, track];
+      const nextIndex = nextQueue.length - 1;
+
+      let shuffleOrder = state.shuffleOrder;
+      if (state.shuffle) {
+        shuffleOrder = shuffleOrder.length > 0 ? [...shuffleOrder, nextIndex] : [nextIndex];
+      }
+
+      set({ queue: nextQueue, shuffleOrder });
+      return;
     }
 
-    set({ queue: nextQueue, shuffleOrder });
+    const insertAt = resolveQueueInsertIndex(state);
+    const nextQueue = [...state.queue];
+    nextQueue.splice(insertAt, 0, track);
+
+    let shuffleOrder = state.shuffleOrder;
+    let shuffleStep = state.shuffleStep;
+    if (state.shuffle && shuffleOrder.length > 0) {
+      shuffleOrder = insertIndexIntoShuffleOrder(shuffleOrder, shuffleStep, insertAt);
+    } else if (!state.shuffle && insertAt <= shuffleStep) {
+      shuffleStep += 1;
+    }
+
+    set({
+      queue: nextQueue,
+      shuffleOrder,
+      shuffleStep,
+      queueInsertIndex: insertAt + 1,
+    });
     if (state.current) {
       syncPrefetchWithQueue(get);
     }
@@ -945,6 +1032,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       positionSec: 0,
       durationSec: 0,
       queue: [],
+      queueInsertIndex: null,
       shuffleOrder: [],
       shuffleStep: 0,
       streamSelection: DEFAULT_SELECTION,

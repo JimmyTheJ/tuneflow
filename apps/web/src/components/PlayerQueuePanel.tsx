@@ -1,4 +1,4 @@
-import { GripVertical, X } from "lucide-react";
+import { GripVertical, ListStart, X } from "lucide-react";
 import { useState, type DragEvent } from "react";
 import { TrackRow } from "@/components/TrackRow";
 import { Button } from "@/components/ui/Button";
@@ -22,12 +22,14 @@ export function PlayerQueuePanel({ onClose, className }: Props) {
   const removeQueueIndex = usePlayerStore((s) => s.removeQueueIndex);
   const clearUpcoming = usePlayerStore((s) => s.clearUpcoming);
   const reorderQueue = usePlayerStore((s) => s.reorderQueue);
+  const moveQueueToTop = usePlayerStore((s) => s.moveQueueToTop);
 
   const [draggedQueueIndex, setDraggedQueueIndex] = useState<number | null>(null);
   const [dropTargetQueueIndex, setDropTargetQueueIndex] = useState<number | null>(null);
 
   const items = getQueueView({ current, queue, shuffle, shuffleOrder, shuffleStep });
   const upcomingCount = items.filter((item) => item.status === "upcoming").length;
+  const firstUpcomingItem = items.find((item) => item.status === "upcoming");
 
   const handleDragStart = (event: DragEvent<HTMLButtonElement>, queueIndex: number) => {
     event.dataTransfer.effectAllowed = "move";
@@ -144,6 +146,18 @@ export function PlayerQueuePanel({ onClose, className }: Props) {
                   onClick={isUpcoming ? () => void playQueueIndex(item.queueIndex) : undefined}
                 />
               </div>
+              {isUpcoming &&
+              firstUpcomingItem != null &&
+              item.queueIndex !== firstUpcomingItem.queueIndex ? (
+                <IconButton
+                  label={`Play ${item.track.title} next`}
+                  size="sm"
+                  className="opacity-0 group-hover:opacity-100"
+                  onClick={() => moveQueueToTop(item.queueIndex)}
+                >
+                  <ListStart className="size-3.5" />
+                </IconButton>
+              ) : null}
               <IconButton
                 label={`Remove ${item.track.title} from queue`}
                 size="sm"

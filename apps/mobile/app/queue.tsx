@@ -17,9 +17,11 @@ export default function QueueScreen() {
   const removeQueueIndex = usePlayerStore((s) => s.removeQueueIndex);
   const clearUpcoming = usePlayerStore((s) => s.clearUpcoming);
   const reorderQueue = usePlayerStore((s) => s.reorderQueue);
+  const moveQueueToTop = usePlayerStore((s) => s.moveQueueToTop);
 
   const items = getQueueView({ current, queue, shuffle, shuffleOrder, shuffleStep });
   const upcomingCount = items.filter((item) => item.status === "upcoming").length;
+  const firstUpcomingItem = items.find((item) => item.status === "upcoming");
 
   if (items.length === 0) {
     return (
@@ -54,6 +56,10 @@ export default function QueueScreen() {
           const isPlaying = item.status === "playing";
           const canMoveUp = isUpcoming && visualIndex > 1;
           const canMoveDown = isUpcoming && visualIndex < items.length - 1;
+          const canMoveToTop =
+            isUpcoming &&
+            firstUpcomingItem != null &&
+            item.queueIndex !== firstUpcomingItem.queueIndex;
 
           return (
             <View
@@ -76,6 +82,16 @@ export default function QueueScreen() {
               </View>
               {isUpcoming ? (
                 <View className="flex-row items-center pr-1">
+                  {canMoveToTop ? (
+                    <Pressable
+                      className="p-1.5"
+                      onPress={() => moveQueueToTop(item.queueIndex)}
+                      hitSlop={6}
+                      accessibilityLabel={`Play ${item.track.title} next`}
+                    >
+                      <Ionicons name="play-skip-forward" size={16} color="#b3b3b3" />
+                    </Pressable>
+                  ) : null}
                   <Pressable
                     disabled={!canMoveUp}
                     className={`p-1.5 ${canMoveUp ? "" : "opacity-25"}`}
