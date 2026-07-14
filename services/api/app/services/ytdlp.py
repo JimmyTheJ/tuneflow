@@ -53,6 +53,17 @@ async def search_video_ids(query: str, limit: int = 8) -> list[str]:
     return await asyncio.to_thread(_search_sync, query, limit)
 
 
+async def search_video_entries(query: str, limit: int = 10) -> list[dict]:
+    return await asyncio.to_thread(_search_sync_entries, query, limit)
+
+
+def _search_sync_entries(query: str, limit: int) -> list[dict]:
+    with yt_dlp.YoutubeDL({**_YTDL_BASE_OPTS, "extract_flat": True}) as ydl:
+        info = ydl.extract_info(f"ytsearch{limit}:{query}", download=False)
+    entries = info.get("entries") or []
+    return [entry for entry in entries if entry.get("id")]
+
+
 def _stream_info_from_audio(info: dict, video_id: str) -> StreamInfo:
     direct_url = info.get("url")
     if not direct_url:

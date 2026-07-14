@@ -40,8 +40,8 @@ def track_resolution_cache_key(
     recording_mbid: str | None = None,
 ) -> str:
     if recording_mbid:
-        return f"track_resolve:recording:{recording_mbid}"
-    return f"track_resolve:query:{artist_name.strip().lower()}|{track_title.strip().lower()}"
+        return f"track_resolve:v2:recording:{recording_mbid}"
+    return f"track_resolve:v2:query:{artist_name.strip().lower()}|{track_title.strip().lower()}"
 
 
 async def get_catalog_cache_many(keys: list[str]) -> dict[str, str]:

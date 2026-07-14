@@ -214,7 +214,12 @@ async def get_album(
     ]
 
     if resolve:
-        catalog_tracks = await _resolve_album_tracks(catalog_tracks, detail.artist_name, child_settings)
+        catalog_tracks = await _resolve_album_tracks(
+            catalog_tracks,
+            detail.artist_name,
+            child_settings,
+            album_title=detail.title,
+        )
 
     return AlbumDetail(
         mbid=detail.mbid,
@@ -232,13 +237,16 @@ async def _resolve_album_tracks(
     tracks: list[CatalogTrack],
     artist_name: str,
     child_settings,
+    *,
+    album_title: str | None = None,
 ) -> list[CatalogTrack]:
     unresolved = [(i, t) for i, t in enumerate(tracks) if not t.resolved]
     if not unresolved:
         return tracks
 
     resolved_list = await resolve_catalog_tracks(
-        [(artist_name, t.title, t.recording_mbid) for _, t in unresolved],
+        [(artist_name, t.title, t.recording_mbid, t.duration_ms) for _, t in unresolved],
+        album_title=album_title,
         concurrency=3,
     )
 
@@ -275,7 +283,12 @@ async def resolve_album_tracks(
         raise HTTPException(status_code=502, detail=f"Could not load album: {exc}") from exc
 
     catalog_tracks = [_catalog_track_from_mb(track) for track in detail.tracks]
-    resolved_tracks = await _resolve_album_tracks(catalog_tracks, detail.artist_name, child_settings)
+    resolved_tracks = await _resolve_album_tracks(
+        catalog_tracks,
+        detail.artist_name,
+        child_settings,
+        album_title=detail.title,
+    )
     return AlbumResolveResult(tracks=resolved_tracks)
 
 
