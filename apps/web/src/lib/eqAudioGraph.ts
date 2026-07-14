@@ -11,6 +11,7 @@ type MediaGraph = {
 
 let audioContext: AudioContext | null = null;
 const graphs = new WeakMap<HTMLMediaElement, MediaGraph>();
+const elementSources = new WeakMap<HTMLMediaElement, MediaElementAudioSourceNode>();
 
 function getContext(): AudioContext {
   if (!audioContext) {
@@ -26,9 +27,28 @@ async function resumeContext(): Promise<void> {
   }
 }
 
-function buildGraph(media: HTMLMediaElement): MediaGraph {
+function getOrCreateSource(media: HTMLMediaElement): MediaElementAudioSourceNode {
+  const existing = elementSources.get(media);
+  if (existing) return existing;
+
+  const source = getContext().createMediaElementSource(media);
+  elementSources.set(media, source);
+  return source;
+}
+
+function wireGraph(graph: MediaGraph): void {
   const context = getContext();
-  const source = context.createMediaElementSource(media);
+  graph.source.connect(graph.filters[0]!);
+  for (let index = 0; index < graph.filters.length - 1; index += 1) {
+    graph.filters[index]!.connect(graph.filters[index + 1]!);
+  }
+  graph.filters[graph.filters.length - 1]!.connect(graph.gain);
+  graph.gain.connect(context.destination);
+}
+
+function createGraph(media: HTMLMediaElement): MediaGraph {
+  const context = getContext();
+  const source = getOrCreateSource(media);
   const filters = Array.from({ length: 10 }, () => {
     const filter = context.createBiquadFilter();
     filter.type = "peaking";
@@ -36,15 +56,9 @@ function buildGraph(media: HTMLMediaElement): MediaGraph {
     return filter;
   });
   const gain = context.createGain();
-
-  source.connect(filters[0]!);
-  for (let index = 0; index < filters.length - 1; index += 1) {
-    filters[index]!.connect(filters[index + 1]!);
-  }
-  filters[filters.length - 1]!.connect(gain);
-  gain.connect(context.destination);
-
-  return { source, filters, gain };
+  const graph = { source, filters, gain };
+  wireGraph(graph);
+  return graph;
 }
 
 export function disconnectEq(media: HTMLMediaElement | null): void {
@@ -82,10 +96,11 @@ export async function connectEq(
   }
 
   if (!graph) {
-    graph = buildGraph(media);
+    graph = createGraph(media);
     graphs.set(media, graph);
-    media.volume = 1;
   }
+
+  media.volume = 1;
 
   const effectiveBands = enabled ? bands : createFlatBands();
   const effectivePreamp = enabled ? preampDb : 0;

@@ -28,8 +28,8 @@ type EqState = {
   ensureTrackAssignment: (videoId: string) => Promise<void>;
 };
 
-function refreshPlaybackEq(): void {
-  void syncEqPlayback();
+function refreshPlaybackEq(): Promise<void> {
+  return syncEqPlayback();
 }
 
 export const useEqStore = create<EqState>((set, get) => ({

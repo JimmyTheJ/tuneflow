@@ -5,37 +5,44 @@ import { useEqStore } from "@/stores/eqStore";
 import { usePlayerStore } from "@/stores/playerStore";
 import type { EqBand } from "@/types";
 
-export async function syncEqPlayback(mediaOverride?: HTMLMediaElement | null): Promise<void> {
-  const player = usePlayerStore.getState();
-  const eq = useEqStore.getState();
-  const media = mediaOverride ?? player.media;
+let eqSyncChain: Promise<void> = Promise.resolve();
 
-  if (!media || !player.current) return;
+export function syncEqPlayback(mediaOverride?: HTMLMediaElement | null): Promise<void> {
+  const run = async () => {
+    const player = usePlayerStore.getState();
+    const eq = useEqStore.getState();
+    const media = mediaOverride ?? player.media;
 
-  const resolved = eq.enabled
-    ? resolveActiveEq({
-        videoId: player.current.video_id,
-        queueSource: player.queueSource,
-        queueEqProfileId: player.queueEqProfileId,
-        eqBroadcastActive: player.eqBroadcastActive,
-        eqBroadcastSnapshot: player.eqBroadcastSnapshot,
-        profiles: eq.profiles,
-        trackAssignments: eq.trackAssignments,
-        playlistAssignments: eq.playlistAssignments,
-      })
-    : {
-        bands: createFlatBands(),
-        preampDb: 0,
-        source: "flat" as const,
-        profileId: null,
-        profileName: null,
-      };
+    if (!media || !player.current) return;
 
-  await connectEq(media, player.volume, resolved.bands, resolved.preampDb, eq.enabled);
+    const resolved = eq.enabled
+      ? resolveActiveEq({
+          videoId: player.current.video_id,
+          queueSource: player.queueSource,
+          queueEqProfileId: player.queueEqProfileId,
+          eqBroadcastActive: player.eqBroadcastActive,
+          eqBroadcastSnapshot: player.eqBroadcastSnapshot,
+          profiles: eq.profiles,
+          trackAssignments: eq.trackAssignments,
+          playlistAssignments: eq.playlistAssignments,
+        })
+      : {
+          bands: createFlatBands(),
+          preampDb: 0,
+          source: "flat" as const,
+          profileId: null,
+          profileName: null,
+        };
 
-  if (media instanceof HTMLVideoElement && player.streamSelection.video && !player.streamSelection.audio) {
-    media.muted = true;
-  }
+    await connectEq(media, player.volume, resolved.bands, resolved.preampDb, eq.enabled);
+
+    if (media instanceof HTMLVideoElement && player.streamSelection.video && !player.streamSelection.audio) {
+      media.muted = true;
+    }
+  };
+
+  eqSyncChain = eqSyncChain.then(run, run);
+  return eqSyncChain;
 }
 
 export async function applyEqPreview(bands: EqBand[], preampDb: number): Promise<void> {
