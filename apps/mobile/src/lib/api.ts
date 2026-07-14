@@ -209,8 +209,10 @@ export const api = {
   getMyChildSettings: () => request<ParentalSettings>("/api/parental/me/settings"),
 
   aiStatus: () => request<LlmStatus>("/api/ai/status"),
-  aiInsights: () => request<AiInsights>("/api/ai/insights"),
-  aiRecommendations: () => request<AiRecommendations>("/api/ai/recommendations"),
+  aiInsights: (refresh = false) =>
+    request<AiInsights>(`/api/ai/insights${refresh ? "?refresh=true" : ""}`),
+  aiRecommendations: (refresh = false) =>
+    request<AiRecommendations>(`/api/ai/recommendations${refresh ? "?refresh=true" : ""}`),
   listScrobblerProviders: () => request<ScrobblerProviderInfo[]>("/api/scrobbler/providers"),
   getScrobblerStatus: (provider: string) =>
     request<ScrobblerConnectionStatus>(`/api/scrobbler/${provider}`),

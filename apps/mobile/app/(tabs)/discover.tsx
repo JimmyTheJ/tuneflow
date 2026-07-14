@@ -1,60 +1,39 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useCallback, useEffect, useState } from "react";
-import { RefreshControl, ScrollView, Text, View } from "react-native";
+import { ActivityIndicator, RefreshControl, ScrollView, Text, View } from "react-native";
 
 import { TrackRow } from "@/components/TrackRow";
 import { Card } from "@/components/ui/Card";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import { Skeleton, TrackRowSkeleton } from "@/components/ui/Skeleton";
-import { api } from "@/lib/api";
+import { useDiscoverData } from "@/hooks/useDiscoverData";
+import { useAuthStore } from "@/stores/auth";
 import { usePlayerStore } from "@/stores/player";
-import type { AiInsights, AiRecommendations, LlmStatus } from "@/types";
 
 export default function DiscoverScreen() {
-  const [status, setStatus] = useState<LlmStatus | null>(null);
-  const [insights, setInsights] = useState<AiInsights | null>(null);
-  const [recommendations, setRecommendations] = useState<AiRecommendations | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const userId = useAuthStore((state) => state.user?.id);
+  const { status, insights, recommendations, error, loading, refreshing, reload } =
+    useDiscoverData(userId);
   const playTrack = usePlayerStore((state) => state.playTrack);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const llmStatus = await api.aiStatus();
-      setStatus(llmStatus);
-      if (llmStatus.enabled && llmStatus.reachable) {
-        const [insightsData, recommendationsData] = await Promise.all([
-          api.aiInsights(),
-          api.aiRecommendations(),
-        ]);
-        setInsights(insightsData);
-        setRecommendations(recommendationsData);
-      } else {
-        setInsights(null);
-        setRecommendations(null);
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not load AI features");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
 
   return (
     <ScrollView
       className="flex-1 bg-base px-4 pt-2"
-      refreshControl={<RefreshControl refreshing={loading} onRefresh={() => void load()} tintColor="#1db954" />}
+      refreshControl={
+        <RefreshControl refreshing={refreshing} onRefresh={() => void reload()} tintColor="#1db954" />
+      }
     >
       <Text className="text-3xl font-bold tracking-tight text-text">Discover</Text>
-      <Text className="mb-4 mt-1 text-text-secondary">
+      <Text className="mb-1 mt-1 text-text-secondary">
         Personalized insights from your listening history
       </Text>
+      {refreshing ? (
+        <View className="mb-3 flex-row items-center gap-2">
+          <ActivityIndicator size="small" color="#1db954" />
+          <Text className="text-sm text-text-secondary">Updating recommendations…</Text>
+        </View>
+      ) : (
+        <View className="mb-4" />
+      )}
 
       {error ? <Text className="mb-3 text-danger-fg">{error}</Text> : null}
 

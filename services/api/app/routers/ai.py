@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -7,6 +7,12 @@ from app.config import settings
 from app.database import get_db
 from app.models import PlayHistory, User
 from app.schemas import AiInsights, AiRecommendations, LlmStatus
+from app.services.ai_cache import (
+    get_discover_insights,
+    get_discover_recommendations,
+    set_discover_insights,
+    set_discover_recommendations,
+)
 from app.services.llm import llm_client
 
 router = APIRouter(prefix="/ai", tags=["ai"])
@@ -19,28 +25,42 @@ async def ai_status(_: User = Depends(get_current_user)) -> LlmStatus:
 
 @router.get("/insights", response_model=AiInsights)
 async def listening_insights(
+    refresh: bool = Query(default=False),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> AiInsights:
     _ensure_llm_ready()
+    if not refresh:
+        cached = await get_discover_insights(current_user.id)
+        if cached:
+            return AiInsights.model_validate_json(cached)
     history_lines = await _history_lines(db, current_user.id)
     try:
-        return await llm_client.insights(history_lines, current_user.display_name)
+        result = await llm_client.insights(history_lines, current_user.display_name)
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    await set_discover_insights(current_user.id, result.model_dump_json())
+    return result
 
 
 @router.get("/recommendations", response_model=AiRecommendations)
 async def music_recommendations(
+    refresh: bool = Query(default=False),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> AiRecommendations:
     _ensure_llm_ready()
+    if not refresh:
+        cached = await get_discover_recommendations(current_user.id)
+        if cached:
+            return AiRecommendations.model_validate_json(cached)
     history_lines = await _history_lines(db, current_user.id)
     try:
-        return await llm_client.recommendations(history_lines, current_user.display_name)
+        result = await llm_client.recommendations(history_lines, current_user.display_name)
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    await set_discover_recommendations(current_user.id, result.model_dump_json())
+    return result
 
 
 def _ensure_llm_ready() -> None:

@@ -1,48 +1,29 @@
-import { useCallback, useEffect, useState } from "react";
-import { Sparkles } from "lucide-react";
+import { Loader2, Sparkles } from "lucide-react";
+
 import { TrackRow } from "@/components/TrackRow";
 import { Card } from "@/components/ui/Card";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import { Skeleton, TrackRowSkeleton } from "@/components/ui/Skeleton";
-import { api } from "@/lib/api";
+import { useDiscoverData } from "@/hooks/useDiscoverData";
+import { useAuthStore } from "@/stores/authStore";
 import { usePlayerStore } from "@/stores/playerStore";
-import type { AiInsights, AiRecommendations, LlmStatus } from "@/types";
 
 export function DiscoverPage() {
-  const [status, setStatus] = useState<LlmStatus | null>(null);
-  const [insights, setInsights] = useState<AiInsights | null>(null);
-  const [recommendations, setRecommendations] = useState<AiRecommendations | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const userId = useAuthStore((s) => s.user?.id);
+  const { status, insights, recommendations, error, loading, refreshing } = useDiscoverData(userId);
   const playTrack = usePlayerStore((s) => s.playTrack);
-
-  const load = useCallback(async () => {
-    setError(null);
-    setLoading(true);
-    try {
-      const llmStatus = await api.aiStatus();
-      setStatus(llmStatus);
-      if (llmStatus.enabled && llmStatus.reachable) {
-        const [i, r] = await Promise.all([api.aiInsights(), api.aiRecommendations()]);
-        setInsights(i);
-        setRecommendations(r);
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not load AI features");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
 
   return (
     <div className="space-y-8">
       <div>
         <h1 className="m-0 text-3xl font-bold tracking-tight md:text-4xl">Discover</h1>
         <p className="mt-2 text-text-secondary">Personalized insights from your listening history</p>
+        {refreshing ? (
+          <p className="mt-2 flex items-center gap-2 text-sm text-text-secondary">
+            <Loader2 className="size-4 animate-spin text-accent" />
+            Updating recommendations…
+          </p>
+        ) : null}
       </div>
 
       {error ? <p className="text-danger-fg">{error}</p> : null}
