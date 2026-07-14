@@ -255,7 +255,7 @@ export function SettingsPage() {
                 Integrations &amp; health
               </SettingsLink>
               <SettingsLink to="/admin/cache" icon={Database}>
-                Audio cache management
+                Cache management
               </SettingsLink>
               <SettingsLink to="/admin/users/deleted" icon={Trash2}>
                 Deleted accounts

@@ -18,6 +18,7 @@ export function AdminCachePage() {
   const [entries, setEntries] = useState<CacheEntry[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [retentionDays, setRetentionDays] = useState("");
+  const [refreshDays, setRefreshDays] = useState("180");
   const [maxSizeMb, setMaxSizeMb] = useState("");
   const [cleanupHours, setCleanupHours] = useState("24");
   const [filterUserId, setFilterUserId] = useState("");
@@ -42,6 +43,7 @@ export function AdminCachePage() {
     setRetentionDays(
       nextSettings.cache_retention_days == null ? "" : String(nextSettings.cache_retention_days),
     );
+    setRefreshDays(String(nextSettings.cache_refresh_days));
     setMaxSizeMb(nextSettings.cache_max_size_mb == null ? "" : String(nextSettings.cache_max_size_mb));
     setCleanupHours(String(nextSettings.cache_cleanup_interval_hours));
   }, [filterUserId]);
@@ -69,6 +71,7 @@ export function AdminCachePage() {
       const updated = await api.updateCacheSettings({
         cache_enabled: settings?.cache_enabled,
         cache_retention_days: retentionDays.trim() === "" ? null : Number(retentionDays),
+        cache_refresh_days: Number(refreshDays),
         cache_max_size_mb: maxSizeMb.trim() === "" ? null : Number(maxSizeMb),
         cache_cleanup_interval_hours: Number(cleanupHours),
       });
@@ -99,6 +102,20 @@ export function AdminCachePage() {
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not clear cache");
+    }
+  };
+
+  const clearCatalogCache = async () => {
+    if (!window.confirm("Delete all cached artist and album metadata? This cannot be undone.")) return;
+    setError(null);
+    try {
+      const result = await api.clearCatalogCache();
+      setMessage(
+        `Cleared ${result.deleted_entries} catalog entr${result.deleted_entries === 1 ? "y" : "ies"} (${formatBytes(result.freed_bytes)} freed)`,
+      );
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not clear catalog cache");
     }
   };
 
@@ -192,30 +209,52 @@ export function AdminCachePage() {
 
   return (
     <div className="page">
-      <h1>Audio cache</h1>
+      <h1>Cache management</h1>
       <p className="muted">
-        Server-side audio files are shared across users. Access metadata tracks who listened to each cached track.
+        Server-side audio files are shared across users. Catalog metadata from MusicBrainz is cached in the
+        database for faster artist and album pages.
       </p>
       {error ? <p className="error">{error}</p> : null}
       {message ? <p className="accent">{message}</p> : null}
 
       {stats ? (
-        <div className="card">
-          <p className="label">Overview</p>
-          <p className="track-title">
-            {stats.entry_count} tracks · {formatBytes(stats.total_size_bytes)} · {stats.unique_users} users
-          </p>
-          <p className="muted">
-            {stats.oldest_accessed_at
-              ? `Last accessed from ${new Date(stats.oldest_accessed_at).toLocaleString()} to ${new Date(stats.newest_accessed_at ?? stats.oldest_accessed_at).toLocaleString()}`
-              : "No cached tracks yet"}
-          </p>
-        </div>
+        <>
+          <div className="card">
+            <p className="label">Audio files</p>
+            <p className="track-title">
+              {stats.entry_count} tracks · {formatBytes(stats.total_size_bytes)} · {stats.unique_users} users
+            </p>
+            <p className="muted">
+              {stats.oldest_accessed_at
+                ? `Last accessed from ${new Date(stats.oldest_accessed_at).toLocaleString()} to ${new Date(stats.newest_accessed_at ?? stats.oldest_accessed_at).toLocaleString()}`
+                : "No cached tracks yet"}
+            </p>
+          </div>
+
+          <div className="card">
+            <p className="label">Catalog metadata</p>
+            <p className="track-title">
+              {stats.catalog.entry_count} entries · {formatBytes(stats.catalog.total_size_bytes)}
+            </p>
+            <p className="muted">
+              {stats.catalog.artist_count} artists · {stats.catalog.album_count} albums ·{" "}
+              {stats.catalog.api_response_count} API responses
+            </p>
+            <p className="muted">
+              {stats.catalog.oldest_cached_at
+                ? `Cached from ${new Date(stats.catalog.oldest_cached_at).toLocaleString()} to ${new Date(stats.catalog.newest_cached_at ?? stats.catalog.oldest_cached_at).toLocaleString()} · expires after 7 days`
+                : "No catalog metadata cached yet"}
+            </p>
+            <button type="button" className="btn-secondary btn-block" onClick={() => void clearCatalogCache()}>
+              Clear catalog metadata
+            </button>
+          </div>
+        </>
       ) : null}
 
       {settings ? (
         <div className="card">
-          <h2>Settings</h2>
+          <h2>Audio cache settings</h2>
           <label className="muted">
             <input
               type="checkbox"
@@ -229,6 +268,12 @@ export function AdminCachePage() {
             placeholder="Retention days (empty = permanent)"
             value={retentionDays}
             onChange={(e) => setRetentionDays(e.target.value)}
+          />
+          <input
+            className="input"
+            placeholder="Re-check metadata after N days"
+            value={refreshDays}
+            onChange={(e) => setRefreshDays(e.target.value)}
           />
           <input
             className="input"
@@ -252,7 +297,7 @@ export function AdminCachePage() {
       ) : null}
 
       <div className="card">
-        <h2>Clear cache</h2>
+        <h2>Clear audio cache</h2>
         <button type="button" className="btn-secondary btn-block" onClick={() => void clearAll()}>
           Clear entire cache
         </button>

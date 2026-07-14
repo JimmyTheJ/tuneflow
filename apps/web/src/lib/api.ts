@@ -211,6 +211,7 @@ export const api = {
     const query = params.toString();
     return request<CachePurgeResult>(`/api/admin/cache${query ? `?${query}` : ""}`, { method: "DELETE" });
   },
+  clearCatalogCache: () => request<CachePurgeResult>("/api/admin/cache/catalog", { method: "DELETE" }),
   clearCacheEntry: (videoId: string) =>
     request<CachePurgeResult>(`/api/admin/cache/${videoId}`, { method: "DELETE" }),
   clearCacheEntries: (videoIds: string[]) =>

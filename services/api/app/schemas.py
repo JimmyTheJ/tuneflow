@@ -398,6 +398,7 @@ class ScrobblerSettingsUpdate(BaseModel):
 class CacheSettingsRead(BaseModel):
     cache_enabled: bool
     cache_retention_days: int | None = Field(default=None, ge=0)
+    cache_refresh_days: int = Field(default=180, ge=1)
     cache_max_size_mb: int | None = Field(default=None, ge=1)
     cache_cleanup_interval_hours: int = Field(ge=1, le=24 * 7)
     updated_at: datetime
@@ -408,8 +409,19 @@ class CacheSettingsRead(BaseModel):
 class CacheSettingsUpdate(BaseModel):
     cache_enabled: bool | None = None
     cache_retention_days: int | None = Field(default=None, ge=0)
+    cache_refresh_days: int | None = Field(default=None, ge=1)
     cache_max_size_mb: int | None = Field(default=None, ge=1)
     cache_cleanup_interval_hours: int | None = Field(default=None, ge=1, le=24 * 7)
+
+
+class CatalogCacheStats(BaseModel):
+    entry_count: int
+    total_size_bytes: int
+    artist_count: int
+    album_count: int
+    api_response_count: int
+    oldest_cached_at: datetime | None
+    newest_cached_at: datetime | None
 
 
 class CacheStats(BaseModel):
@@ -418,6 +430,7 @@ class CacheStats(BaseModel):
     oldest_accessed_at: datetime | None
     newest_accessed_at: datetime | None
     unique_users: int
+    catalog: CatalogCacheStats
 
 
 class CacheAccessUser(BaseModel):

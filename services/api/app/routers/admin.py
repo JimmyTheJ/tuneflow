@@ -25,6 +25,7 @@ from app.services.cache_manager import (
     purge_videos,
     run_retention_cleanup,
 )
+from app.services.catalog_cache import get_catalog_cache_stats, purge_all_catalog_cache
 
 router = APIRouter(prefix="/admin/cache", tags=["admin"])
 
@@ -34,7 +35,9 @@ async def cache_stats(
     _: User = Depends(require_root_admin),
     db: AsyncSession = Depends(get_db),
 ) -> CacheStats:
-    return CacheStats(**await get_cache_stats(db))
+    audio_stats = await get_cache_stats(db)
+    catalog_stats = await get_catalog_cache_stats(db)
+    return CacheStats(**audio_stats, catalog=catalog_stats)
 
 
 @router.get("/settings", response_model=CacheSettingsRead)
@@ -112,6 +115,12 @@ async def clear_cache(
     return CachePurgeResult(deleted_entries=deleted, freed_bytes=freed)
 
 
+@router.delete("/catalog", response_model=CachePurgeResult)
+async def clear_catalog_cache(
+    _: User = Depends(require_root_admin),
+    db: AsyncSession = Depends(get_db),
+) -> CachePurgeResult:
+    deleted, freed = await purge_all_catalog_cache(db)
     return CachePurgeResult(deleted_entries=deleted, freed_bytes=freed)
 
 

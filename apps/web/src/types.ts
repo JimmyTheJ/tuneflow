@@ -111,6 +111,18 @@ export type ArtistDetail = {
   singles: ReleaseSummary[];
 };
 
+export type ArtistStreamEvent =
+  | {
+      event: "profile";
+      data: Pick<ArtistDetail, "mbid" | "name" | "type" | "disambiguation" | "image_url">;
+    }
+  | {
+      event: "chunk";
+      data: Pick<ArtistDetail, "albums" | "eps" | "singles">;
+    }
+  | { event: "done"; data: { image_url?: string | null } }
+  | { event: "error"; data: { message: string } };
+
 export type AlbumDetail = {
   mbid: string;
   title: string;
@@ -240,9 +252,20 @@ export type ScrobblerConnection = {
 export type CacheSettings = {
   cache_enabled: boolean;
   cache_retention_days: number | null;
+  cache_refresh_days: number;
   cache_max_size_mb: number | null;
   cache_cleanup_interval_hours: number;
   updated_at: string;
+};
+
+export type CatalogCacheStats = {
+  entry_count: number;
+  total_size_bytes: number;
+  artist_count: number;
+  album_count: number;
+  api_response_count: number;
+  oldest_cached_at: string | null;
+  newest_cached_at: string | null;
 };
 
 export type CacheStats = {
@@ -251,6 +274,7 @@ export type CacheStats = {
   oldest_accessed_at: string | null;
   newest_accessed_at: string | null;
   unique_users: number;
+  catalog: CatalogCacheStats;
 };
 
 export type CacheAccessUser = {
