@@ -1,4 +1,4 @@
-import { dbToLinear } from "@/lib/eqBands";
+import { createFlatBands, dbToLinear } from "@/lib/eqBands";
 import type { EqBand } from "@/types";
 
 const FILTER_Q = 1.4;
@@ -75,27 +75,29 @@ export async function connectEq(
 ): Promise<void> {
   await resumeContext();
 
-  if (!enabled) {
-    disconnectEq(media);
+  let graph = graphs.get(media);
+  if (!enabled && !graph) {
     media.volume = volume;
     return;
   }
 
-  let graph = graphs.get(media);
   if (!graph) {
     graph = buildGraph(media);
     graphs.set(media, graph);
     media.volume = 1;
   }
 
+  const effectiveBands = enabled ? bands : createFlatBands();
+  const effectivePreamp = enabled ? preampDb : 0;
+
   graph.filters.forEach((filter, index) => {
-    const band = bands[index];
+    const band = effectiveBands[index];
     if (!band) return;
     filter.frequency.value = band.freq;
     filter.gain.value = band.gainDb;
   });
 
-  const output = Math.max(0, Math.min(1, volume * dbToLinear(preampDb)));
+  const output = Math.max(0, Math.min(1, volume * dbToLinear(effectivePreamp)));
   graph.gain.gain.value = output;
 }
 
