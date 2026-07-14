@@ -40,7 +40,8 @@ export default function SearchScreen() {
   const [inputFocused, setInputFocused] = useState(false);
   const [lastQuery, setLastQuery] = useState<string | null>(null);
   const loadingMoreRef = useRef(false);
-  const endReachedGuardRef = useRef(false);
+  const listRef = useRef<FlatList<Track>>(null);
+  const scrollOffsetRef = useRef(0);
   const playTrack = usePlayerStore((state) => state.playTrack);
   const { suggestions, recordQuery, removeQuery, clearHistory } = useSearchHistory(query);
 
@@ -66,7 +67,6 @@ export default function SearchScreen() {
     setError(null);
     setNextPage(null);
     setLastQuery(trimmed);
-    endReachedGuardRef.current = false;
     try {
       const page = await api.search(trimmed);
       setResults(page.results);
@@ -193,8 +193,13 @@ export default function SearchScreen() {
       ) : null}
 
       <FlatList
+        ref={listRef}
         data={results}
         keyExtractor={(item) => item.video_id}
+        onScroll={(event) => {
+          scrollOffsetRef.current = event.nativeEvent.contentOffset.y;
+        }}
+        scrollEventThrottle={16}
         renderItem={({ item }) => (
           <TrackRowWithActions
             track={item}
@@ -213,17 +218,10 @@ export default function SearchScreen() {
           />
         )}
         onEndReached={() => {
-          if (endReachedGuardRef.current || loadingMoreRef.current || loading || !nextPage) return;
-          endReachedGuardRef.current = true;
+          if (loadingMoreRef.current || loading || !nextPage) return;
           void loadMore();
         }}
         onEndReachedThreshold={0.4}
-        onMomentumScrollBegin={() => {
-          endReachedGuardRef.current = false;
-        }}
-        onScrollBeginDrag={() => {
-          endReachedGuardRef.current = false;
-        }}
         ListHeaderComponent={
           !loading && artists.length > 0 ? (
             <View className="mb-2">

@@ -1,5 +1,5 @@
 import { Search as SearchIcon, X } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { ArtistSearchCard } from "@/components/ArtistSearchCard";
 import { TrackRowWithActions } from "@/components/TrackRowWithActions";
@@ -38,7 +38,7 @@ export function SearchPage() {
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const loadMoreRef = useRef<HTMLDivElement>(null);
   const loadingMoreRef = useRef(false);
-  const wasIntersectingRef = useRef(false);
+  const scrollRestoreYRef = useRef<number | null>(null);
   const playTrack = usePlayerStore((s) => s.playTrack);
   const { suggestions, recordQuery, removeQuery, clearHistory } = useSearchHistory(query);
   const { likedVideoIds, refresh: refreshLikedTracks } = useLikedTracks();
@@ -108,10 +108,6 @@ export function SearchPage() {
     };
   }, [urlQuery, recordQuery]);
 
-  useEffect(() => {
-    wasIntersectingRef.current = false;
-  }, [urlQuery]);
-
   const loadMore = useCallback(async () => {
     const trimmed = urlQuery.trim();
     if (!trimmed || !nextPage || loadingMoreRef.current || loading) return;
@@ -119,12 +115,14 @@ export function SearchPage() {
     loadingMoreRef.current = true;
     setLoadingMore(true);
     setError(null);
+    scrollRestoreYRef.current = window.scrollY;
 
     try {
       const page = await api.search(trimmed, { nextPage });
       setResults((current) => mergeTracks(current, page.results));
       setNextPage(page.next_page);
     } catch (err) {
+      scrollRestoreYRef.current = null;
       setError(err instanceof Error ? err.message : "Could not load more results");
     } finally {
       loadingMoreRef.current = false;
@@ -132,24 +130,29 @@ export function SearchPage() {
     }
   }, [urlQuery, nextPage, loading]);
 
+  useLayoutEffect(() => {
+    const y = scrollRestoreYRef.current;
+    if (y === null) return;
+    scrollRestoreYRef.current = null;
+    window.scrollTo(0, y);
+  }, [results]);
+
   useEffect(() => {
     const node = loadMoreRef.current;
     if (!node || !nextPage || loading || loadingMore) return;
 
     const observer = new IntersectionObserver(
       (entries) => {
-        const isIntersecting = entries[0]?.isIntersecting ?? false;
-        if (isIntersecting && !wasIntersectingRef.current) {
+        if (entries[0]?.isIntersecting) {
           void loadMore();
         }
-        wasIntersectingRef.current = isIntersecting;
       },
       { rootMargin: "240px" },
     );
 
     observer.observe(node);
     return () => observer.disconnect();
-  }, [loadMore, nextPage, loading, loadingMore, results.length]);
+  }, [loadMore, nextPage, loading, loadingMore]);
 
   useEffect(() => {
     if (loading || loadingMore || !nextPage) return;
@@ -283,7 +286,7 @@ export function SearchPage() {
         </div>
       ) : null}
 
-      <div className="space-y-0.5">
+      <div className="space-y-0.5 [overflow-anchor:none]">
         {results.map((track) => (
           <TrackRowWithActions
             key={track.video_id}
