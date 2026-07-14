@@ -352,6 +352,29 @@ function adjustQueueInsertIndexAfterRemoval(
   return queueInsertIndex;
 }
 
+function trimQueueFrom(
+  state: Pick<PlayerState, "queue" | "shuffle" | "shuffleOrder">,
+  queueIndex: number,
+): { queue: Track[]; shuffleOrder: number[]; shuffleStep: number } {
+  const clampedIndex = Math.max(0, Math.min(queueIndex, state.queue.length - 1));
+
+  if (state.shuffle && state.shuffleOrder.length > 1) {
+    const step = state.shuffleOrder.indexOf(clampedIndex);
+    if (step >= 0) {
+      const remaining = state.shuffleOrder.slice(step);
+      const queue = remaining.map((index) => state.queue[index]!);
+      return {
+        queue,
+        shuffleOrder: queue.map((_, index) => index),
+        shuffleStep: 0,
+      };
+    }
+  }
+
+  const queue = state.queue.slice(clampedIndex);
+  return { queue, shuffleOrder: [], shuffleStep: 0 };
+}
+
 function attachMediaListeners(
   media: HTMLMediaElement,
   track: Track,
@@ -698,6 +721,17 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   },
 
   playTrack: async (track, queue = [], options) => {
+    if (!options?.fromNavigation) {
+      const state = get();
+      if (state.current && state.queue.length > 0) {
+        const existingIndex = state.queue.findIndex((item) => item.video_id === track.video_id);
+        if (existingIndex >= 0) {
+          await get().playQueueIndex(existingIndex);
+          return;
+        }
+      }
+    }
+
     const generation = nextPlayGeneration();
     disposeMedia(get().media);
 
@@ -967,17 +1001,19 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
   playQueueIndex: async (queueIndex: number) => {
     const state = get();
-    const track = state.queue[queueIndex];
+    if (queueIndex < 0 || queueIndex >= state.queue.length) return;
+
+    const trimmed = trimQueueFrom(state, queueIndex);
+    const track = trimmed.queue[0];
     if (!track) return;
 
-    if (state.shuffle && state.shuffleOrder.length > 1) {
-      const step = state.shuffleOrder.indexOf(queueIndex);
-      if (step >= 0) {
-        set({ shuffleStep: step });
-      }
-    }
+    set({
+      shuffleOrder: trimmed.shuffleOrder,
+      shuffleStep: trimmed.shuffleStep,
+      queueInsertIndex: 1,
+    });
 
-    await get().playTrack(track, state.queue, { fromNavigation: true });
+    await get().playTrack(track, trimmed.queue, { fromNavigation: true });
   },
 
   removeQueueIndex: async (queueIndex: number) => {
