@@ -11,8 +11,20 @@ from app.auth import (
 )
 from app.database import get_db
 from app.models import User
-from app.schemas import SearchResult, SearchResultsPage, StreamInfo
+from app.schemas import (
+    AlbumDetail,
+    AlbumResolveResult,
+    ArtistDetail,
+    ArtistSearchHit,
+    CatalogTrack,
+    ReleaseSummary,
+    SearchResult,
+    SearchResultsPage,
+    StreamInfo,
+)
 from app.services.cache_manager import resolve_audio
+from app.services.catalog_resolver import resolve_catalog_tracks
+from app.services.musicbrainz import musicbrainz_client
 from app.services.piped import piped_client
 from app.services.stream_resolver import resolve_stream, stream_video_chunks
 from app.services.ytdlp import stream_audio_via_ytdlp
@@ -26,6 +38,67 @@ def _piped_unavailable(exc: Exception) -> HTTPException:
         status_code=502,
         detail=f"Could not play this track: {exc}",
     )
+
+
+def _catalog_track_from_mb(track, *, resolved=None, blocked_reason: str | None = None) -> CatalogTrack:
+    duration_sec = None
+    if track.duration_ms:
+        duration_sec = max(1, round(track.duration_ms / 1000))
+    return CatalogTrack(
+        position=track.position,
+        title=track.title,
+        recording_mbid=track.recording_mbid,
+        duration_ms=track.duration_ms,
+        artist_name=track.artist_name,
+        video_id=resolved.video_id if resolved else None,
+        thumbnail_url=resolved.thumbnail_url if resolved else None,
+        duration_sec=resolved.duration_sec if resolved and resolved.duration_sec else duration_sec,
+        blocked_reason=blocked_reason,
+        resolved=resolved is not None,
+    )
+
+
+def _apply_resolution(
+    track: CatalogTrack,
+    *,
+    artist_name: str,
+    resolved,
+    blocked_reason: str | None,
+) -> CatalogTrack:
+    duration_sec = resolved.duration_sec
+    if not duration_sec and track.duration_ms:
+        duration_sec = max(1, round(track.duration_ms / 1000))
+    return CatalogTrack(
+        position=track.position,
+        title=track.title,
+        recording_mbid=track.recording_mbid,
+        duration_ms=track.duration_ms,
+        artist_name=track.artist_name or artist_name,
+        video_id=resolved.video_id,
+        thumbnail_url=resolved.thumbnail_url,
+        duration_sec=duration_sec,
+        blocked_reason=blocked_reason,
+        resolved=True,
+    )
+
+
+async def _search_artists_for_query(query: str) -> list[ArtistSearchHit]:
+    try:
+        hits = await musicbrainz_client.search_artists(query)
+    except httpx.HTTPError:
+        return []
+
+    return [
+        ArtistSearchHit(
+            mbid=hit.mbid,
+            name=hit.name,
+            type=hit.type,
+            score=hit.score,
+            disambiguation=hit.disambiguation,
+            image_url=hit.image_url,
+        )
+        for hit in hits
+    ]
 
 
 @router.get("/search", response_model=SearchResultsPage)
@@ -42,7 +115,11 @@ async def search_music(
 
     blocked_query = check_content_allowed(settings=child_settings, query=q)
     if blocked_query:
-        return SearchResultsPage(results=[], next_page=None)
+        return SearchResultsPage(results=[], artists=[], next_page=None)
+
+    artist_hits: list[ArtistSearchHit] = []
+    if not next_page:
+        artist_hits = await _search_artists_for_query(q)
 
     try:
         if next_page:
@@ -72,7 +149,115 @@ async def search_music(
                 blocked_reason=reason,
             )
         )
-    return SearchResultsPage(results=filtered, next_page=next_token)
+    return SearchResultsPage(results=filtered, artists=artist_hits, next_page=next_token)
+
+
+@router.get("/artists/{mbid}", response_model=ArtistDetail)
+async def get_artist(
+    mbid: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ArtistDetail:
+    await enforce_child_access(db, current_user)
+    try:
+        detail = await musicbrainz_client.get_artist_detail(mbid)
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Could not load artist: {exc}") from exc
+
+    return ArtistDetail(
+        mbid=detail.mbid,
+        name=detail.name,
+        type=detail.type,
+        disambiguation=detail.disambiguation,
+        image_url=detail.image_url,
+        albums=[ReleaseSummary.model_validate(r.__dict__) for r in detail.albums],
+        eps=[ReleaseSummary.model_validate(r.__dict__) for r in detail.eps],
+        singles=[ReleaseSummary.model_validate(r.__dict__) for r in detail.singles],
+    )
+
+
+@router.get("/albums/{mbid}", response_model=AlbumDetail)
+async def get_album(
+    mbid: str,
+    resolve: bool = Query(default=False),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> AlbumDetail:
+    child_settings = await enforce_child_access(db, current_user)
+    try:
+        detail = await musicbrainz_client.get_album_detail(mbid)
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Could not load album: {exc}") from exc
+
+    catalog_tracks = [
+        _catalog_track_from_mb(track)
+        for track in detail.tracks
+    ]
+
+    if resolve:
+        catalog_tracks = await _resolve_album_tracks(catalog_tracks, detail.artist_name, child_settings)
+
+    return AlbumDetail(
+        mbid=detail.mbid,
+        title=detail.title,
+        artist_name=detail.artist_name,
+        artist_mbid=detail.artist_mbid,
+        release_date=detail.release_date,
+        release_type=detail.release_type,
+        cover_url=detail.cover_url,
+        tracks=catalog_tracks,
+    )
+
+
+async def _resolve_album_tracks(
+    tracks: list[CatalogTrack],
+    artist_name: str,
+    child_settings,
+) -> list[CatalogTrack]:
+    unresolved = [(i, t) for i, t in enumerate(tracks) if not t.resolved]
+    if not unresolved:
+        return tracks
+
+    resolved_list = await resolve_catalog_tracks(
+        [(artist_name, t.title) for _, t in unresolved],
+        concurrency=3,
+    )
+
+    updated = list(tracks)
+    for (index, track), resolved in zip(unresolved, resolved_list, strict=True):
+        if not resolved:
+            updated[index] = track
+            continue
+        blocked = check_content_allowed(
+            settings=child_settings,
+            video_id=resolved.video_id,
+            title=resolved.title,
+            artist=resolved.artist,
+        )
+        updated[index] = _apply_resolution(
+            track,
+            artist_name=artist_name,
+            resolved=resolved,
+            blocked_reason=blocked,
+        )
+    return updated
+
+
+@router.post("/albums/{mbid}/resolve", response_model=AlbumResolveResult)
+async def resolve_album_tracks(
+    mbid: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> AlbumResolveResult:
+    child_settings = await enforce_child_access(db, current_user)
+    try:
+        detail = await musicbrainz_client.get_album_detail(mbid)
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Could not load album: {exc}") from exc
+
+    catalog_tracks = [_catalog_track_from_mb(track) for track in detail.tracks]
+    resolved_tracks = await _resolve_album_tracks(catalog_tracks, detail.artist_name, child_settings)
+    return AlbumResolveResult(tracks=resolved_tracks)
 
 
 @router.get("/stream/{video_id}", response_model=StreamInfo)

@@ -8,13 +8,14 @@ import {
   View,
 } from "react-native";
 
+import { ArtistSearchCard } from "@/components/ArtistSearchCard";
 import { TrackRowWithActions } from "@/components/TrackRowWithActions";
 import { Button } from "@/components/ui/Button";
 import { TrackRowSkeleton } from "@/components/ui/Skeleton";
 import { useSearchHistory } from "@/hooks/useSearchHistory";
 import { api } from "@/lib/api";
 import { usePlayerStore } from "@/stores/player";
-import type { Playlist, Track } from "@/types";
+import type { ArtistSearchHit, Playlist, Track } from "@/types";
 
 function mergeTracks(existing: Track[], incoming: Track[]): Track[] {
   const seen = new Set(existing.map((track) => track.video_id));
@@ -30,6 +31,7 @@ function mergeTracks(existing: Track[], incoming: Track[]): Track[] {
 export default function SearchScreen() {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Track[]>([]);
+  const [artists, setArtists] = useState<ArtistSearchHit[]>([]);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [nextPage, setNextPage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -68,11 +70,13 @@ export default function SearchScreen() {
     try {
       const page = await api.search(trimmed);
       setResults(page.results);
+      setArtists(page.artists ?? []);
       setNextPage(page.next_page);
       recordQuery(trimmed);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Search failed");
       setResults([]);
+      setArtists([]);
       setNextPage(null);
     } finally {
       setLoading(false);
@@ -220,6 +224,15 @@ export default function SearchScreen() {
         onScrollBeginDrag={() => {
           endReachedGuardRef.current = false;
         }}
+        ListHeaderComponent={
+          !loading && artists.length > 0 ? (
+            <View className="mb-2">
+              {artists.map((artist) => (
+                <ArtistSearchCard key={artist.mbid} artist={artist} />
+              ))}
+            </View>
+          ) : null
+        }
         ListFooterComponent={
           loadingMore ? (
             <Text className="my-4 text-center text-sm text-text-secondary">Loading more…</Text>

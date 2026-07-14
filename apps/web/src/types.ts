@@ -65,7 +65,65 @@ export type Track = {
 
 export type SearchResultsPage = {
   results: Track[];
+  artists: ArtistSearchHit[];
   next_page: string | null;
+};
+
+export type ArtistSearchHit = {
+  mbid: string;
+  name: string;
+  type?: string | null;
+  score: number;
+  disambiguation?: string | null;
+  image_url?: string | null;
+};
+
+export type ReleaseSummary = {
+  mbid: string;
+  title: string;
+  release_type: string;
+  release_date?: string | null;
+  cover_url?: string | null;
+  track_count?: number | null;
+};
+
+export type CatalogTrack = {
+  position: number;
+  title: string;
+  recording_mbid?: string | null;
+  duration_ms?: number | null;
+  artist_name?: string | null;
+  video_id?: string | null;
+  thumbnail_url?: string | null;
+  duration_sec?: number | null;
+  blocked_reason?: string | null;
+  resolved: boolean;
+};
+
+export type ArtistDetail = {
+  mbid: string;
+  name: string;
+  type?: string | null;
+  disambiguation?: string | null;
+  image_url?: string | null;
+  albums: ReleaseSummary[];
+  eps: ReleaseSummary[];
+  singles: ReleaseSummary[];
+};
+
+export type AlbumDetail = {
+  mbid: string;
+  title: string;
+  artist_name: string;
+  artist_mbid?: string | null;
+  release_date?: string | null;
+  release_type?: string | null;
+  cover_url?: string | null;
+  tracks: CatalogTrack[];
+};
+
+export type AlbumResolveResult = {
+  tracks: CatalogTrack[];
 };
 
 export type Playlist = {

@@ -80,6 +80,8 @@ export default function RootLayout() {
       <Stack.Screen name="family" options={{ ...headerOptions, title: "Family" }} />
       <Stack.Screen name="parental" options={{ ...headerOptions, title: "Parental controls" }} />
       <Stack.Screen name="playlist/[id]" options={{ ...headerOptions, title: "Playlist" }} />
+      <Stack.Screen name="artist/[id]" options={{ ...headerOptions, title: "Artist" }} />
+      <Stack.Screen name="album/[id]" options={{ ...headerOptions, title: "Album" }} />
     </Stack>
   );
 }

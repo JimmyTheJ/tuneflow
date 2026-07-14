@@ -11,6 +11,7 @@ type Props = {
   displayTitle?: string;
   subtitle?: string;
   showBadges?: boolean;
+  index?: number;
   disabled?: boolean;
   onPlay: () => void;
   onLikedChange: () => void;
@@ -25,6 +26,7 @@ export function TrackRowWithActions({
   displayTitle,
   subtitle,
   showBadges,
+  index,
   disabled,
   onPlay,
   onLikedChange,
@@ -46,6 +48,7 @@ export function TrackRowWithActions({
           displayTitle={displayTitle}
           showBadges={showBadges}
           subtitle={subtitle}
+          index={index}
           disabled={disabled}
           onClick={disabled ? undefined : onPlay}
         />

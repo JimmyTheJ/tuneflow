@@ -1,6 +1,7 @@
 import { Search as SearchIcon, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
+import { ArtistSearchCard } from "@/components/ArtistSearchCard";
 import { TrackRowWithActions } from "@/components/TrackRowWithActions";
 import { Button } from "@/components/ui/Button";
 import { TrackRowSkeleton } from "@/components/ui/Skeleton";
@@ -9,7 +10,7 @@ import { useSearchHistory } from "@/hooks/useSearchHistory";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { usePlayerStore } from "@/stores/playerStore";
-import type { Playlist, Track } from "@/types";
+import type { ArtistSearchHit, Playlist, Track } from "@/types";
 
 function mergeTracks(existing: Track[], incoming: Track[]): Track[] {
   const seen = new Set(existing.map((track) => track.video_id));
@@ -27,6 +28,7 @@ export function SearchPage() {
   const urlQuery = searchParams.get("q") ?? "";
   const [query, setQuery] = useState(urlQuery);
   const [results, setResults] = useState<Track[]>([]);
+  const [artists, setArtists] = useState<ArtistSearchHit[]>([]);
   const [nextPage, setNextPage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -65,6 +67,7 @@ export function SearchPage() {
     const trimmed = urlQuery.trim();
     if (!trimmed) {
       setResults([]);
+      setArtists([]);
       setNextPage(null);
       setLastQuery(null);
       setError(null);
@@ -79,6 +82,7 @@ export function SearchPage() {
     setError(null);
     setLastQuery(trimmed);
     setResults([]);
+    setArtists([]);
     setNextPage(null);
 
     void (async () => {
@@ -86,6 +90,7 @@ export function SearchPage() {
         const page = await api.search(trimmed);
         if (!cancelled) {
           setResults(page.results);
+          setArtists(page.artists ?? []);
           setNextPage(page.next_page);
           recordQuery(trimmed);
         }
@@ -268,6 +273,14 @@ export function SearchPage() {
 
       {!loading && lastQuery && results.length === 0 && !error ? (
         <p className="text-text-muted">No results for &ldquo;{lastQuery}&rdquo;.</p>
+      ) : null}
+
+      {!loading && artists.length > 0 ? (
+        <div className="space-y-3">
+          {artists.map((artist) => (
+            <ArtistSearchCard key={artist.mbid} artist={artist} />
+          ))}
+        </div>
       ) : null}
 
       <div className="space-y-0.5">

@@ -67,6 +67,8 @@ class Settings(BaseSettings):
     scrobbler_librefm_api_key: str = ""
     scrobbler_librefm_api_secret: str = ""
 
+    musicbrainz_user_agent: str = "TuneFlow/0.3.0 ( https://github.com/tuneflow )"
+
     @field_validator("tuneflow_data_dir", mode="before")
     @classmethod
     def _coerce_data_dir(cls, value: object) -> Path:

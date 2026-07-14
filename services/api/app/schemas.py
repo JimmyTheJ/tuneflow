@@ -251,8 +251,66 @@ class SearchResult(TrackRead):
     short_description: str | None = None
 
 
+class ArtistSearchHit(BaseModel):
+    mbid: str
+    name: str
+    type: str | None = None
+    score: int
+    disambiguation: str | None = None
+    image_url: str | None = None
+
+
+class ReleaseSummary(BaseModel):
+    mbid: str
+    title: str
+    release_type: str
+    release_date: str | None = None
+    cover_url: str | None = None
+    track_count: int | None = None
+
+
+class CatalogTrack(BaseModel):
+    position: int
+    title: str
+    recording_mbid: str | None = None
+    duration_ms: int | None = None
+    artist_name: str | None = None
+    video_id: str | None = None
+    thumbnail_url: str | None = None
+    duration_sec: int | None = None
+    blocked_reason: str | None = None
+    resolved: bool = False
+
+
+class ArtistDetail(BaseModel):
+    mbid: str
+    name: str
+    type: str | None = None
+    disambiguation: str | None = None
+    image_url: str | None = None
+    albums: list[ReleaseSummary] = []
+    eps: list[ReleaseSummary] = []
+    singles: list[ReleaseSummary] = []
+
+
+class AlbumDetail(BaseModel):
+    mbid: str
+    title: str
+    artist_name: str
+    artist_mbid: str | None = None
+    release_date: str | None = None
+    release_type: str | None = None
+    cover_url: str | None = None
+    tracks: list[CatalogTrack] = []
+
+
+class AlbumResolveResult(BaseModel):
+    tracks: list[CatalogTrack]
+
+
 class SearchResultsPage(BaseModel):
     results: list[SearchResult]
+    artists: list[ArtistSearchHit] = []
     next_page: str | None = None
 
 

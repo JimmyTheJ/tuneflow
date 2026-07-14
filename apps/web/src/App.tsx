@@ -7,6 +7,8 @@ import { useAuthStore } from "@/stores/authStore";
 import { usePlayerStore } from "@/stores/playerStore";
 import { LoginPage, SetupPage } from "@/pages/AuthPages";
 import { DiscoverPage } from "@/pages/DiscoverPage";
+import { ArtistPage } from "@/pages/ArtistPage";
+import { AlbumPage } from "@/pages/AlbumPage";
 import { FamilyPage } from "@/pages/FamilyPage";
 import { HouseholdsPage } from "@/pages/HouseholdsPage";
 import { HomePage } from "@/pages/HomePage";
@@ -92,6 +94,8 @@ export function App() {
           <Route path="family" element={<FamilyPage />} />
           <Route path="parental" element={<ParentalPage />} />
           <Route path="playlist/:id" element={<PlaylistPage />} />
+          <Route path="artist/:id" element={<ArtistPage />} />
+          <Route path="album/:id" element={<AlbumPage />} />
           <Route path="player" element={<PlayerPage />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />

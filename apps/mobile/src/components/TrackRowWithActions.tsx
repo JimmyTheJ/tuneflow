@@ -11,6 +11,7 @@ type Props = {
   displayTitle?: string;
   subtitle?: string;
   showBadges?: boolean;
+  index?: number;
   disabled?: boolean;
   onPlay: () => void;
   onPlaylistsChange: () => void;
@@ -23,6 +24,7 @@ export function TrackRowWithActions({
   displayTitle,
   subtitle,
   showBadges,
+  index,
   disabled,
   onPlay,
   onPlaylistsChange,
@@ -35,6 +37,7 @@ export function TrackRowWithActions({
           displayTitle={displayTitle}
           showBadges={showBadges}
           subtitle={subtitle}
+          index={index}
           onPress={disabled ? undefined : onPlay}
         />
       </View>

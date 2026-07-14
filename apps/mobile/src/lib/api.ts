@@ -21,6 +21,9 @@ import type {
   TokenResponse,
   Track,
   User,
+  ArtistDetail,
+  AlbumDetail,
+  AlbumResolveResult,
 } from "@/types";
 import { getAccessToken, getApiUrl } from "./settings";
 import { ApiError, withRetry } from "./retry";
@@ -96,6 +99,10 @@ export const api = {
     if (options?.nextPage) params.set("next_page", options.nextPage);
     return request<SearchResultsPage>(`/api/music/search?${params.toString()}`);
   },
+  getArtist: (mbid: string) => request<ArtistDetail>(`/api/music/artists/${mbid}`),
+  getAlbum: (mbid: string) => request<AlbumDetail>(`/api/music/albums/${mbid}`),
+  resolveAlbum: (mbid: string) =>
+    request<AlbumResolveResult>(`/api/music/albums/${mbid}/resolve`, { method: "POST" }),
   getStream: (videoId: string, track?: Pick<Track, "title" | "artist">) => {
     const params = new URLSearchParams();
     if (track?.title) params.set("title", track.title);
