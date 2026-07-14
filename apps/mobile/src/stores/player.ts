@@ -336,7 +336,12 @@ function adjustQueueInsertIndexAfterRemoval(
   return queueInsertIndex;
 }
 
-function trimQueueFrom(
+function rotateQueueToIndex(queue: Track[], index: number): Track[] {
+  if (index <= 0 || queue.length <= 1) return queue;
+  return [...queue.slice(index), ...queue.slice(0, index)];
+}
+
+function rotateQueueFrom(
   state: Pick<PlayerState, "queue" | "shuffle" | "shuffleOrder">,
   queueIndex: number,
 ): { queue: Track[]; shuffleOrder: number[]; shuffleStep: number } {
@@ -345,8 +350,11 @@ function trimQueueFrom(
   if (state.shuffle && state.shuffleOrder.length > 1) {
     const step = state.shuffleOrder.indexOf(clampedIndex);
     if (step >= 0) {
-      const remaining = state.shuffleOrder.slice(step);
-      const queue = remaining.map((index) => state.queue[index]!);
+      const rotatedOrder = [
+        ...state.shuffleOrder.slice(step),
+        ...state.shuffleOrder.slice(0, step),
+      ];
+      const queue = rotatedOrder.map((index) => state.queue[index]!);
       return {
         queue,
         shuffleOrder: queue.map((_, index) => index),
@@ -355,7 +363,7 @@ function trimQueueFrom(
     }
   }
 
-  const queue = state.queue.slice(clampedIndex);
+  const queue = rotateQueueToIndex(state.queue, clampedIndex);
   return { queue, shuffleOrder: [], shuffleStep: 0 };
 }
 
@@ -651,9 +659,14 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       invalidatePrefetch();
     }
 
-    const nextQueue = queue.length ? queue : [track];
+    let nextQueue = queue.length ? queue : [track];
     const queueIndex = nextQueue.findIndex((item) => item.video_id === track.video_id);
-    const activeIndex = queueIndex >= 0 ? queueIndex : 0;
+    let activeIndex = queueIndex >= 0 ? queueIndex : 0;
+
+    if (!options?.fromNavigation && activeIndex > 0) {
+      nextQueue = rotateQueueToIndex(nextQueue, activeIndex);
+      activeIndex = 0;
+    }
 
     let shuffleOrder = get().shuffleOrder;
     let shuffleStep = get().shuffleStep;
@@ -869,17 +882,17 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     const state = get();
     if (queueIndex < 0 || queueIndex >= state.queue.length) return;
 
-    const trimmed = trimQueueFrom(state, queueIndex);
-    const track = trimmed.queue[0];
+    const rotated = rotateQueueFrom(state, queueIndex);
+    const track = rotated.queue[0];
     if (!track) return;
 
     set({
-      shuffleOrder: trimmed.shuffleOrder,
-      shuffleStep: trimmed.shuffleStep,
+      shuffleOrder: rotated.shuffleOrder,
+      shuffleStep: rotated.shuffleStep,
       queueInsertIndex: 1,
     });
 
-    await get().playTrack(track, trimmed.queue, { fromNavigation: true });
+    await get().playTrack(track, rotated.queue, { fromNavigation: true });
   },
 
   removeQueueIndex: async (queueIndex) => {
