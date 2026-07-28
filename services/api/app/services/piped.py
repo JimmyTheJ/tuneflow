@@ -181,6 +181,94 @@ def _result_display_title(result: SearchResult) -> str:
     return (result.source_title or result.title or "").strip()
 
 
+def _result_candidate_title(result: SearchResult) -> str:
+    display = _result_display_title(result)
+    _, parsed_title = parse_artist_title(display)
+    return parsed_title or result.title or ""
+
+
+def _result_candidate_artist(result: SearchResult) -> str:
+    display = _result_display_title(result)
+    parsed_artist, _ = parse_artist_title(display)
+    return (parsed_artist or result.artist or "").replace("- Topic", "").strip()
+
+
+def _token_in_text(token: str, text: str) -> bool:
+    if not text:
+        return False
+    norm_token = _normalize_text(token)
+    if not norm_token:
+        return False
+    if norm_token in _normalize_text(text):
+        return True
+    return title_matches(token, text)
+
+
+def query_relevance_score(query: str, result: SearchResult) -> int:
+    """Higher is better. Score how well a search result matches the user query."""
+    query = query.strip()
+    if not query:
+        return 0
+
+    title = _result_candidate_title(result)
+    artist = _result_candidate_artist(result)
+    query_tokens = _title_tokens(query)
+    if not query_tokens:
+        return 0
+
+    score = 0
+    combined = f"{title} {artist}".strip()
+    norm_query = _normalize_text(query)
+    norm_combined = _normalize_text(combined)
+
+    if norm_query and norm_query in norm_combined:
+        score += 6
+
+    if title_matches(query, title):
+        score += 8
+    elif title and any(_token_in_text(token, title) for token in query_tokens):
+        score += 4
+
+    if artist:
+        if artist_matches(query, artist):
+            score += 4
+        elif any(len(token) >= 3 and artist_matches(token, artist) for token in query_tokens):
+            score += 3
+
+    if len(query_tokens) >= 2 and title and artist:
+        for split_at in range(1, len(query_tokens)):
+            title_first = " ".join(query_tokens[:split_at])
+            artist_second = " ".join(query_tokens[split_at:])
+            if title_matches(title_first, title) and artist_matches(artist_second, artist):
+                score += 12
+                break
+            artist_first = " ".join(query_tokens[:split_at])
+            title_second = " ".join(query_tokens[split_at:])
+            if title_matches(title_second, title) and artist_matches(artist_first, artist):
+                score += 12
+                break
+
+    if all(
+        _token_in_text(token, title) or _token_in_text(token, artist) or token in norm_combined
+        for token in query_tokens
+    ):
+        score += 5
+
+    for split_at in range(1, len(query_tokens) + 1):
+        wanted_title = " ".join(query_tokens[:split_at])
+        wanted_artist = None if split_at == len(query_tokens) else " ".join(query_tokens[split_at:])
+        if matches_requested_track(
+            wanted_title=wanted_title,
+            wanted_artist=wanted_artist,
+            candidate_title=title,
+            candidate_artist=artist or result.artist,
+        ):
+            score = max(score, 14)
+            break
+
+    return score
+
+
 def _result_is_live(result: SearchResult) -> bool:
     return looks_like_live_version(_result_display_title(result), result.title)
 
@@ -188,7 +276,7 @@ def _result_is_live(result: SearchResult) -> bool:
 def _song_dedupe_key(result: SearchResult) -> str | None:
     """Collapse near-duplicate uploads of the same song (studio search only)."""
     raw = _result_display_title(result)
-    parsed_artist, parsed_title = parse_artist_title(raw)
+    _, parsed_title = parse_artist_title(raw)
     # Strip live markers and trailing venue/date text so live variants share a key.
     base_title = re.sub(r"[\(\[].*?[\)\]]", " ", parsed_title)
     base_title = re.sub(
@@ -200,7 +288,9 @@ def _song_dedupe_key(result: SearchResult) -> str | None:
     title_key = _normalize_text(base_title)
     if not title_key:
         return None
-    artist = (parsed_artist or "").replace("- Topic", "").strip()
+    artist = _result_candidate_artist(result)
+    if not artist:
+        return None
     return f"{_normalize_text(artist)}|{title_key}"
 
 
@@ -223,16 +313,36 @@ def dedupe_search_results(results: list[SearchResult], *, collapse_same_song: bo
     return deduped
 
 
-def _search_rank_key(result: SearchResult, *, prefer_studio: bool) -> tuple[int, int, str]:
-    # Ascending sort. Default: studio before live, Topic before others.
-    # If the query asks for live, invert so live versions rank first.
+def _search_rank_key(
+    result: SearchResult,
+    *,
+    query: str,
+    prefer_studio: bool,
+    original_index: int,
+) -> tuple[int, int, int, int]:
+    # Ascending sort: relevance first, then soft live/topic preferences, then Piped order.
+    relevance = query_relevance_score(query, result)
     is_live = _result_is_live(result)
     if prefer_studio:
         live_rank = 1 if is_live else 0
     else:
         live_rank = 0 if is_live else 1
     non_topic = 0 if is_topic_upload(result.artist) else 1
-    return (live_rank, non_topic, _result_display_title(result).lower())
+    return (-relevance, live_rank, non_topic, original_index)
+
+
+def rank_search_results(query: str, results: list[SearchResult]) -> list[SearchResult]:
+    prefer_studio = not query_requests_live(query)
+    indexed = list(enumerate(results))
+    indexed.sort(
+        key=lambda pair: _search_rank_key(
+            pair[1],
+            query=query,
+            prefer_studio=prefer_studio,
+            original_index=pair[0],
+        )
+    )
+    return [result for _, result in indexed]
 
 
 def collect_playable_audio_streams(payload: dict) -> list[dict]:
@@ -352,9 +462,8 @@ class PipedClient:
 
     async def search_piped(self, query: str, limit: int = 20) -> tuple[list[SearchResult], str | None]:
         payload = await self._request_json("/search", params={"q": query, "filter": "music_songs"})
-        results = _parse_search_items(payload)
+        results = rank_search_results(query, _parse_search_items(payload))
         prefer_studio = not query_requests_live(query)
-        results.sort(key=lambda result: _search_rank_key(result, prefer_studio=prefer_studio))
         # Studio searches collapse same song; live searches keep alternate performances.
         results = dedupe_search_results(results, collapse_same_song=prefer_studio)
         return results[:limit], _next_page_token(payload)
@@ -369,9 +478,8 @@ class PipedClient:
             "/nextpage/search",
             params={"q": query, "filter": "music_songs", "nextpage": next_page},
         )
-        results = _parse_search_items(payload)
+        results = rank_search_results(query, _parse_search_items(payload))
         prefer_studio = not query_requests_live(query)
-        results.sort(key=lambda result: _search_rank_key(result, prefer_studio=prefer_studio))
         results = dedupe_search_results(results, collapse_same_song=prefer_studio)
         return results[:limit], _next_page_token(payload)
 
