@@ -8,7 +8,9 @@ $mobileRoot = Split-Path -Parent $PSScriptRoot
 $repoRoot = Resolve-Path (Join-Path $mobileRoot "..\..")
 $metadataScript = Join-Path $PSScriptRoot "read-dev-version.mjs"
 $androidDir = Join-Path $mobileRoot "android"
-$apkOutputDir = Join-Path $androidDir "app\build\outputs\apk\debug"
+# Release embeds the JS bundle and disables Metro developer support, so the APK
+# can be sideloaded onto a phone without a USB-linked Metro packager.
+$apkOutputDir = Join-Path $androidDir "app\build\outputs\apk\release"
 
 function Resolve-SystemSdkManager {
     $sdkRoots = @(
@@ -256,7 +258,7 @@ try {
 
     Push-Location $androidDir
     try {
-        & $gradlew assembleDebug
+        & $gradlew assembleRelease
     }
     finally {
         Pop-Location
@@ -265,21 +267,21 @@ try {
     $apkFiles = Get-ChildItem -Path $apkOutputDir -Filter "*.apk" -File -ErrorAction SilentlyContinue
     if (-not $apkFiles) {
         throw @"
-No debug APK found in $apkOutputDir
+No release APK found in $apkOutputDir
 
 Gradle may have failed earlier in this run. Re-run with the android folder present and check:
   cd apps\mobile\android
-  .\gradlew.bat assembleDebug --stacktrace
+  .\gradlew.bat assembleRelease --stacktrace
 "@
     }
 
     $sourceApk = $apkFiles | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-    $targetName = "tuneflow-v$versionName-debug.apk"
+    $targetName = "tuneflow-v$versionName.apk"
     $targetApk = Join-Path $apkOutputDir $targetName
     Copy-Item -Path $sourceApk.FullName -Destination $targetApk -Force
 
     $recordScript = Join-Path $PSScriptRoot "record-dev-build.mjs"
-    node $recordScript --apk $targetApk --version $versionName --code $versionCode
+    node $recordScript --apk $targetApk --version $versionName --code $versionCode --variant release
 
     Write-Host ""
     Write-Host "Dev APK ready:"

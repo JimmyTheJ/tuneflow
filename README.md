@@ -190,7 +190,7 @@ npx expo start
 
 ### Android dev APK
 
-Local debug builds use auto-incrementing versions stored under `%USERPROFILE%\.tuneflow-mobile-dev\` (same idea as [jellyfin-android](https://github.com/jellyfin/jellyfin-android)):
+Local sideload builds use auto-incrementing versions stored under `%USERPROFILE%\.tuneflow-mobile-dev\` (same idea as [jellyfin-android](https://github.com/jellyfin/jellyfin-android)). They are **release** APKs signed with the Android debug keystore so the JS bundle is embedded and the app launches without Metro (useful when installing over Wi‑Fi / Drive without USB debugging).
 
 | File | Purpose |
 |------|---------|
@@ -205,9 +205,11 @@ npm install
 npm run dev:apk
 ```
 
-Output: `apps\mobile\android\app\build\outputs\apk\debug\tuneflow-v<version>-debug.apk`
+Output: `apps\mobile\android\app\build\outputs\apk\release\tuneflow-v<version>.apk`
 
 Each successful build bumps the dev suffix (`0.1.0-dev.2` → `0.1.0-dev.3`) in your user profile, not in git.
+
+For live reload / Metro during development, use `npx expo start` (or `npm run android`) instead of the sideload APK.
 
 ### Phone ↔ server networking
 

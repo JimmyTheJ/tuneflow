@@ -16,12 +16,13 @@ function readArg(flag) {
 const apkPath = path.resolve(readArg("--apk"));
 const versionName = readArg("--version");
 const versionCode = Number.parseInt(readArg("--code"), 10) || getVersionCode(versionName);
+const variant = process.argv.includes("--variant") ? readArg("--variant") : "release";
 
 const record = recordDevBuild({
   versionName,
   versionCode,
   apkPath,
-  variant: "debug",
+  variant,
 });
 
 process.stdout.write(`${JSON.stringify(record, null, 2)}\n`);
