@@ -31,7 +31,6 @@ export function EqualizerPanel({ className }: Props) {
   const setQueueEqProfile = usePlayerStore((s) => s.setQueueEqProfile);
   const profiles = useEqStore((s) => s.profiles);
   const enabled = useEqStore((s) => s.enabled);
-  const loaded = useEqStore((s) => s.loaded);
   const trackAssignments = useEqStore((s) => s.trackAssignments);
   const playlistAssignments = useEqStore((s) => s.playlistAssignments);
   const setEnabled = useEqStore((s) => s.setEnabled);
@@ -64,12 +63,6 @@ export function EqualizerPanel({ className }: Props) {
     trackAssignments,
     playlistAssignments,
   ]);
-
-  useEffect(() => {
-    if (!loaded) {
-      void useEqStore.getState().load();
-    }
-  }, [loaded]);
 
   useEffect(() => {
     if (!current) return;

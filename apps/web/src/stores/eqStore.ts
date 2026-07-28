@@ -32,6 +32,8 @@ function refreshPlaybackEq(): Promise<void> {
   return syncEqPlayback();
 }
 
+let loadPromise: Promise<void> | null = null;
+
 export const useEqStore = create<EqState>((set, get) => ({
   profiles: [],
   trackAssignments: {},
@@ -40,15 +42,25 @@ export const useEqStore = create<EqState>((set, get) => ({
   enabled: true,
 
   load: async () => {
-    const profiles = await api.listEqProfiles();
-    set({
-      profiles,
-      loaded: true,
+    if (get().loaded) return;
+    if (loadPromise) return loadPromise;
+
+    loadPromise = (async () => {
+      const profiles = await api.listEqProfiles();
+      set({
+        profiles,
+        loaded: true,
+      });
+      await refreshPlaybackEq();
+    })().finally(() => {
+      loadPromise = null;
     });
-    refreshPlaybackEq();
+
+    return loadPromise;
   },
 
   reset: () => {
+    loadPromise = null;
     set({
       profiles: [],
       trackAssignments: {},

@@ -1,5 +1,5 @@
 import { GripVertical, ListStart, X } from "lucide-react";
-import { useCallback, useEffect, useState, type DragEvent } from "react";
+import { useCallback, useState, type DragEvent } from "react";
 import { EqBulkWarningModal } from "@/components/EqBulkWarningModal";
 import { EqProfilePickerModal } from "@/components/EqProfilePickerModal";
 import { PlaylistPickerModal } from "@/components/PlaylistPickerModal";
@@ -42,19 +42,12 @@ export function PlayerQueuePanel({ onClose, className }: Props) {
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [status, setStatus] = useState<string | null>(null);
   const profiles = useEqStore((s) => s.profiles);
-  const loaded = useEqStore((s) => s.loaded);
   const bulkAssignTracks = useEqStore((s) => s.bulkAssignTracks);
 
   const showStatus = useCallback((message: string) => {
     setStatus(message);
     window.setTimeout(() => setStatus(null), 2200);
   }, []);
-
-  useEffect(() => {
-    if (!loaded) {
-      void useEqStore.getState().load();
-    }
-  }, [loaded]);
 
   const openSaveToPlaylist = async () => {
     try {

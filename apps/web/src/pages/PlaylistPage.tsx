@@ -33,7 +33,6 @@ export function PlaylistPage() {
   const playTrack = usePlayerStore((s) => s.playTrack);
   const profiles = useEqStore((s) => s.profiles);
   const playlistAssignments = useEqStore((s) => s.playlistAssignments);
-  const loaded = useEqStore((s) => s.loaded);
   const assignPlaylist = useEqStore((s) => s.assignPlaylist);
   const applyPlaylistToTracks = useEqStore((s) => s.applyPlaylistToTracks);
   const clearPlaylistTrackEqs = useEqStore((s) => s.clearPlaylistTrackEqs);
@@ -52,12 +51,6 @@ export function PlaylistPage() {
   useEffect(() => {
     void load();
   }, [load]);
-
-  useEffect(() => {
-    if (!loaded) {
-      void useEqStore.getState().load();
-    }
-  }, [loaded]);
 
   useEffect(() => {
     if (!playlist) return;

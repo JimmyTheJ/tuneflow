@@ -62,7 +62,6 @@ export const TrackActionsMenu = forwardRef<TrackActionsMenuHandle, Props>(functi
   const addToQueue = usePlayerStore((s) => s.addToQueue);
   const profiles = useEqStore((s) => s.profiles);
   const trackAssignments = useEqStore((s) => s.trackAssignments);
-  const loaded = useEqStore((s) => s.loaded);
   const assignTrack = useEqStore((s) => s.assignTrack);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -75,12 +74,6 @@ export const TrackActionsMenu = forwardRef<TrackActionsMenuHandle, Props>(functi
 
   const isLiked = likedVideoIds.has(track.video_id);
   const hasTrackEq = trackAssignments[track.video_id] != null;
-
-  useEffect(() => {
-    if (!loaded) {
-      void useEqStore.getState().load();
-    }
-  }, [loaded]);
 
   const showStatus = useCallback((message: string) => {
     setStatus(message);
