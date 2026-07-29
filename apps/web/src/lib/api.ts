@@ -48,6 +48,7 @@ type RequestOptions = {
   method?: "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
   body?: unknown;
   auth?: boolean;
+  signal?: AbortSignal;
 };
 
 async function executeRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
@@ -63,6 +64,7 @@ async function executeRequest<T>(path: string, options: RequestOptions = {}): Pr
     method: options.method ?? "GET",
     headers,
     body: options.body ? JSON.stringify(options.body) : undefined,
+    signal: options.signal,
   });
 
   if (!response.ok) {
@@ -81,7 +83,8 @@ async function executeRequest<T>(path: string, options: RequestOptions = {}): Pr
 }
 
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  return withRetry(() => executeRequest<T>(path, options));
+  const { signal, ...requestOptions } = options;
+  return withRetry(() => executeRequest<T>(path, requestOptions), { signal });
 }
 
 async function* streamArtistEvents(mbid: string): AsyncGenerator<ArtistStreamEvent> {
@@ -141,7 +144,7 @@ export const api = {
   getHouseholdPublic: (slug: string) =>
     request<{ slug: string; name: string }>(`/api/households/public/${encodeURIComponent(slug)}`, { auth: false }),
   me: () => request<User>("/api/auth/me"),
-  search: (q: string, options?: { nextPage?: string; searchOptions?: SearchOptions }) => {
+  search: (q: string, options?: { nextPage?: string; searchOptions?: SearchOptions; signal?: AbortSignal }) => {
     const params = new URLSearchParams({ q });
     if (options?.nextPage) params.set("next_page", options.nextPage);
     if (options?.searchOptions) {
@@ -156,7 +159,7 @@ export const api = {
         params.set("version_preference", version_preference);
       }
     }
-    return request<SearchResultsPage>(`/api/music/search?${params.toString()}`);
+    return request<SearchResultsPage>(`/api/music/search?${params.toString()}`, { signal: options?.signal });
   },
   getHouseholdSearchSettings: () => request<HouseholdSearchSettings>("/api/households/mine/search-settings"),
   updateHouseholdSearchSettings: (searchDefaults: Partial<SearchOptions>) =>

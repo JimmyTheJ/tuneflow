@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/Button";
 import { TrackRowSkeleton } from "@/components/ui/Skeleton";
 import { useSearchHistory } from "@/hooks/useSearchHistory";
 import { api } from "@/lib/api";
+import { isAbortError } from "@/lib/retry";
 import {
   DEFAULT_SEARCH_OPTIONS,
   flattenGroupTracks,
@@ -35,9 +36,12 @@ export default function SearchScreen() {
   const [error, setError] = useState<string | null>(null);
   const [inputFocused, setInputFocused] = useState(false);
   const [lastQuery, setLastQuery] = useState<string | null>(null);
+  const [pendingQuery, setPendingQuery] = useState<string | null>(null);
   const [sessionOptions] = useState(DEFAULT_SEARCH_OPTIONS);
   const [explanation, setExplanation] = useState<string | null>(null);
   const loadingMoreRef = useRef(false);
+  const searchAbortRef = useRef<AbortController | null>(null);
+  const loadMoreAbortRef = useRef<AbortController | null>(null);
   const listRef = useRef<FlatList<Track>>(null);
   const scrollOffsetRef = useRef(0);
   const playTrack = usePlayerStore((state) => state.playTrack);
@@ -55,30 +59,57 @@ export default function SearchScreen() {
     void loadPlaylists();
   }, [loadPlaylists]);
 
+  const cancelSearch = useCallback(() => {
+    searchAbortRef.current?.abort();
+    searchAbortRef.current = null;
+    setLoading(false);
+    setPendingQuery(null);
+  }, []);
+
+  const cancelLoadMore = useCallback(() => {
+    loadMoreAbortRef.current?.abort();
+    loadMoreAbortRef.current = null;
+    loadingMoreRef.current = false;
+    setLoadingMore(false);
+  }, []);
+
   const runSearch = async (searchText?: string) => {
     const trimmed = (searchText ?? query).trim();
     if (!trimmed) return;
+
+    searchAbortRef.current?.abort();
+    const controller = new AbortController();
+    searchAbortRef.current = controller;
+
     setQuery(trimmed);
     setInputFocused(false);
     setLoading(true);
     setLoadingMore(false);
     setError(null);
     setNextPage(null);
-    setLastQuery(trimmed);
+    setPendingQuery(trimmed);
+
     try {
-      const page = await api.search(trimmed, { searchOptions: sessionOptions });
+      const page = await api.search(trimmed, { searchOptions: sessionOptions, signal: controller.signal });
+      if (searchAbortRef.current !== controller) return;
       setGroups(page.groups);
       setArtists(page.artists ?? []);
       setNextPage(page.next_page);
       setExplanation(page.explanation?.messages.join(" · ") ?? null);
+      setLastQuery(trimmed);
       recordQuery(trimmed);
     } catch (err) {
+      if (isAbortError(err) || searchAbortRef.current !== controller) return;
       setError(err instanceof Error ? err.message : "Search failed");
       setGroups([]);
       setArtists([]);
       setNextPage(null);
     } finally {
-      setLoading(false);
+      if (searchAbortRef.current === controller) {
+        searchAbortRef.current = null;
+        setLoading(false);
+        setPendingQuery(null);
+      }
     }
   };
 
@@ -86,20 +117,33 @@ export default function SearchScreen() {
     const trimmed = query.trim();
     if (!trimmed || !nextPage || loadingMoreRef.current || loading) return;
 
+    loadMoreAbortRef.current?.abort();
+    const controller = new AbortController();
+    loadMoreAbortRef.current = controller;
+
     loadingMoreRef.current = true;
     setLoadingMore(true);
     setError(null);
 
     try {
-      const page = await api.search(trimmed, { nextPage, searchOptions: sessionOptions });
+      const page = await api.search(trimmed, {
+        nextPage,
+        searchOptions: sessionOptions,
+        signal: controller.signal,
+      });
+      if (loadMoreAbortRef.current !== controller) return;
       setGroups((current) => mergeSearchGroups(current, page.groups));
       setNextPage(page.next_page);
       setExplanation(page.explanation?.messages.join(" · ") ?? null);
     } catch (err) {
+      if (isAbortError(err) || loadMoreAbortRef.current !== controller) return;
       setError(err instanceof Error ? err.message : "Could not load more results");
     } finally {
-      loadingMoreRef.current = false;
-      setLoadingMore(false);
+      if (loadMoreAbortRef.current === controller) {
+        loadMoreAbortRef.current = null;
+        loadingMoreRef.current = false;
+        setLoadingMore(false);
+      }
     }
   }, [query, nextPage, loading, sessionOptions]);
 
@@ -132,12 +176,12 @@ export default function SearchScreen() {
           />
         </View>
         <Button
-          onPress={() => void runSearch()}
-          disabled={loading || !query.trim()}
+          onPress={() => (loading ? cancelSearch() : void runSearch())}
+          disabled={!loading && !query.trim()}
           loading={loading}
           className="px-5"
         >
-          Search
+          {loading ? "Cancel" : "Search"}
         </Button>
       </View>
 
@@ -179,11 +223,11 @@ export default function SearchScreen() {
       {loading ? (
         <View className="gap-1">
           <Text className="mb-2 text-sm text-text-secondary">
-            Searching for &ldquo;{lastQuery}&rdquo;…
+            Searching for &ldquo;{pendingQuery}&rdquo;…
           </Text>
-          {Array.from({ length: 6 }).map((_, i) => (
-            <TrackRowSkeleton key={i} />
-          ))}
+          {results.length === 0
+            ? Array.from({ length: 6 }).map((_, i) => <TrackRowSkeleton key={i} />)
+            : null}
         </View>
       ) : null}
 
@@ -235,7 +279,12 @@ export default function SearchScreen() {
         }
         ListFooterComponent={
           loadingMore ? (
-            <Text className="my-4 text-center text-sm text-text-secondary">Loading more…</Text>
+            <View className="my-4 flex-row items-center justify-center gap-3">
+              <Text className="text-sm text-text-secondary">Loading more…</Text>
+              <Pressable onPress={cancelLoadMore} hitSlop={8}>
+                <Text className="text-sm font-semibold text-text-secondary">Cancel</Text>
+              </Pressable>
+            </View>
           ) : null
         }
         ListEmptyComponent={

@@ -10,6 +10,7 @@ import { useLikedTracks } from "@/hooks/useLikedTracks";
 import { useSearchHistory } from "@/hooks/useSearchHistory";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/cn";
+import { isAbortError } from "@/lib/retry";
 import {
   buildMoreVersionsQuery,
   countActiveSearchOptionChanges,
@@ -34,6 +35,7 @@ export function SearchPage() {
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [lastQuery, setLastQuery] = useState<string | null>(null);
+  const [pendingQuery, setPendingQuery] = useState<string | null>(null);
   const [inputFocused, setInputFocused] = useState(false);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [optionsOpen, setOptionsOpen] = useState(false);
@@ -44,6 +46,8 @@ export function SearchPage() {
   const [searchAdvancedHidden, setSearchAdvancedHidden] = useState(false);
   const loadMoreRef = useRef<HTMLDivElement>(null);
   const loadingMoreRef = useRef(false);
+  const searchAbortRef = useRef<AbortController | null>(null);
+  const loadMoreAbortRef = useRef<AbortController | null>(null);
   const scrollRestoreYRef = useRef<number | null>(null);
   const playTrack = usePlayerStore((s) => s.playTrack);
   const { suggestions, recordQuery, removeQuery, clearHistory } = useSearchHistory(query);
@@ -79,22 +83,41 @@ export function SearchPage() {
   }, [sessionOptions]);
 
   const runSearchRequest = useCallback(
-    async (trimmed: string, options: SearchOptions, pageToken?: string | null) => {
+    async (trimmed: string, options: SearchOptions, pageToken?: string | null, signal?: AbortSignal) => {
       return api.search(trimmed, {
         nextPage: pageToken ?? undefined,
         searchOptions: options,
+        signal,
       });
     },
     [],
   );
 
+  const cancelSearch = useCallback(() => {
+    searchAbortRef.current?.abort();
+    searchAbortRef.current = null;
+    setLoading(false);
+    setPendingQuery(null);
+  }, []);
+
+  const cancelLoadMore = useCallback(() => {
+    loadMoreAbortRef.current?.abort();
+    loadMoreAbortRef.current = null;
+    loadingMoreRef.current = false;
+    setLoadingMore(false);
+    scrollRestoreYRef.current = null;
+  }, []);
+
   useEffect(() => {
     const trimmed = urlQuery.trim();
     if (!trimmed) {
+      searchAbortRef.current?.abort();
+      searchAbortRef.current = null;
       setGroups([]);
       setArtists([]);
       setNextPage(null);
       setLastQuery(null);
+      setPendingQuery(null);
       setError(null);
       setExplanation(null);
       setLoading(false);
@@ -102,37 +125,40 @@ export function SearchPage() {
       return;
     }
 
-    let cancelled = false;
+    searchAbortRef.current?.abort();
+    const controller = new AbortController();
+    searchAbortRef.current = controller;
+
     setLoading(true);
     setLoadingMore(false);
     setError(null);
-    setLastQuery(trimmed);
-    setGroups([]);
-    setArtists([]);
-    setNextPage(null);
+    setPendingQuery(trimmed);
 
     void (async () => {
       try {
-        const page = await runSearchRequest(trimmed, sessionOptions);
-        if (!cancelled) {
-          setGroups(page.groups);
-          setArtists(page.artists ?? []);
-          setNextPage(page.next_page);
-          setExplanation(page.explanation);
-          setSearchAdvancedHidden(page.search_advanced_hidden);
-          recordQuery(trimmed);
-        }
+        const page = await runSearchRequest(trimmed, sessionOptions, null, controller.signal);
+        if (searchAbortRef.current !== controller) return;
+        setGroups(page.groups);
+        setArtists(page.artists ?? []);
+        setNextPage(page.next_page);
+        setExplanation(page.explanation);
+        setSearchAdvancedHidden(page.search_advanced_hidden);
+        setLastQuery(trimmed);
+        recordQuery(trimmed);
       } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : "Search failed");
-        }
+        if (isAbortError(err) || searchAbortRef.current !== controller) return;
+        setError(err instanceof Error ? err.message : "Search failed");
       } finally {
-        if (!cancelled) setLoading(false);
+        if (searchAbortRef.current === controller) {
+          searchAbortRef.current = null;
+          setLoading(false);
+          setPendingQuery(null);
+        }
       }
     })();
 
     return () => {
-      cancelled = true;
+      controller.abort();
     };
   }, [urlQuery, sessionOptions, recordQuery, runSearchRequest]);
 
@@ -140,22 +166,31 @@ export function SearchPage() {
     const trimmed = urlQuery.trim();
     if (!trimmed || !nextPage || loadingMoreRef.current || loading) return;
 
+    loadMoreAbortRef.current?.abort();
+    const controller = new AbortController();
+    loadMoreAbortRef.current = controller;
+
     loadingMoreRef.current = true;
     setLoadingMore(true);
     setError(null);
     scrollRestoreYRef.current = window.scrollY;
 
     try {
-      const page = await runSearchRequest(trimmed, sessionOptions, nextPage);
+      const page = await runSearchRequest(trimmed, sessionOptions, nextPage, controller.signal);
+      if (loadMoreAbortRef.current !== controller) return;
       setGroups((current) => mergeSearchGroups(current, page.groups));
       setNextPage(page.next_page);
       setExplanation(page.explanation);
     } catch (err) {
+      if (isAbortError(err) || loadMoreAbortRef.current !== controller) return;
       scrollRestoreYRef.current = null;
       setError(err instanceof Error ? err.message : "Could not load more results");
     } finally {
-      loadingMoreRef.current = false;
-      setLoadingMore(false);
+      if (loadMoreAbortRef.current === controller) {
+        loadMoreAbortRef.current = null;
+        loadingMoreRef.current = false;
+        setLoadingMore(false);
+      }
     }
   }, [urlQuery, nextPage, loading, sessionOptions, runSearchRequest]);
 
@@ -252,7 +287,6 @@ export function SearchPage() {
             onBlur={() => {
               window.setTimeout(() => setInputFocused(false), 150);
             }}
-            disabled={loading}
             aria-busy={loading}
             aria-autocomplete="list"
             aria-expanded={showSuggestions}
@@ -323,8 +357,14 @@ export function SearchPage() {
             ) : null}
           </Button>
         ) : null}
-        <Button type="submit" disabled={loading || !query.trim()} className="shrink-0 px-6">
-          {loading ? "Searching…" : "Search"}
+        <Button
+          type={loading ? "button" : "submit"}
+          variant={loading ? "secondary" : "primary"}
+          disabled={!loading && !query.trim()}
+          className="shrink-0 px-6"
+          onClick={loading ? cancelSearch : undefined}
+        >
+          {loading ? "Cancel" : "Search"}
         </Button>
       </form>
 
@@ -346,11 +386,11 @@ export function SearchPage() {
         <div className="space-y-1" role="status" aria-live="polite">
           <p className="mb-3 flex items-center gap-2 text-sm text-text-secondary">
             <span className="tf-spinner" aria-hidden="true" />
-            Searching for &ldquo;{lastQuery}&rdquo;&hellip;
+            Searching for &ldquo;{pendingQuery}&rdquo;&hellip;
           </p>
-          {Array.from({ length: 6 }).map((_, i) => (
-            <TrackRowSkeleton key={i} />
-          ))}
+          {!hasResults
+            ? Array.from({ length: 6 }).map((_, i) => <TrackRowSkeleton key={i} />)
+            : null}
         </div>
       ) : null}
 
@@ -387,10 +427,15 @@ export function SearchPage() {
 
       {nextPage ? <div ref={loadMoreRef} className="h-px" aria-hidden="true" /> : null}
       {loadingMore ? (
-        <p className="flex items-center gap-2 text-sm text-text-secondary" role="status" aria-live="polite">
-          <span className="tf-spinner" aria-hidden="true" />
-          Loading more results&hellip;
-        </p>
+        <div className="flex items-center gap-3">
+          <p className="flex items-center gap-2 text-sm text-text-secondary" role="status" aria-live="polite">
+            <span className="tf-spinner" aria-hidden="true" />
+            Loading more results&hellip;
+          </p>
+          <Button type="button" variant="ghost" size="sm" onClick={cancelLoadMore}>
+            Cancel
+          </Button>
+        </div>
       ) : null}
     </div>
   );

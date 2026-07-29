@@ -27,6 +27,16 @@ export function isRetryableApiFailure(error: unknown): boolean {
   return false;
 }
 
+export function isAbortError(error: unknown): boolean {
+  if (error instanceof DOMException && error.name === "AbortError") {
+    return true;
+  }
+  if (error instanceof Error && error.name === "AbortError") {
+    return true;
+  }
+  return false;
+}
+
 export function isRetryablePlaybackFailure(error: unknown): boolean {
   if (isRetryableApiFailure(error)) {
     return true;
@@ -49,6 +59,7 @@ type RetryOptions = {
   baseDelayMs?: number;
   maxDelayMs?: number;
   shouldRetry?: (error: unknown, attempt: number) => boolean;
+  signal?: AbortSignal;
 };
 
 export async function withRetry<T>(
@@ -59,19 +70,26 @@ export async function withRetry<T>(
   const baseDelayMs = options.baseDelayMs ?? 500;
   const maxDelayMs = options.maxDelayMs ?? 4000;
   const shouldRetry = options.shouldRetry ?? isRetryableApiFailure;
+  const { signal } = options;
 
   let lastError: unknown;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    if (signal?.aborted) {
+      throw new DOMException("Request aborted", "AbortError");
+    }
     try {
       return await fn();
     } catch (error) {
       lastError = error;
-      if (attempt >= maxAttempts || !shouldRetry(error, attempt)) {
+      if (isAbortError(error) || attempt >= maxAttempts || !shouldRetry(error, attempt)) {
         throw error;
       }
       const delay = Math.min(baseDelayMs * 2 ** (attempt - 1), maxDelayMs);
       const jitter = delay * 0.2 * Math.random();
       await sleep(delay + jitter);
+      if (signal?.aborted) {
+        throw new DOMException("Request aborted", "AbortError");
+      }
     }
   }
   throw lastError;
