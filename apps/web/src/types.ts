@@ -63,10 +63,42 @@ export type Track = {
   short_description?: string | null;
 };
 
+export type SearchOptions = {
+  max_per_song: number | null;
+  hide_covers: boolean;
+  hide_loops: boolean;
+  results_per_page: number;
+  version_preference: "auto" | "studio" | "live" | "any";
+};
+
+export type SearchExplanation = {
+  messages: string[];
+};
+
+export type SearchResultGroup = {
+  group_key: string;
+  primary: Track;
+  alternates: Track[];
+};
+
 export type SearchResultsPage = {
-  results: Track[];
+  groups: SearchResultGroup[];
   artists: ArtistSearchHit[];
   next_page: string | null;
+  effective_options: SearchOptions;
+  explanation: SearchExplanation | null;
+  search_advanced_hidden: boolean;
+};
+
+export type HouseholdSearchSettings = {
+  search_defaults: SearchOptions;
+};
+
+export type UserChannelPin = {
+  id: number;
+  artist_key: string;
+  channel_name: string;
+  created_at: string;
 };
 
 export type ArtistSearchHit = {
@@ -203,6 +235,10 @@ export type ParentalSettings = {
   allowed_end_hour: number;
   blocked_keywords: string[];
   blocked_video_ids: string[];
+  search_advanced_hidden: boolean;
+  search_locked: boolean;
+  search_max_versions_ceiling: number | null;
+  search_force_clean: boolean;
   updated_at: string;
 };
 

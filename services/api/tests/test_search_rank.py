@@ -29,9 +29,11 @@ def test_dedupe_keeps_distinct_artists_with_same_title():
         _result("other1", title="Hello", artist="Someone Else - Topic", source_title="Hello"),
     ]
 
-    deduped = dedupe_search_results(results, collapse_same_song=True)
+    deduped, counts, collapsed = dedupe_search_results(results, max_per_song=1)
 
     assert [result.video_id for result in deduped] == ["adele1", "richie1", "other1"]
+    assert collapsed == 0
+    assert len(counts) == 3
 
 
 def test_dedupe_collapses_duplicate_uploads_for_same_artist():
@@ -40,9 +42,24 @@ def test_dedupe_collapses_duplicate_uploads_for_same_artist():
         _result("adele2", title="Hello", artist="Adele - Topic", source_title="Hello (Official Audio)"),
     ]
 
-    deduped = dedupe_search_results(results, collapse_same_song=True)
+    deduped, counts, collapsed = dedupe_search_results(results, max_per_song=1)
 
     assert [result.video_id for result in deduped] == ["adele1"]
+    assert collapsed == 1
+
+
+def test_dedupe_allows_multiple_versions_when_configured():
+    results = [
+        _result("adele1", title="Hello", artist="Adele - Topic", source_title="Hello"),
+        _result("adele2", title="Hello", artist="Adele - Topic", source_title="Hello (Official Audio)"),
+        _result("adele3", title="Hello", artist="Adele - Topic", source_title="Hello (Live)"),
+    ]
+
+    deduped, counts, collapsed = dedupe_search_results(results, max_per_song=2)
+
+    assert [result.video_id for result in deduped] == ["adele1", "adele2"]
+    assert collapsed == 1
+    assert counts["adele|hello"] == 2
 
 
 def test_query_relevance_prefers_title_and_artist_match():

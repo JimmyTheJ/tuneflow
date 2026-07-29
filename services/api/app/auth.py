@@ -61,6 +61,10 @@ def settings_to_read(settings: ParentalSettings) -> ParentalSettingsRead:
         allowed_end_hour=settings.allowed_end_hour,
         blocked_keywords=parse_json_list(settings.blocked_keywords),
         blocked_video_ids=parse_json_list(settings.blocked_video_ids),
+        search_advanced_hidden=settings.search_advanced_hidden,
+        search_locked=settings.search_locked,
+        search_max_versions_ceiling=settings.search_max_versions_ceiling,
+        search_force_clean=settings.search_force_clean,
         updated_at=settings.updated_at,
     )
 

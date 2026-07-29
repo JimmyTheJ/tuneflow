@@ -7,9 +7,16 @@ from sqlalchemy.orm import selectinload
 
 from app.auth import assert_same_household, build_user_read, require_manage_members, require_root_admin
 from app.database import get_db
-from app.models import Household, User, UserRoleAssignment
+from app.models import Household, User, UserChannelPin, UserRoleAssignment
 from app.permissions import Permission
-from app.schemas import ResetPasswordRequest, UserCreate, UserRead, UserUpdate
+from app.schemas import (
+    ResetPasswordRequest,
+    UserChannelPinCreate,
+    UserChannelPinRead,
+    UserCreate,
+    UserRead,
+    UserUpdate,
+)
 from app.security import hash_password
 from app.services.households import ensure_unique_username_in_household
 from app.services.roles import (
@@ -20,8 +27,13 @@ from app.services.roles import (
     user_has_permission,
     validate_assignable_profiles,
 )
+from app.services.piped import _normalize_text
 
 router = APIRouter(prefix="/users", tags=["users"])
+
+
+def _normalize_artist_key(value: str) -> str:
+    return _normalize_text(value.replace("- Topic", "").strip())
 
 
 async def _get_user(db: AsyncSession, user_id: int) -> User:
@@ -251,4 +263,68 @@ async def permanently_delete_user(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot permanently delete root admin account")
 
     await db.delete(user)
+    await db.commit()
+
+
+@router.get("/me/channel-pins", response_model=list[UserChannelPinRead])
+async def list_my_channel_pins(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[UserChannelPinRead]:
+    result = await db.execute(
+        select(UserChannelPin)
+        .where(UserChannelPin.user_id == current_user.id)
+        .order_by(UserChannelPin.artist_key.asc())
+    )
+    return [UserChannelPinRead.model_validate(pin, from_attributes=True) for pin in result.scalars().all()]
+
+
+@router.put("/me/channel-pins", response_model=UserChannelPinRead)
+async def upsert_my_channel_pin(
+    payload: UserChannelPinCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> UserChannelPinRead:
+    artist_key = _normalize_artist_key(payload.artist_key)
+    if not artist_key:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Artist is required")
+
+    result = await db.execute(
+        select(UserChannelPin).where(
+            UserChannelPin.user_id == current_user.id,
+            UserChannelPin.artist_key == artist_key,
+        )
+    )
+    pin = result.scalar_one_or_none()
+    if pin is None:
+        pin = UserChannelPin(
+            user_id=current_user.id,
+            artist_key=artist_key,
+            channel_name=payload.channel_name.strip(),
+        )
+        db.add(pin)
+    else:
+        pin.channel_name = payload.channel_name.strip()
+    await db.commit()
+    await db.refresh(pin)
+    return UserChannelPinRead.model_validate(pin, from_attributes=True)
+
+
+@router.delete("/me/channel-pins/{artist_key}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_my_channel_pin(
+    artist_key: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    normalized = _normalize_artist_key(artist_key)
+    result = await db.execute(
+        select(UserChannelPin).where(
+            UserChannelPin.user_id == current_user.id,
+            UserChannelPin.artist_key == normalized,
+        )
+    )
+    pin = result.scalar_one_or_none()
+    if pin is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Channel pin not found")
+    await db.delete(pin)
     await db.commit()

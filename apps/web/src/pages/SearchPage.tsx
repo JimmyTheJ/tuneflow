@@ -1,34 +1,33 @@
-import { Search as SearchIcon, X } from "lucide-react";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Search as SearchIcon, Settings2, X } from "lucide-react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { ArtistSearchCard } from "@/components/ArtistSearchCard";
-import { TrackRowWithActions } from "@/components/TrackRowWithActions";
+import { SearchOptionsPanel } from "@/components/SearchOptionsPanel";
+import { SearchResultGroupRow } from "@/components/SearchResultGroupRow";
 import { Button } from "@/components/ui/Button";
 import { TrackRowSkeleton } from "@/components/ui/Skeleton";
 import { useLikedTracks } from "@/hooks/useLikedTracks";
 import { useSearchHistory } from "@/hooks/useSearchHistory";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/cn";
-import { formatSearchSubtitle } from "@/lib/tracks";
+import {
+  buildMoreVersionsQuery,
+  countActiveSearchOptionChanges,
+  DEFAULT_SEARCH_OPTIONS,
+  loadSessionSearchOptions,
+  mergeSearchGroups,
+  primaryPlayQueue,
+  saveSessionSearchOptions,
+} from "@/lib/searchOptions";
+import { formatTrackArtist } from "@/lib/tracks";
 import { usePlayerStore } from "@/stores/playerStore";
-import type { ArtistSearchHit, Playlist, Track } from "@/types";
-
-function mergeTracks(existing: Track[], incoming: Track[]): Track[] {
-  const seen = new Set(existing.map((track) => track.video_id));
-  const merged = [...existing];
-  for (const track of incoming) {
-    if (seen.has(track.video_id)) continue;
-    seen.add(track.video_id);
-    merged.push(track);
-  }
-  return merged;
-}
+import type { ArtistSearchHit, Playlist, SearchExplanation, SearchOptions, SearchResultGroup, Track } from "@/types";
 
 export function SearchPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const urlQuery = searchParams.get("q") ?? "";
   const [query, setQuery] = useState(urlQuery);
-  const [results, setResults] = useState<Track[]>([]);
+  const [groups, setGroups] = useState<SearchResultGroup[]>([]);
   const [artists, setArtists] = useState<ArtistSearchHit[]>([]);
   const [nextPage, setNextPage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -37,12 +36,23 @@ export function SearchPage() {
   const [lastQuery, setLastQuery] = useState<string | null>(null);
   const [inputFocused, setInputFocused] = useState(false);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
+  const [optionsOpen, setOptionsOpen] = useState(false);
+  const [sessionOptions, setSessionOptions] = useState<SearchOptions>(
+    () => loadSessionSearchOptions() ?? DEFAULT_SEARCH_OPTIONS,
+  );
+  const [explanation, setExplanation] = useState<SearchExplanation | null>(null);
+  const [searchAdvancedHidden, setSearchAdvancedHidden] = useState(false);
   const loadMoreRef = useRef<HTMLDivElement>(null);
   const loadingMoreRef = useRef(false);
   const scrollRestoreYRef = useRef<number | null>(null);
   const playTrack = usePlayerStore((s) => s.playTrack);
   const { suggestions, recordQuery, removeQuery, clearHistory } = useSearchHistory(query);
   const { likedVideoIds, refresh: refreshLikedTracks } = useLikedTracks();
+
+  const activeOptionCount = useMemo(
+    () => countActiveSearchOptionChanges(sessionOptions, DEFAULT_SEARCH_OPTIONS),
+    [sessionOptions],
+  );
 
   const loadPlaylists = useCallback(async () => {
     try {
@@ -65,13 +75,28 @@ export function SearchPage() {
   }, [urlQuery]);
 
   useEffect(() => {
+    saveSessionSearchOptions(sessionOptions);
+  }, [sessionOptions]);
+
+  const runSearchRequest = useCallback(
+    async (trimmed: string, options: SearchOptions, pageToken?: string | null) => {
+      return api.search(trimmed, {
+        nextPage: pageToken ?? undefined,
+        searchOptions: options,
+      });
+    },
+    [],
+  );
+
+  useEffect(() => {
     const trimmed = urlQuery.trim();
     if (!trimmed) {
-      setResults([]);
+      setGroups([]);
       setArtists([]);
       setNextPage(null);
       setLastQuery(null);
       setError(null);
+      setExplanation(null);
       setLoading(false);
       setLoadingMore(false);
       return;
@@ -82,17 +107,19 @@ export function SearchPage() {
     setLoadingMore(false);
     setError(null);
     setLastQuery(trimmed);
-    setResults([]);
+    setGroups([]);
     setArtists([]);
     setNextPage(null);
 
     void (async () => {
       try {
-        const page = await api.search(trimmed);
+        const page = await runSearchRequest(trimmed, sessionOptions);
         if (!cancelled) {
-          setResults(page.results);
+          setGroups(page.groups);
           setArtists(page.artists ?? []);
           setNextPage(page.next_page);
+          setExplanation(page.explanation);
+          setSearchAdvancedHidden(page.search_advanced_hidden);
           recordQuery(trimmed);
         }
       } catch (err) {
@@ -107,7 +134,7 @@ export function SearchPage() {
     return () => {
       cancelled = true;
     };
-  }, [urlQuery, recordQuery]);
+  }, [urlQuery, sessionOptions, recordQuery, runSearchRequest]);
 
   const loadMore = useCallback(async () => {
     const trimmed = urlQuery.trim();
@@ -119,9 +146,10 @@ export function SearchPage() {
     scrollRestoreYRef.current = window.scrollY;
 
     try {
-      const page = await api.search(trimmed, { nextPage });
-      setResults((current) => mergeTracks(current, page.results));
+      const page = await runSearchRequest(trimmed, sessionOptions, nextPage);
+      setGroups((current) => mergeSearchGroups(current, page.groups));
       setNextPage(page.next_page);
+      setExplanation(page.explanation);
     } catch (err) {
       scrollRestoreYRef.current = null;
       setError(err instanceof Error ? err.message : "Could not load more results");
@@ -129,14 +157,14 @@ export function SearchPage() {
       loadingMoreRef.current = false;
       setLoadingMore(false);
     }
-  }, [urlQuery, nextPage, loading]);
+  }, [urlQuery, nextPage, loading, sessionOptions, runSearchRequest]);
 
   useLayoutEffect(() => {
     const y = scrollRestoreYRef.current;
     if (y === null) return;
     scrollRestoreYRef.current = null;
     window.scrollTo(0, y);
-  }, [results]);
+  }, [groups]);
 
   useEffect(() => {
     const node = loadMoreRef.current;
@@ -160,7 +188,7 @@ export function SearchPage() {
     const doc = document.documentElement;
     if (doc.scrollHeight > window.innerHeight) return;
     void loadMore();
-  }, [results.length, loading, loadingMore, nextPage, loadMore]);
+  }, [groups.length, loading, loadingMore, nextPage, loadMore]);
 
   const runSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -178,8 +206,30 @@ export function SearchPage() {
     setSearchParams({ q: text });
   };
 
+  const handlePlayTrack = (track: Track, queue: Track[]) => {
+    void playTrack(track, queue);
+  };
+
+  const handleMoreVersions = (track: Track) => {
+    const nextQuery = buildMoreVersionsQuery(track);
+    setSessionOptions((current) => ({ ...current, max_per_song: null }));
+    setQuery(nextQuery);
+    setSearchParams({ q: nextQuery });
+    setOptionsOpen(true);
+  };
+
+  const handlePinChannel = async (track: Track) => {
+    const artistKey = formatTrackArtist(track.artist);
+    const channelName = track.artist?.trim();
+    if (!artistKey || artistKey === "Unknown artist" || !channelName) {
+      throw new Error("No channel available to pin");
+    }
+    await api.upsertChannelPin(artistKey, channelName);
+  };
+
   const showSuggestions = inputFocused && suggestions.length > 0 && !loading;
-  const playable = results.filter((t) => !t.blocked_reason);
+  const playable = primaryPlayQueue(groups);
+  const hasResults = groups.length > 0;
 
   return (
     <div className="space-y-6">
@@ -256,10 +306,41 @@ export function SearchPage() {
             </div>
           ) : null}
         </div>
+        {!searchAdvancedHidden ? (
+          <Button
+            type="button"
+            variant="secondary"
+            className="relative shrink-0 px-3"
+            aria-expanded={optionsOpen}
+            aria-label="Search options"
+            onClick={() => setOptionsOpen((open) => !open)}
+          >
+            <Settings2 className="size-5" />
+            {activeOptionCount > 0 ? (
+              <span className="absolute -right-1 -top-1 flex size-5 items-center justify-center rounded-full bg-accent text-[11px] font-bold text-accent-fg">
+                {activeOptionCount}
+              </span>
+            ) : null}
+          </Button>
+        ) : null}
         <Button type="submit" disabled={loading || !query.trim()} className="shrink-0 px-6">
           {loading ? "Searching…" : "Search"}
         </Button>
       </form>
+
+      {optionsOpen && !searchAdvancedHidden ? (
+        <SearchOptionsPanel
+          value={sessionOptions}
+          onChange={setSessionOptions}
+          onReset={() => setSessionOptions(DEFAULT_SEARCH_OPTIONS)}
+        />
+      ) : null}
+
+      {explanation?.messages.length ? (
+        <p className="text-sm text-text-secondary">
+          {explanation.messages.join(" · ")}
+        </p>
+      ) : null}
 
       {loading ? (
         <div className="space-y-1" role="status" aria-live="polite">
@@ -275,7 +356,7 @@ export function SearchPage() {
 
       {error ? <p className="text-danger-fg">{error}</p> : null}
 
-      {!loading && lastQuery && results.length === 0 && !error ? (
+      {!loading && lastQuery && !hasResults && !error ? (
         <p className="text-text-muted">No results for &ldquo;{lastQuery}&rdquo;.</p>
       ) : null}
 
@@ -288,24 +369,18 @@ export function SearchPage() {
       ) : null}
 
       <div className="space-y-0.5 [overflow-anchor:none]">
-        {results.map((track) => (
-          <TrackRowWithActions
-            key={track.video_id}
-            track={track}
+        {groups.map((group) => (
+          <SearchResultGroupRow
+            key={group.group_key}
+            group={group}
             playQueue={playable}
             likedVideoIds={likedVideoIds}
             playlists={playlists}
-            displayTitle={track.source_title ?? track.title}
-            showBadges
-            subtitle={
-              track.blocked_reason
-                ? `Blocked: ${track.blocked_reason}`
-                : formatSearchSubtitle(track)
-            }
-            disabled={!!track.blocked_reason}
-            onPlay={() => void playTrack(track, playable)}
+            onPlayTrack={handlePlayTrack}
             onLikedChange={() => void loadLibraryData()}
             onPlaylistsChange={() => void loadLibraryData()}
+            onMoreVersions={handleMoreVersions}
+            onPinChannel={(track) => void handlePinChannel(track)}
           />
         ))}
       </div>

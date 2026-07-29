@@ -11,6 +11,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { PinModal } from "@/components/PinModal";
+import { SearchOptionsPanel } from "@/components/SearchOptionsPanel";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
@@ -24,8 +25,9 @@ import {
   isChildProfile,
 } from "@/lib/permissions";
 import { getApiUrl, setApiUrl } from "@/lib/settings";
+import { DEFAULT_SEARCH_OPTIONS } from "@/lib/searchOptions";
 import { useAuthStore } from "@/stores/authStore";
-import type { ParentalSettings, ScrobblerConnectionStatus, ScrobblerProviderInfo } from "@/types";
+import type { ParentalSettings, ScrobblerConnectionStatus, ScrobblerProviderInfo, SearchOptions } from "@/types";
 
 function SettingsLink({
   to,
@@ -72,8 +74,12 @@ export function SettingsPage() {
   const [householdSlugMessage, setHouseholdSlugMessage] = useState<string | null>(null);
   const [householdSlugError, setHouseholdSlugError] = useState<string | null>(null);
   const [householdSlugBusy, setHouseholdSlugBusy] = useState(false);
+  const [householdSearchDefaults, setHouseholdSearchDefaults] = useState<SearchOptions>(DEFAULT_SEARCH_OPTIONS);
+  const [householdSearchBusy, setHouseholdSearchBusy] = useState(false);
+  const [householdSearchMessage, setHouseholdSearchMessage] = useState<string | null>(null);
 
   const isHouseholdAdmin = canManageRoleProfiles(user) && !isRootAdmin;
+  const canEditHouseholdSearch = canManageParentalControls(user) || canManageRoleProfiles(user);
 
   useEffect(() => {
     if (!isHouseholdAdmin) return;
@@ -82,6 +88,14 @@ export function SettingsPage() {
       .then((household) => setHouseholdSlug(household.slug))
       .catch(() => undefined);
   }, [isHouseholdAdmin]);
+
+  useEffect(() => {
+    if (!canEditHouseholdSearch || isRootAdmin) return;
+    void api
+      .getHouseholdSearchSettings()
+      .then((settings) => setHouseholdSearchDefaults(settings.search_defaults))
+      .catch(() => setHouseholdSearchDefaults(DEFAULT_SEARCH_OPTIONS));
+  }, [canEditHouseholdSearch, isRootAdmin]);
 
   useEffect(() => {
     if (canSetParentPin(user)) {
@@ -197,6 +211,20 @@ export function SettingsPage() {
     }
   };
 
+  const saveHouseholdSearchDefaults = async () => {
+    setHouseholdSearchBusy(true);
+    setHouseholdSearchMessage(null);
+    try {
+      const settings = await api.updateHouseholdSearchSettings(householdSearchDefaults);
+      setHouseholdSearchDefaults(settings.search_defaults);
+      setHouseholdSearchMessage("Household search defaults saved.");
+    } catch (err) {
+      setHouseholdSearchMessage(err instanceof Error ? err.message : "Could not save search defaults");
+    } finally {
+      setHouseholdSearchBusy(false);
+    }
+  };
+
   return (
     <div className="mx-auto max-w-2xl space-y-8">
       <h1 className="m-0 text-3xl font-bold tracking-tight md:text-4xl">Settings</h1>
@@ -308,6 +336,34 @@ export function SettingsPage() {
           </Button>
           {householdSlugMessage ? <p className="m-0 text-sm text-accent">{householdSlugMessage}</p> : null}
           {householdSlugError ? <p className="m-0 text-sm text-danger-fg">{householdSlugError}</p> : null}
+        </Card>
+      ) : null}
+
+      {canEditHouseholdSearch && !isRootAdmin ? (
+        <Card className="space-y-4">
+          <div>
+            <h2 className="m-0 text-base font-bold">Search defaults</h2>
+            <p className="mt-1 mb-0 text-sm text-text-secondary">
+              Default search behavior for everyone in your household.
+            </p>
+          </div>
+          <SearchOptionsPanel
+            value={householdSearchDefaults}
+            onChange={setHouseholdSearchDefaults}
+            onReset={() => setHouseholdSearchDefaults(DEFAULT_SEARCH_OPTIONS)}
+            compact
+          />
+          <Button
+            variant="secondary"
+            block
+            disabled={householdSearchBusy}
+            onClick={() => void saveHouseholdSearchDefaults()}
+          >
+            {householdSearchBusy ? "Saving…" : "Save search defaults"}
+          </Button>
+          {householdSearchMessage ? (
+            <p className="m-0 text-sm text-text-secondary">{householdSearchMessage}</p>
+          ) : null}
         </Card>
       ) : null}
 

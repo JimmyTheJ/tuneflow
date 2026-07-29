@@ -16,6 +16,7 @@ import type {
   ScrobblerLinkStart,
   ScrobblerProviderInfo,
   SearchResultsPage,
+  SearchOptions,
   SetupStatus,
   StreamInfo,
   TokenResponse,
@@ -135,10 +136,21 @@ export const api = {
     request<{ slug: string; name: string }>(`/api/households/public/${encodeURIComponent(slug)}`, { auth: false }),
   me: () => request<User>("/api/auth/me"),
 
-  search: (q: string, options?: { limit?: number; nextPage?: string }) => {
+  search: (q: string, options?: { nextPage?: string; searchOptions?: SearchOptions }) => {
     const params = new URLSearchParams({ q });
-    if (options?.limit) params.set("limit", String(options.limit));
     if (options?.nextPage) params.set("next_page", options.nextPage);
+    if (options?.searchOptions) {
+      const { max_per_song, hide_covers, hide_loops, results_per_page, version_preference } =
+        options.searchOptions;
+      if (max_per_song === null) params.set("max_per_song", "0");
+      else if (max_per_song != null) params.set("max_per_song", String(max_per_song));
+      if (hide_covers) params.set("hide_covers", "true");
+      if (hide_loops) params.set("hide_loops", "true");
+      if (results_per_page) params.set("limit", String(results_per_page));
+      if (version_preference && version_preference !== "auto") {
+        params.set("version_preference", version_preference);
+      }
+    }
     return request<SearchResultsPage>(`/api/music/search?${params.toString()}`);
   },
   getArtist: (mbid: string) => request<ArtistDetail>(`/api/music/artists/${mbid}`),

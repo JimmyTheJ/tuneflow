@@ -1,12 +1,29 @@
+import json
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.auth import build_user_read, get_current_user, require_manage_role_profiles, require_root_admin
+from app.auth import (
+    build_user_read,
+    get_current_user,
+    require_manage_role_profiles,
+    require_root_admin,
+)
 from app.database import get_db
 from app.models import Household, User, UserRoleAssignment
-from app.schemas import HouseholdCreate, HouseholdPublicRead, HouseholdRead, HouseholdUpdate, UserRead
+from app.schemas import (
+    HouseholdCreate,
+    HouseholdPublicRead,
+    HouseholdRead,
+    HouseholdSearchSettingsRead,
+    HouseholdSearchSettingsUpdate,
+    HouseholdUpdate,
+    SearchOptions,
+    SearchOptionsUpdate,
+    UserRead,
+)
 from app.security import hash_password
 from app.services.households import (
     ensure_unique_username_in_household,
@@ -15,10 +32,25 @@ from app.services.households import (
     update_household_slug,
     validated_household_slug,
 )
-from app.services.roles import assign_role_profile, get_role_profile_by_slug
+from app.services.roles import assign_role_profile, get_role_profile_by_slug, user_has_permission
+from app.permissions import Permission
+from app.services.search_options import merge_search_options, parse_household_search_defaults
 from app.slugify import validate_household_slug
 
 router = APIRouter(prefix="/households", tags=["households"])
+
+
+async def _assert_can_manage_household_search(db: AsyncSession, actor: User) -> None:
+    if actor.is_root_admin:
+        return
+    if await user_has_permission(db, actor, Permission.MANAGE_ROLE_PROFILES):
+        return
+    if await user_has_permission(db, actor, Permission.MANAGE_PARENTAL_CONTROLS):
+        return
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Household admin or parental controls permission required",
+    )
 
 
 async def _household_read(db: AsyncSession, household: Household) -> HouseholdRead:
@@ -77,6 +109,40 @@ async def update_my_household(
 
     await update_household_slug(db, household, payload.slug)
     return await _household_read(db, household)
+
+
+@router.get("/mine/search-settings", response_model=HouseholdSearchSettingsRead)
+async def get_household_search_settings(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> HouseholdSearchSettingsRead:
+    household = await get_household_for_user(db, current_user)
+    if household.is_system:
+        return HouseholdSearchSettingsRead(search_defaults=SearchOptions())
+    return HouseholdSearchSettingsRead(search_defaults=parse_household_search_defaults(household))
+
+
+@router.patch("/mine/search-settings", response_model=HouseholdSearchSettingsRead)
+async def update_household_search_settings(
+    payload: HouseholdSearchSettingsUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> HouseholdSearchSettingsRead:
+    await _assert_can_manage_household_search(db, current_user)
+    household = await get_household_for_user(db, current_user)
+    if household.is_system:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="System household has no editable settings")
+
+    current = parse_household_search_defaults(household)
+    if payload.search_defaults is not None:
+        current = merge_search_options(
+            current,
+            SearchOptions.model_validate(payload.search_defaults.model_dump(exclude_unset=True)),
+        )
+    household.search_defaults_json = json.dumps(current.model_dump(mode="json"))
+    await db.commit()
+    await db.refresh(household)
+    return HouseholdSearchSettingsRead(search_defaults=current)
 
 
 @router.get("", response_model=list[HouseholdRead])

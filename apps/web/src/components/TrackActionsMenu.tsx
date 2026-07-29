@@ -32,8 +32,11 @@ type Props = {
   likedVideoIds: Set<string>;
   playlists: Playlist[];
   disabled?: boolean;
+  groupTracks?: Track[];
   onLikedChange: () => void;
   onPlaylistsChange: () => void;
+  onMoreVersions?: (track: Track) => void;
+  onPinChannel?: (track: Track) => void;
 };
 
 function clampMenuPosition(position: MenuPosition, menuWidth: number, menuHeight: number): MenuPosition {
@@ -55,6 +58,9 @@ export const TrackActionsMenu = forwardRef<TrackActionsMenuHandle, Props>(functi
     disabled = false,
     onLikedChange,
     onPlaylistsChange,
+    groupTracks,
+    onMoreVersions,
+    onPinChannel,
   },
   ref,
 ) {
@@ -132,6 +138,21 @@ export const TrackActionsMenu = forwardRef<TrackActionsMenuHandle, Props>(functi
     close();
     const queue = playQueue.length > 0 ? playQueue : [track];
     void playTrack(track, queue);
+  };
+
+  const handlePlayAllVersions = () => {
+    close();
+    const versions = (groupTracks ?? []).filter((item) => !item.blocked_reason);
+    if (versions.length === 0) {
+      void playTrack(track, [track]);
+      return;
+    }
+    void playTrack(versions[0], versions);
+  };
+
+  const handlePlayThisVersion = () => {
+    close();
+    void playTrack(track, [track]);
   };
 
   const handleAddToQueue = () => {
@@ -229,6 +250,16 @@ export const TrackActionsMenu = forwardRef<TrackActionsMenuHandle, Props>(functi
           <button type="button" className={itemClass} role="menuitem" onClick={handlePlay}>
             Play now
           </button>
+          {groupTracks && groupTracks.length > 1 ? (
+            <>
+              <button type="button" className={itemClass} role="menuitem" onClick={handlePlayThisVersion}>
+                Play this version
+              </button>
+              <button type="button" className={itemClass} role="menuitem" onClick={handlePlayAllVersions}>
+                Play all versions in group
+              </button>
+            </>
+          ) : null}
           <button type="button" className={itemClass} role="menuitem" onClick={handleAddToQueue}>
             Add to queue
           </button>
@@ -281,6 +312,40 @@ export const TrackActionsMenu = forwardRef<TrackActionsMenuHandle, Props>(functi
           >
             Add to playlist…
           </button>
+          {onMoreVersions ? (
+            <button
+              type="button"
+              className={itemClass}
+              role="menuitem"
+              onClick={() => {
+                close();
+                onMoreVersions(track);
+              }}
+            >
+              More versions…
+            </button>
+          ) : null}
+          {onPinChannel && track.artist ? (
+            <button
+              type="button"
+              className={itemClass}
+              role="menuitem"
+              disabled={busy}
+              onClick={() => {
+                close();
+                void (async () => {
+                  try {
+                    await onPinChannel(track);
+                    showStatus("Channel pinned");
+                  } catch (err) {
+                    showStatus(err instanceof Error ? err.message : "Could not pin channel");
+                  }
+                })();
+              }}
+            >
+              Pin channel for artist
+            </button>
+          ) : null}
           {status ? (
             <div
               className="mt-1 border-t border-border px-3 py-2 text-sm text-accent"

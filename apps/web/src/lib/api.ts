@@ -23,6 +23,9 @@ import type {
   ScrobblerLinkStart,
   ScrobblerProviderInfo,
   SearchResultsPage,
+  HouseholdSearchSettings,
+  UserChannelPin,
+  SearchOptions,
   SetupStatus,
   StreamInfo,
   TokenResponse,
@@ -138,12 +141,37 @@ export const api = {
   getHouseholdPublic: (slug: string) =>
     request<{ slug: string; name: string }>(`/api/households/public/${encodeURIComponent(slug)}`, { auth: false }),
   me: () => request<User>("/api/auth/me"),
-  search: (q: string, options?: { limit?: number; nextPage?: string }) => {
+  search: (q: string, options?: { nextPage?: string; searchOptions?: SearchOptions }) => {
     const params = new URLSearchParams({ q });
-    if (options?.limit) params.set("limit", String(options.limit));
     if (options?.nextPage) params.set("next_page", options.nextPage);
+    if (options?.searchOptions) {
+      const { max_per_song, hide_covers, hide_loops, results_per_page, version_preference } =
+        options.searchOptions;
+      if (max_per_song === null) params.set("max_per_song", "0");
+      else if (max_per_song != null) params.set("max_per_song", String(max_per_song));
+      if (hide_covers) params.set("hide_covers", "true");
+      if (hide_loops) params.set("hide_loops", "true");
+      if (results_per_page) params.set("limit", String(results_per_page));
+      if (version_preference && version_preference !== "auto") {
+        params.set("version_preference", version_preference);
+      }
+    }
     return request<SearchResultsPage>(`/api/music/search?${params.toString()}`);
   },
+  getHouseholdSearchSettings: () => request<HouseholdSearchSettings>("/api/households/mine/search-settings"),
+  updateHouseholdSearchSettings: (searchDefaults: Partial<SearchOptions>) =>
+    request<HouseholdSearchSettings>("/api/households/mine/search-settings", {
+      method: "PATCH",
+      body: { search_defaults: searchDefaults },
+    }),
+  listChannelPins: () => request<UserChannelPin[]>("/api/users/me/channel-pins"),
+  upsertChannelPin: (artistKey: string, channelName: string) =>
+    request<UserChannelPin>("/api/users/me/channel-pins", {
+      method: "PUT",
+      body: { artist_key: artistKey, channel_name: channelName },
+    }),
+  deleteChannelPin: (artistKey: string) =>
+    request<void>(`/api/users/me/channel-pins/${encodeURIComponent(artistKey)}`, { method: "DELETE" }),
   getArtist: (mbid: string) => request<ArtistDetail>(`/api/music/artists/${mbid}`),
   streamArtist: streamArtistEvents,
   getAlbum: (mbid: string) => request<AlbumDetail>(`/api/music/albums/${mbid}`),

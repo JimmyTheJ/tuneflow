@@ -273,6 +273,10 @@ def _result_is_live(result: SearchResult) -> bool:
     return looks_like_live_version(_result_display_title(result), result.title)
 
 
+def song_dedupe_key(result: SearchResult) -> str | None:
+    return _song_dedupe_key(result)
+
+
 def _song_dedupe_key(result: SearchResult) -> str | None:
     """Collapse near-duplicate uploads of the same song (studio search only)."""
     raw = _result_display_title(result)
@@ -294,23 +298,31 @@ def _song_dedupe_key(result: SearchResult) -> str | None:
     return f"{_normalize_text(artist)}|{title_key}"
 
 
-def dedupe_search_results(results: list[SearchResult], *, collapse_same_song: bool) -> list[SearchResult]:
-    """Drop exact video duplicates; optionally keep one upload per song."""
+def dedupe_search_results(
+    results: list[SearchResult],
+    *,
+    max_per_song: int | None,
+    song_counts: dict[str, int] | None = None,
+) -> tuple[list[SearchResult], dict[str, int], int]:
+    """Drop exact video duplicates; optionally cap uploads per song."""
     seen_ids: set[str] = set()
-    seen_songs: set[str] = set()
+    counts = dict(song_counts or {})
     deduped: list[SearchResult] = []
+    collapsed = 0
     for result in results:
         if result.video_id in seen_ids:
             continue
         seen_ids.add(result.video_id)
-        if collapse_same_song:
+        if max_per_song is not None:
             song_key = _song_dedupe_key(result)
             if song_key is not None:
-                if song_key in seen_songs:
+                current = counts.get(song_key, 0)
+                if current >= max_per_song:
+                    collapsed += 1
                     continue
-                seen_songs.add(song_key)
+                counts[song_key] = current + 1
         deduped.append(result)
-    return deduped
+    return deduped, counts, collapsed
 
 
 def _search_rank_key(
@@ -331,8 +343,18 @@ def _search_rank_key(
     return (-relevance, live_rank, non_topic, original_index)
 
 
-def rank_search_results(query: str, results: list[SearchResult]) -> list[SearchResult]:
-    prefer_studio = not query_requests_live(query)
+def rank_search_results(
+    query: str,
+    results: list[SearchResult],
+    *,
+    version_preference: str = "auto",
+) -> list[SearchResult]:
+    if version_preference == "studio":
+        prefer_studio = True
+    elif version_preference in {"live", "any"}:
+        prefer_studio = False
+    else:
+        prefer_studio = not query_requests_live(query)
     indexed = list(enumerate(results))
     indexed.sort(
         key=lambda pair: _search_rank_key(
@@ -343,6 +365,31 @@ def rank_search_results(query: str, results: list[SearchResult]) -> list[SearchR
         )
     )
     return [result for _, result in indexed]
+
+
+def apply_channel_pin_boost(
+    results: list[SearchResult],
+    *,
+    artist_key: str | None,
+    channel_name: str | None,
+) -> list[SearchResult]:
+    if not artist_key or not channel_name:
+        return results
+    normalized_artist = _normalize_text(artist_key)
+    normalized_channel = _normalize_text(channel_name)
+    if not normalized_artist or not normalized_channel:
+        return results
+
+    boosted: list[SearchResult] = []
+    rest: list[SearchResult] = []
+    for result in results:
+        result_artist = _normalize_text(_result_candidate_artist(result))
+        result_channel = _normalize_text(result.artist or "")
+        if result_artist == normalized_artist and normalized_channel in result_channel:
+            boosted.append(result)
+        else:
+            rest.append(result)
+    return boosted + rest
 
 
 def collect_playable_audio_streams(payload: dict) -> list[dict]:
@@ -460,31 +507,62 @@ class PipedClient:
         detail = "; ".join(errors[:3])
         raise httpx.HTTPError(f"All Piped instances failed. {detail}")
 
-    async def search_piped(self, query: str, limit: int = 20) -> tuple[list[SearchResult], str | None]:
+    async def search_piped(
+        self,
+        query: str,
+        *,
+        limit: int = 20,
+        max_per_song: int | None = 1,
+        version_preference: str = "auto",
+        song_counts: dict[str, int] | None = None,
+        seen_video_ids: set[str] | None = None,
+        channel_pins: dict[str, str] | None = None,
+    ) -> tuple[list[SearchResult], str | None, dict[str, int], int]:
         payload = await self._request_json("/search", params={"q": query, "filter": "music_songs"})
-        results = rank_search_results(query, _parse_search_items(payload))
-        prefer_studio = not query_requests_live(query)
-        # Studio searches collapse same song; live searches keep alternate performances.
-        results = dedupe_search_results(results, collapse_same_song=prefer_studio)
-        return results[:limit], _next_page_token(payload)
+        results = _parse_search_items(payload)
+        results = [r for r in results if not seen_video_ids or r.video_id not in seen_video_ids]
+        if channel_pins:
+            for artist_key, channel_name in channel_pins.items():
+                results = apply_channel_pin_boost(results, artist_key=artist_key, channel_name=channel_name)
+        results = rank_search_results(query, results, version_preference=version_preference)
+        results, counts, collapsed = dedupe_search_results(
+            results,
+            max_per_song=max_per_song,
+            song_counts=song_counts,
+        )
+        return results[:limit], _next_page_token(payload), counts, collapsed
 
     async def search_piped_next(
         self,
         query: str,
         next_page: str,
+        *,
         limit: int = 20,
-    ) -> tuple[list[SearchResult], str | None]:
+        max_per_song: int | None = 1,
+        version_preference: str = "auto",
+        song_counts: dict[str, int] | None = None,
+        seen_video_ids: set[str] | None = None,
+        channel_pins: dict[str, str] | None = None,
+    ) -> tuple[list[SearchResult], str | None, dict[str, int], int]:
         payload = await self._request_json(
             "/nextpage/search",
             params={"q": query, "filter": "music_songs", "nextpage": next_page},
         )
-        results = rank_search_results(query, _parse_search_items(payload))
-        prefer_studio = not query_requests_live(query)
-        results = dedupe_search_results(results, collapse_same_song=prefer_studio)
-        return results[:limit], _next_page_token(payload)
+        results = _parse_search_items(payload)
+        results = [r for r in results if not seen_video_ids or r.video_id not in seen_video_ids]
+        if channel_pins:
+            for artist_key, channel_name in channel_pins.items():
+                results = apply_channel_pin_boost(results, artist_key=artist_key, channel_name=channel_name)
+        results = rank_search_results(query, results, version_preference=version_preference)
+        results, counts, collapsed = dedupe_search_results(
+            results,
+            max_per_song=max_per_song,
+            song_counts=song_counts,
+        )
+        return results[:limit], _next_page_token(payload), counts, collapsed
 
     async def search(self, query: str, limit: int = 20) -> list[SearchResult]:
-        results, _ = await self.search_piped(query, limit=limit)
+        results, _, _, _ = await self.search_piped(query, limit=limit)
         return results
 
     async def get_stream(self, video_id: str) -> StreamInfo:

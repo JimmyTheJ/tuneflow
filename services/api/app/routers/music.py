@@ -1,8 +1,9 @@
 import httpx
-import json
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse, StreamingResponse
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.auth import (
     check_content_allowed,
@@ -11,7 +12,7 @@ from app.auth import (
     get_current_user_from_token,
 )
 from app.database import get_db
-from app.models import User
+from app.models import User, UserChannelPin
 from app.schemas import (
     AlbumDetail,
     AlbumResolveResult,
@@ -21,12 +22,25 @@ from app.schemas import (
     ReleaseSummary,
     SearchResult,
     SearchResultsPage,
+    SearchOptions,
+    SearchOptionsUpdate,
     StreamInfo,
 )
 from app.services.cache_manager import resolve_audio, resolve_stream_with_cache
 from app.services.catalog_resolver import resolve_catalog_tracks
 from app.services.musicbrainz import musicbrainz_client
-from app.services.piped import piped_client
+from app.services.piped import song_dedupe_key, piped_client
+from app.services.search_options import (
+    SearchCursor,
+    build_search_explanation,
+    decode_search_cursor,
+    encode_search_cursor,
+    filter_search_results,
+    group_search_results,
+    max_per_song_from_query,
+    options_fingerprint,
+    resolve_search_options,
+)
 from app.services.stream_resolver import stream_video_chunks
 from app.services.ytdlp import stream_audio_via_ytdlp
 from app.slugify import build_track_filename
@@ -102,34 +116,16 @@ async def _search_artists_for_query(query: str) -> list[ArtistSearchHit]:
     ]
 
 
-@router.get("/search", response_model=SearchResultsPage)
-async def search_music(
-    q: str = Query(min_length=1),
-    limit: int = Query(default=20, ge=1, le=50),
-    next_page: str | None = Query(default=None),
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> SearchResultsPage:
-    child_settings = await enforce_child_access(db, current_user)
-    if child_settings is not None and not child_settings.search_enabled:
-        raise HTTPException(status_code=403, detail="Search is disabled for this account")
+async def _load_channel_pins(db: AsyncSession, user_id: int) -> dict[str, str]:
+    result = await db.execute(select(UserChannelPin).where(UserChannelPin.user_id == user_id))
+    return {pin.artist_key: pin.channel_name for pin in result.scalars().all()}
 
-    blocked_query = check_content_allowed(settings=child_settings, query=q)
-    if blocked_query:
-        return SearchResultsPage(results=[], artists=[], next_page=None)
 
-    artist_hits: list[ArtistSearchHit] = []
-    if not next_page:
-        artist_hits = await _search_artists_for_query(q)
-
-    try:
-        if next_page:
-            results, next_token = await piped_client.search_piped_next(q, next_page, limit=limit)
-        else:
-            results, next_token = await piped_client.search_piped(q, limit=limit)
-    except httpx.HTTPError as exc:
-        raise _piped_unavailable(exc) from exc
-
+def _apply_parental_blocks(
+    results: list[SearchResult],
+    *,
+    child_settings,
+) -> list[SearchResult]:
     filtered: list[SearchResult] = []
     for track in results:
         reason = check_content_allowed(
@@ -150,7 +146,155 @@ async def search_music(
                 blocked_reason=reason,
             )
         )
-    return SearchResultsPage(results=filtered, artists=artist_hits, next_page=next_token)
+    return filtered
+
+
+def _empty_search_page(
+    *,
+    effective_options: SearchOptions,
+    search_advanced_hidden: bool = False,
+) -> SearchResultsPage:
+    return SearchResultsPage(
+        groups=[],
+        artists=[],
+        next_page=None,
+        effective_options=effective_options,
+        explanation=None,
+        search_advanced_hidden=search_advanced_hidden,
+    )
+
+
+@router.get("/search", response_model=SearchResultsPage)
+async def search_music(
+    q: str = Query(min_length=1),
+    limit: int | None = Query(default=None, ge=1, le=50),
+    next_page: str | None = Query(default=None),
+    max_per_song: int | None = Query(default=None, ge=0, le=50),
+    hide_covers: bool | None = Query(default=None),
+    hide_loops: bool | None = Query(default=None),
+    version_preference: str | None = Query(default=None, pattern="^(auto|studio|live|any)$"),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> SearchResultsPage:
+    child_settings = await enforce_child_access(db, current_user)
+    if child_settings is not None and not child_settings.search_enabled:
+        raise HTTPException(status_code=403, detail="Search is disabled for this account")
+
+    household = None
+    if current_user.household_id is not None:
+        result = await db.execute(
+            select(User)
+            .options(selectinload(User.household))
+            .where(User.id == current_user.id)
+        )
+        loaded = result.scalar_one_or_none()
+        if loaded is not None:
+            household = loaded.household
+
+    requested_updates: dict[str, object] = {}
+    if max_per_song is not None:
+        requested_updates["max_per_song"] = max_per_song_from_query(max_per_song)
+    if hide_covers is not None:
+        requested_updates["hide_covers"] = hide_covers
+    if hide_loops is not None:
+        requested_updates["hide_loops"] = hide_loops
+    if limit is not None:
+        requested_updates["results_per_page"] = limit
+    if version_preference is not None:
+        requested_updates["version_preference"] = version_preference
+
+    requested = SearchOptionsUpdate(**requested_updates) if requested_updates else None
+    requested_options = (
+        SearchOptions.model_validate(requested.model_dump(exclude_unset=True)) if requested else None
+    )
+    effective_options = resolve_search_options(
+        household=household,
+        parental=child_settings,
+        requested=requested_options,
+    )
+    fingerprint = options_fingerprint(effective_options)
+    search_advanced_hidden = bool(child_settings and child_settings.search_advanced_hidden)
+
+    blocked_query = check_content_allowed(settings=child_settings, query=q)
+    if blocked_query:
+        return _empty_search_page(
+            effective_options=effective_options,
+            search_advanced_hidden=search_advanced_hidden,
+        )
+
+    artist_hits: list[ArtistSearchHit] = []
+    cursor = decode_search_cursor(next_page, expected_fingerprint=fingerprint)
+    if cursor is None and next_page:
+        raise HTTPException(status_code=400, detail="Search session expired. Run the search again.")
+
+    if cursor is None:
+        artist_hits = await _search_artists_for_query(q)
+
+    seen_video_ids = set(cursor.seen_video_ids if cursor else [])
+    song_counts = dict(cursor.song_counts if cursor else {})
+    piped_next = cursor.piped_nextpage if cursor else None
+    channel_pins = await _load_channel_pins(db, current_user.id)
+
+    try:
+        if piped_next:
+            raw_results, piped_token, song_counts, collapsed = await piped_client.search_piped_next(
+                q,
+                piped_next,
+                limit=effective_options.results_per_page,
+                max_per_song=effective_options.max_per_song,
+                version_preference=effective_options.version_preference,
+                song_counts=song_counts,
+                seen_video_ids=seen_video_ids,
+                channel_pins=channel_pins,
+            )
+        else:
+            raw_results, piped_token, song_counts, collapsed = await piped_client.search_piped(
+                q,
+                limit=effective_options.results_per_page,
+                max_per_song=effective_options.max_per_song,
+                version_preference=effective_options.version_preference,
+                song_counts=song_counts,
+                seen_video_ids=seen_video_ids,
+                channel_pins=channel_pins,
+            )
+    except httpx.HTTPError as exc:
+        raise _piped_unavailable(exc) from exc
+
+    for result in raw_results:
+        seen_video_ids.add(result.video_id)
+
+    filtered_results, removed_count = filter_search_results(raw_results, options=effective_options)
+    blocked_results = _apply_parental_blocks(filtered_results, child_settings=child_settings)
+    groups = group_search_results(
+        blocked_results,
+        max_per_song=effective_options.max_per_song,
+        song_key_fn=song_dedupe_key,
+    )
+
+    next_cursor = SearchCursor(
+        piped_nextpage=piped_token,
+        seen_video_ids=sorted(seen_video_ids),
+        song_counts=song_counts,
+        options_fingerprint=fingerprint,
+    )
+    next_token = encode_search_cursor(next_cursor)
+
+    explanation = build_search_explanation(
+        options=effective_options,
+        household=household,
+        parental=child_settings,
+        filtered_count=removed_count,
+        collapsed_count=collapsed,
+    )
+
+    return SearchResultsPage(
+        groups=groups,
+        artists=artist_hits,
+        next_page=next_token,
+        effective_options=effective_options,
+        explanation=explanation,
+        search_advanced_hidden=search_advanced_hidden,
+    )
 
 
 @router.get("/artists/{mbid}", response_model=ArtistDetail)

@@ -196,3 +196,53 @@ async def run_migrations() -> None:
                     "CREATE INDEX ix_eq_playlist_assignments_playlist_id ON eq_playlist_assignments (playlist_id)"
                 )
             )
+
+        household_columns = await conn.execute(text("PRAGMA table_info(households)"))
+        household_cols = {row[1] for row in household_columns.fetchall()}
+        if household_cols and "search_defaults_json" not in household_cols:
+            await conn.execute(
+                text("ALTER TABLE households ADD COLUMN search_defaults_json TEXT NOT NULL DEFAULT '{}'")
+            )
+
+        parental_columns = await conn.execute(text("PRAGMA table_info(parental_settings)"))
+        parental_cols = {row[1] for row in parental_columns.fetchall()}
+        if parental_cols:
+            if "search_advanced_hidden" not in parental_cols:
+                await conn.execute(
+                    text("ALTER TABLE parental_settings ADD COLUMN search_advanced_hidden BOOLEAN NOT NULL DEFAULT 0")
+                )
+            if "search_locked" not in parental_cols:
+                await conn.execute(
+                    text("ALTER TABLE parental_settings ADD COLUMN search_locked BOOLEAN NOT NULL DEFAULT 0")
+                )
+            if "search_max_versions_ceiling" not in parental_cols:
+                await conn.execute(
+                    text("ALTER TABLE parental_settings ADD COLUMN search_max_versions_ceiling INTEGER")
+                )
+            if "search_force_clean" not in parental_cols:
+                await conn.execute(
+                    text("ALTER TABLE parental_settings ADD COLUMN search_force_clean BOOLEAN NOT NULL DEFAULT 0")
+                )
+
+        channel_pins_result = await conn.execute(
+            text("SELECT name FROM sqlite_master WHERE type='table' AND name='user_channel_pins'")
+        )
+        if channel_pins_result.fetchone() is None:
+            await conn.execute(
+                text(
+                    """
+                    CREATE TABLE user_channel_pins (
+                        id INTEGER NOT NULL PRIMARY KEY,
+                        user_id INTEGER NOT NULL,
+                        artist_key VARCHAR(200) NOT NULL,
+                        channel_name VARCHAR(300) NOT NULL,
+                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                        FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE,
+                        CONSTRAINT uq_user_channel_pin_artist UNIQUE (user_id, artist_key)
+                    )
+                    """
+                )
+            )
+            await conn.execute(
+                text("CREATE INDEX ix_user_channel_pins_user_id ON user_channel_pins (user_id)")
+            )

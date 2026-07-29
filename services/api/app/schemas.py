@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -169,6 +170,10 @@ class ParentalSettingsRead(BaseModel):
     allowed_end_hour: int = Field(ge=0, le=23)
     blocked_keywords: list[str]
     blocked_video_ids: list[str]
+    search_advanced_hidden: bool = False
+    search_locked: bool = False
+    search_max_versions_ceiling: int | None = None
+    search_force_clean: bool = False
     updated_at: datetime
 
     model_config = {"from_attributes": True}
@@ -182,6 +187,10 @@ class ParentalSettingsUpdate(BaseModel):
     allowed_end_hour: int | None = Field(default=None, ge=0, le=23)
     blocked_keywords: list[str] | None = None
     blocked_video_ids: list[str] | None = None
+    search_advanced_hidden: bool | None = None
+    search_locked: bool | None = None
+    search_max_versions_ceiling: int | None = Field(default=None, ge=0, le=50)
+    search_force_clean: bool | None = None
 
 
 class ChildProfile(BaseModel):
@@ -264,6 +273,54 @@ class SearchResult(TrackRead):
     short_description: str | None = None
 
 
+class SearchOptions(BaseModel):
+    max_per_song: int | None = 1
+    hide_covers: bool = False
+    hide_loops: bool = False
+    results_per_page: int = Field(default=20, ge=1, le=50)
+    version_preference: Literal["auto", "studio", "live", "any"] = "auto"
+
+
+class SearchOptionsUpdate(BaseModel):
+    max_per_song: int | None = None
+    hide_covers: bool | None = None
+    hide_loops: bool | None = None
+    results_per_page: int | None = Field(default=None, ge=1, le=50)
+    version_preference: Literal["auto", "studio", "live", "any"] | None = None
+
+
+class HouseholdSearchSettingsRead(BaseModel):
+    search_defaults: SearchOptions
+
+
+class HouseholdSearchSettingsUpdate(BaseModel):
+    search_defaults: SearchOptionsUpdate | None = None
+
+
+class UserChannelPinRead(BaseModel):
+    id: int
+    artist_key: str
+    channel_name: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class UserChannelPinCreate(BaseModel):
+    artist_key: str = Field(min_length=1, max_length=200)
+    channel_name: str = Field(min_length=1, max_length=300)
+
+
+class SearchExplanation(BaseModel):
+    messages: list[str] = Field(default_factory=list)
+
+
+class SearchResultGroup(BaseModel):
+    group_key: str
+    primary: SearchResult
+    alternates: list[SearchResult] = Field(default_factory=list)
+
+
 class ArtistSearchHit(BaseModel):
     mbid: str
     name: str
@@ -322,9 +379,12 @@ class AlbumResolveResult(BaseModel):
 
 
 class SearchResultsPage(BaseModel):
-    results: list[SearchResult]
-    artists: list[ArtistSearchHit] = []
+    groups: list[SearchResultGroup]
+    artists: list[ArtistSearchHit] = Field(default_factory=list)
     next_page: str | None = None
+    effective_options: SearchOptions
+    explanation: SearchExplanation | None = None
+    search_advanced_hidden: bool = False
 
 
 class StreamInfo(BaseModel):

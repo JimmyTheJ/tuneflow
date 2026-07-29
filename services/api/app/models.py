@@ -20,6 +20,7 @@ class Household(Base):
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     slug: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
     is_system: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    search_defaults_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     members: Mapped[list["User"]] = relationship(back_populates="household")
@@ -93,6 +94,22 @@ class User(Base):
     eq_playlist_assignments: Mapped[list["EqPlaylistAssignment"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
+    channel_pins: Mapped[list["UserChannelPin"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+
+
+class UserChannelPin(Base):
+    __tablename__ = "user_channel_pins"
+    __table_args__ = (UniqueConstraint("user_id", "artist_key", name="uq_user_channel_pin_artist"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    artist_key: Mapped[str] = mapped_column(String(200), nullable=False)
+    channel_name: Mapped[str] = mapped_column(String(300), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    user: Mapped["User"] = relationship(back_populates="channel_pins")
 
 
 class ParentalSettings(Base):
@@ -107,6 +124,10 @@ class ParentalSettings(Base):
     allowed_end_hour: Mapped[int] = mapped_column(Integer, nullable=False, default=23)
     blocked_keywords: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     blocked_video_ids: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    search_advanced_hidden: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    search_locked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    search_max_versions_ceiling: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    search_force_clean: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )

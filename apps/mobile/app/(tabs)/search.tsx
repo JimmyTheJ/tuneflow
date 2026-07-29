@@ -14,24 +14,19 @@ import { Button } from "@/components/ui/Button";
 import { TrackRowSkeleton } from "@/components/ui/Skeleton";
 import { useSearchHistory } from "@/hooks/useSearchHistory";
 import { api } from "@/lib/api";
+import {
+  DEFAULT_SEARCH_OPTIONS,
+  flattenGroupTracks,
+  mergeSearchGroups,
+  primaryPlayQueue,
+} from "@/lib/searchOptions";
 import { formatSearchSubtitle } from "@/lib/tracks";
 import { usePlayerStore } from "@/stores/player";
-import type { ArtistSearchHit, Playlist, Track } from "@/types";
-
-function mergeTracks(existing: Track[], incoming: Track[]): Track[] {
-  const seen = new Set(existing.map((track) => track.video_id));
-  const merged = [...existing];
-  for (const track of incoming) {
-    if (seen.has(track.video_id)) continue;
-    seen.add(track.video_id);
-    merged.push(track);
-  }
-  return merged;
-}
+import type { ArtistSearchHit, Playlist, SearchResultGroup, Track } from "@/types";
 
 export default function SearchScreen() {
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<Track[]>([]);
+  const [groups, setGroups] = useState<SearchResultGroup[]>([]);
   const [artists, setArtists] = useState<ArtistSearchHit[]>([]);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [nextPage, setNextPage] = useState<string | null>(null);
@@ -40,6 +35,8 @@ export default function SearchScreen() {
   const [error, setError] = useState<string | null>(null);
   const [inputFocused, setInputFocused] = useState(false);
   const [lastQuery, setLastQuery] = useState<string | null>(null);
+  const [sessionOptions] = useState(DEFAULT_SEARCH_OPTIONS);
+  const [explanation, setExplanation] = useState<string | null>(null);
   const loadingMoreRef = useRef(false);
   const listRef = useRef<FlatList<Track>>(null);
   const scrollOffsetRef = useRef(0);
@@ -69,14 +66,15 @@ export default function SearchScreen() {
     setNextPage(null);
     setLastQuery(trimmed);
     try {
-      const page = await api.search(trimmed);
-      setResults(page.results);
+      const page = await api.search(trimmed, { searchOptions: sessionOptions });
+      setGroups(page.groups);
       setArtists(page.artists ?? []);
       setNextPage(page.next_page);
+      setExplanation(page.explanation?.messages.join(" · ") ?? null);
       recordQuery(trimmed);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Search failed");
-      setResults([]);
+      setGroups([]);
       setArtists([]);
       setNextPage(null);
     } finally {
@@ -93,19 +91,21 @@ export default function SearchScreen() {
     setError(null);
 
     try {
-      const page = await api.search(trimmed, { nextPage });
-      setResults((current) => mergeTracks(current, page.results));
+      const page = await api.search(trimmed, { nextPage, searchOptions: sessionOptions });
+      setGroups((current) => mergeSearchGroups(current, page.groups));
       setNextPage(page.next_page);
+      setExplanation(page.explanation?.messages.join(" · ") ?? null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load more results");
     } finally {
       loadingMoreRef.current = false;
       setLoadingMore(false);
     }
-  }, [query, nextPage, loading]);
+  }, [query, nextPage, loading, sessionOptions]);
 
   const showSuggestions = inputFocused && suggestions.length > 0 && !loading;
-  const playable = results.filter((track) => !track.blocked_reason);
+  const results = flattenGroupTracks(groups);
+  const playable = primaryPlayQueue(groups);
 
   return (
     <View className="flex-1 bg-base px-4 pt-2">
@@ -188,6 +188,7 @@ export default function SearchScreen() {
       ) : null}
 
       {error ? <Text className="mb-2 text-danger-fg">{error}</Text> : null}
+      {explanation ? <Text className="mb-2 text-sm text-text-secondary">{explanation}</Text> : null}
 
       {!loading && lastQuery && results.length === 0 && !error ? (
         <Text className="text-text-muted">No results for &ldquo;{lastQuery}&rdquo;.</Text>

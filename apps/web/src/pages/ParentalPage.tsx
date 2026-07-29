@@ -23,6 +23,10 @@ export function ParentalPage() {
   const [endHour, setEndHour] = useState(20);
   const [blockExplicit, setBlockExplicit] = useState(true);
   const [searchEnabled, setSearchEnabled] = useState(true);
+  const [searchAdvancedHidden, setSearchAdvancedHidden] = useState(false);
+  const [searchLocked, setSearchLocked] = useState(false);
+  const [searchForceClean, setSearchForceClean] = useState(false);
+  const [searchVersionsCeiling, setSearchVersionsCeiling] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -48,6 +52,12 @@ export function ParentalPage() {
     setEndHour(s.allowed_end_hour);
     setBlockExplicit(s.block_explicit);
     setSearchEnabled(s.search_enabled);
+    setSearchAdvancedHidden(s.search_advanced_hidden);
+    setSearchLocked(s.search_locked);
+    setSearchForceClean(s.search_force_clean);
+    setSearchVersionsCeiling(
+      s.search_max_versions_ceiling != null ? String(s.search_max_versions_ceiling) : "",
+    );
     void Promise.all([api.getChildUsage(selected.user.id), api.getChildHistory(selected.user.id)]).then(
       ([u, h]) => {
         setUsage(u);
@@ -61,6 +71,12 @@ export function ParentalPage() {
     await api.updateChildSettings(selected.user.id, {
       block_explicit: blockExplicit,
       search_enabled: searchEnabled,
+      search_advanced_hidden: searchAdvancedHidden,
+      search_locked: searchLocked,
+      search_force_clean: searchForceClean,
+      search_max_versions_ceiling: searchVersionsCeiling.trim()
+        ? Number(searchVersionsCeiling)
+        : null,
       max_daily_minutes: maxMinutes.trim() ? Number(maxMinutes) : null,
       allowed_start_hour: startHour,
       allowed_end_hour: endHour,
@@ -123,6 +139,33 @@ export function ParentalPage() {
                 <span>Allow search</span>
                 <input type="checkbox" checked={searchEnabled} onChange={(e) => setSearchEnabled(e.target.checked)} />
               </label>
+              <h3 className="m-0 text-sm font-semibold">Search options</h3>
+              <label className="toggle-row">
+                <span>Hide advanced search</span>
+                <input
+                  type="checkbox"
+                  checked={searchAdvancedHidden}
+                  onChange={(e) => setSearchAdvancedHidden(e.target.checked)}
+                />
+              </label>
+              <label className="toggle-row">
+                <span>Lock search options to household defaults</span>
+                <input type="checkbox" checked={searchLocked} onChange={(e) => setSearchLocked(e.target.checked)} />
+              </label>
+              <label className="toggle-row">
+                <span>Force clean search results</span>
+                <input
+                  type="checkbox"
+                  checked={searchForceClean}
+                  onChange={(e) => setSearchForceClean(e.target.checked)}
+                />
+              </label>
+              <input
+                className="input"
+                placeholder="Max versions ceiling (blank = no ceiling)"
+                value={searchVersionsCeiling}
+                onChange={(e) => setSearchVersionsCeiling(e.target.value)}
+              />
               <input
                 className="input"
                 placeholder="Daily limit (minutes, blank = unlimited)"

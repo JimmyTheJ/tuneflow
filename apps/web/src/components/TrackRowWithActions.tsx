@@ -1,6 +1,7 @@
 import { useRef, type MouseEvent } from "react";
 import { TrackActionsMenu, type TrackActionsMenuHandle } from "@/components/TrackActionsMenu";
 import { TrackRow } from "@/components/TrackRow";
+import { cn } from "@/lib/cn";
 import type { Playlist, Track } from "@/types";
 
 type Props = {
@@ -13,9 +14,13 @@ type Props = {
   showBadges?: boolean;
   index?: number;
   disabled?: boolean;
+  className?: string;
+  groupTracks?: Track[];
   onPlay: () => void;
   onLikedChange: () => void;
   onPlaylistsChange: () => void;
+  onMoreVersions?: (track: Track) => void;
+  onPinChannel?: (track: Track) => void;
 };
 
 export function TrackRowWithActions({
@@ -28,9 +33,13 @@ export function TrackRowWithActions({
   showBadges,
   index,
   disabled,
+  className,
+  groupTracks,
   onPlay,
   onLikedChange,
   onPlaylistsChange,
+  onMoreVersions,
+  onPinChannel,
 }: Props) {
   const menuRef = useRef<TrackActionsMenuHandle>(null);
 
@@ -41,7 +50,7 @@ export function TrackRowWithActions({
   };
 
   return (
-    <div className="group flex items-center gap-1 rounded-lg" onContextMenu={handleContextMenu}>
+    <div className={cn("group flex items-center gap-1 rounded-lg", className)} onContextMenu={handleContextMenu}>
       <div className="min-w-0 flex-1">
         <TrackRow
           track={track}
@@ -62,6 +71,9 @@ export function TrackRowWithActions({
         disabled={disabled}
         onLikedChange={onLikedChange}
         onPlaylistsChange={onPlaylistsChange}
+        groupTracks={groupTracks}
+        onMoreVersions={onMoreVersions}
+        onPinChannel={onPinChannel}
       />
     </div>
   );
