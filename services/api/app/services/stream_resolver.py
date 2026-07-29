@@ -89,7 +89,7 @@ async def _find_playable_alternate(
         pass
 
     try:
-        results, _ = await piped_client.search_piped(query, limit=12)
+        results, _, _, _ = await piped_client.search_piped(query, limit=12)
         for result in results:
             if result.video_id in seen or is_topic_upload(result.artist):
                 continue
@@ -139,7 +139,7 @@ async def _lookup_track_metadata(
         pass
 
     try:
-        results, _ = await piped_client.search_piped(video_id, limit=5)
+        results, _, _, _ = await piped_client.search_piped(video_id, limit=5)
         for result in results:
             if result.video_id == video_id:
                 return result.title, result.artist
