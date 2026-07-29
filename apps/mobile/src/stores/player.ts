@@ -46,6 +46,7 @@ type PlayerState = {
   playPrevious: () => Promise<void>;
   playNext: (fromAutoAdvance?: boolean) => Promise<void>;
   onTrackEnded: () => Promise<void>;
+  onPlaybackError: (reason?: string) => Promise<void>;
   playQueueIndex: (queueIndex: number) => Promise<void>;
   removeQueueIndex: (queueIndex: number) => Promise<void>;
   clearUpcoming: () => void;
@@ -141,6 +142,83 @@ async function disposeSound(sound: Audio.Sound | null): Promise<void> {
     await sound.unloadAsync();
   } catch {
     /* already unloaded */
+  }
+}
+
+let trackRetryCount = 0;
+let consecutiveSkipCount = 0;
+let handlingPlaybackFailure = false;
+
+const MAX_TRACK_RETRIES = 1;
+const MAX_CONSECUTIVE_SKIPS = 15;
+
+function resetPlaybackFailureState(): void {
+  trackRetryCount = 0;
+  consecutiveSkipCount = 0;
+}
+
+function resetTrackRetryCount(): void {
+  trackRetryCount = 0;
+}
+
+async function handlePlaybackFailure(
+  reason: string,
+  get: () => PlayerState,
+  set: (partial: Partial<PlayerState>) => void,
+): Promise<void> {
+  if (handlingPlaybackFailure) return;
+  handlingPlaybackFailure = true;
+
+  try {
+    const state = get();
+    const current = state.current;
+    const queue = state.queue;
+
+    await disposeSound(state.sound);
+    state.videoControls?.pause().catch(() => undefined);
+    invalidatePrefetch();
+    set({
+      sound: null,
+      mediaUrl: null,
+      isLoading: false,
+      isPlaying: false,
+      error: null,
+    });
+
+    if (!current) {
+      set({ error: reason, isPlaying: false });
+      return;
+    }
+
+    if (trackRetryCount < MAX_TRACK_RETRIES) {
+      trackRetryCount += 1;
+      await get().playTrack(current, queue, { fromNavigation: true });
+      return;
+    }
+    trackRetryCount = 0;
+
+    const hasNext = resolveNextAction(state).type === "track";
+    if (!hasNext) {
+      consecutiveSkipCount = 0;
+      set({ error: reason, isPlaying: false });
+      return;
+    }
+
+    if (consecutiveSkipCount >= MAX_CONSECUTIVE_SKIPS) {
+      consecutiveSkipCount = 0;
+      set({ error: "Multiple tracks failed to play", isPlaying: false });
+      return;
+    }
+    consecutiveSkipCount += 1;
+
+    const currentIndex = currentQueueIndex(state);
+    if (currentIndex >= 0) {
+      await get().removeQueueIndex(currentIndex);
+    } else {
+      await get().playNext(true);
+    }
+  } finally {
+    handlingPlaybackFailure = false;
   }
 }
 
@@ -539,7 +617,12 @@ async function loadAudioPlayback(
 
   sound.setOnPlaybackStatusUpdate((status) => {
     if (!isActiveGeneration(generation)) return;
-    if (!status.isLoaded) return;
+    if (!status.isLoaded) {
+      if ("error" in status && status.error) {
+        void handlePlaybackFailure(status.error, get, set);
+      }
+      return;
+    }
     set({
       isPlaying: status.isPlaying,
       positionSec: (status.positionMillis ?? 0) / 1000,
@@ -726,7 +809,12 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
         } else {
           sound.setOnPlaybackStatusUpdate((status) => {
             if (!isActiveGeneration(generation)) return;
-            if (!status.isLoaded) return;
+            if (!status.isLoaded) {
+              if ("error" in status && status.error) {
+                void handlePlaybackFailure(status.error, get, set);
+              }
+              return;
+            }
             set({
               isPlaying: status.isPlaying,
               positionSec: (status.positionMillis ?? 0) / 1000,
@@ -764,11 +852,12 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       }
 
       void api.recordPlay(track).catch(() => undefined);
+      resetPlaybackFailureState();
       schedulePrefetchNext(get);
     } catch (error) {
       if (!isActiveGeneration(generation)) return;
       const message = error instanceof Error ? error.message : "Playback failed";
-      set({ isLoading: false, isPlaying: false, error: message });
+      await handlePlaybackFailure(message, get, set);
     }
   },
 
@@ -850,7 +939,12 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     await get().playNext(true);
   },
 
+  onPlaybackError: async (reason = "Playback failed") => {
+    await handlePlaybackFailure(reason, get, set);
+  },
+
   playPrevious: async () => {
+    resetTrackRetryCount();
     const action = resolvePreviousAction(get());
     if (action.type === "restart") {
       await get().seek(0);
@@ -870,7 +964,8 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     await get().playTrack(track, rotated.queue, { fromNavigation: true });
   },
 
-  playNext: async (_fromAutoAdvance = false) => {
+  playNext: async (fromAutoAdvance = false) => {
+    if (!fromAutoAdvance) resetTrackRetryCount();
     const action = resolveNextAction(get());
     if (action.type === "repeat-one") {
       await get().seek(0);
@@ -902,6 +997,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   },
 
   playQueueIndex: async (queueIndex) => {
+    resetTrackRetryCount();
     const state = get();
     if (queueIndex < 0 || queueIndex >= state.queue.length) return;
 

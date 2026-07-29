@@ -83,7 +83,12 @@ export default function PlayerScreen() {
   }, [playbackKind, mediaUrl, isPlaying]);
 
   const onVideoStatus = (status: AVPlaybackStatus) => {
-    if (!status.isLoaded) return;
+    if (!status.isLoaded) {
+      if ("error" in status && status.error) {
+        void usePlayerStore.getState().onPlaybackError(status.error);
+      }
+      return;
+    }
     positionRef.current = (status.positionMillis ?? 0) / 1000;
     reportProgress(
       positionRef.current,

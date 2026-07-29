@@ -154,6 +154,76 @@ function disposeMedia(media: HTMLMediaElement | null): void {
   media.load();
 }
 
+let trackRetryCount = 0;
+let consecutiveSkipCount = 0;
+let handlingPlaybackFailure = false;
+
+const MAX_TRACK_RETRIES = 1;
+const MAX_CONSECUTIVE_SKIPS = 15;
+
+function resetPlaybackFailureState(): void {
+  trackRetryCount = 0;
+  consecutiveSkipCount = 0;
+}
+
+function resetTrackRetryCount(): void {
+  trackRetryCount = 0;
+}
+
+async function handlePlaybackFailure(
+  reason: string,
+  get: () => PlayerState,
+  set: (partial: Partial<PlayerState>) => void,
+): Promise<void> {
+  if (handlingPlaybackFailure) return;
+  handlingPlaybackFailure = true;
+
+  try {
+    const state = get();
+    const current = state.current;
+    const queue = state.queue;
+
+    disposeMedia(state.media);
+    invalidatePrefetch();
+    set({ media: null, isLoading: false, isPlaying: false, error: null });
+
+    if (!current) {
+      set({ error: reason, isPlaying: false });
+      return;
+    }
+
+    if (trackRetryCount < MAX_TRACK_RETRIES) {
+      trackRetryCount += 1;
+      await get().playTrack(current, queue, { fromNavigation: true });
+      return;
+    }
+    trackRetryCount = 0;
+
+    const hasNext = resolveNextAction(state).type === "track";
+    if (!hasNext) {
+      consecutiveSkipCount = 0;
+      set({ error: reason, isPlaying: false });
+      return;
+    }
+
+    if (consecutiveSkipCount >= MAX_CONSECUTIVE_SKIPS) {
+      consecutiveSkipCount = 0;
+      set({ error: "Multiple tracks failed to play", isPlaying: false });
+      return;
+    }
+    consecutiveSkipCount += 1;
+
+    const currentIndex = currentQueueIndex(state);
+    if (currentIndex >= 0) {
+      await get().removeQueueIndex(currentIndex);
+    } else {
+      await get().playNext(true);
+    }
+  } finally {
+    handlingPlaybackFailure = false;
+  }
+}
+
 function snapshotFromState(state: PlayerState): PlayerSessionSnapshot | null {
   if (!state.current) return null;
   return {
@@ -458,7 +528,7 @@ function attachMediaListeners(
     "error",
     () => {
       if (!shouldHandle()) return;
-      set({ isLoading: false, isPlaying: false, error: "Playback failed — try another track" });
+      void handlePlaybackFailure("Playback failed — try another track", get, set);
     },
     { signal },
   );
@@ -903,13 +973,14 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       persistSnapshot(get());
       pendingMedia = null;
       void api.recordPlay(track).catch(() => undefined);
+      resetPlaybackFailureState();
       schedulePrefetchNext(get);
     } catch (error) {
       if (pendingMedia) disposeMedia(pendingMedia);
       if (!isActiveGeneration(generation)) return;
 
       const message = error instanceof Error ? error.message : "Playback failed";
-      set({ isLoading: false, isPlaying: false, error: message });
+      await handlePlaybackFailure(message, get, set);
     }
   },
 
@@ -993,6 +1064,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   },
 
   playPrevious: async () => {
+    resetTrackRetryCount();
     const action = resolvePreviousAction(get());
     if (action.type === "restart") {
       const { media } = get();
@@ -1016,6 +1088,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   },
 
   playNext: async (fromAutoAdvance = false) => {
+    if (!fromAutoAdvance) resetTrackRetryCount();
     const action = resolveNextAction(get());
     if (action.type === "repeat-one") {
       const { media } = get();
@@ -1099,6 +1172,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   },
 
   playQueueIndex: async (queueIndex: number) => {
+    resetTrackRetryCount();
     const state = get();
     if (queueIndex < 0 || queueIndex >= state.queue.length) return;
 
