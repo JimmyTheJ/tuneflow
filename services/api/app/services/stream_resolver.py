@@ -8,7 +8,6 @@ from app.schemas import StreamInfo
 from app.services.piped import (
     artist_matches,
     collect_video_playback_streams,
-    is_topic_upload,
     looks_like_live_version,
     matches_requested_track,
     piped_client,
@@ -16,12 +15,14 @@ from app.services.piped import (
 )
 from app.services.ytdlp import (
     get_stream_via_ytdlp,
+    search_video_ids,
     stream_audio_via_ytdlp,
     stream_video_via_ytdlp,
 )
 
-_MAX_ALTERNATE_ATTEMPTS = 5
-_PIPED_ALTERNATE_SEARCH_LIMIT = 8
+_MAX_ALTERNATE_ATTEMPTS = 8
+_PIPED_ALTERNATE_SEARCH_LIMIT = 15
+_YTDLP_ALTERNATE_SEARCH_LIMIT = 10
 
 
 def _proxy_audio_url(video_id: str) -> str:
@@ -106,52 +107,71 @@ async def _find_playable_alternate(
     if not query:
         return None
 
-    try:
-        results, _, _, _ = await piped_client.search_piped(query, limit=_PIPED_ALTERNATE_SEARCH_LIMIT)
-    except httpx.HTTPError:
-        return None
-
-    ranked_candidates: list[tuple[int, str]] = []
     seen: set[str] = {original_video_id}
-    for result in results:
-        if result.video_id in seen or is_topic_upload(result.artist):
-            continue
-        seen.add(result.video_id)
-        if not matches_requested_track(
-            wanted_title=title,
-            wanted_artist=artist,
-            candidate_title=result.title,
-            candidate_artist=result.artist,
-        ):
-            continue
-        score = _score_alternate_candidate(
-            title,
-            artist,
-            candidate_title=result.title,
-            candidate_artist=result.artist,
-            candidate_source_title=result.source_title,
+    piped_candidates: list[tuple[int, str]] = []
+    try:
+        results, _, _, _ = await piped_client.search_piped(
+            query,
+            limit=_PIPED_ALTERNATE_SEARCH_LIMIT,
+            max_per_song=None,
         )
-        ranked_candidates.append((score, result.video_id))
+        for result in results:
+            if result.video_id in seen:
+                continue
+            seen.add(result.video_id)
+            if not matches_requested_track(
+                wanted_title=title,
+                wanted_artist=artist,
+                candidate_title=result.title,
+                candidate_artist=result.artist,
+            ):
+                continue
+            score = _score_alternate_candidate(
+                title,
+                artist,
+                candidate_title=result.title,
+                candidate_artist=result.artist,
+                candidate_source_title=result.source_title,
+            )
+            piped_candidates.append((score, result.video_id))
+    except httpx.HTTPError:
+        pass
 
-    ranked_candidates.sort(key=lambda item: (item[0], item[1]))
-    for _, video_id in ranked_candidates[:_MAX_ALTERNATE_ATTEMPTS]:
-        try:
-            return await piped_client.get_stream(video_id)
-        except (httpx.HTTPError, ValueError):
-            continue
+    ytdlp_candidates: list[str] = []
+    try:
+        for video_id in await search_video_ids(query, limit=_YTDLP_ALTERNATE_SEARCH_LIMIT):
+            if video_id in seen:
+                continue
+            seen.add(video_id)
+            ytdlp_candidates.append(video_id)
+    except Exception:
+        pass
 
-    for _, video_id in ranked_candidates[:2]:
+    piped_candidates.sort(key=lambda item: (item[0], item[1]))
+    piped_ids = [video_id for _, video_id in piped_candidates]
+    piped_id_set = set(piped_ids)
+    # Prefer yt-dlp search hits first; they are often playable when the search result id is dead.
+    candidate_ids = ytdlp_candidates + [video_id for video_id in piped_ids if video_id not in ytdlp_candidates]
+    candidate_ids = candidate_ids[:_MAX_ALTERNATE_ATTEMPTS]
+
+    for video_id in candidate_ids:
         try:
             stream = await get_stream_via_ytdlp(video_id)
         except Exception:
-            continue
-        if matches_requested_track(
+            stream = None
+        if stream is not None and matches_requested_track(
             wanted_title=title,
             wanted_artist=artist,
             candidate_title=stream.title,
             candidate_artist=stream.artist,
         ):
             return stream
+
+        if video_id in piped_id_set:
+            try:
+                return await piped_client.get_stream(video_id)
+            except (httpx.HTTPError, ValueError):
+                continue
     return None
 
 
