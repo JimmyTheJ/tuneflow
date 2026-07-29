@@ -82,7 +82,7 @@ export function Layout() {
       )}
     >
       {/* Desktop sidebar */}
-      <aside className="hidden flex-col gap-6 border-r border-border bg-surface p-5 md:flex">
+      <aside className="sticky top-0 hidden h-screen flex-col gap-6 self-start overflow-y-auto border-r border-border bg-surface p-5 md:flex">
         <div className="px-2">
           <div className="text-2xl font-extrabold tracking-tight text-accent">Tuneflow</div>
         </div>
