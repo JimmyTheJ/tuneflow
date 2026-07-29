@@ -5,7 +5,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.auth import assert_same_household, build_user_read, require_manage_members, require_root_admin
+from app.auth import assert_same_household, build_user_read, get_current_user, require_manage_members, require_root_admin
 from app.database import get_db
 from app.models import Household, User, UserChannelPin, UserRoleAssignment
 from app.permissions import Permission
