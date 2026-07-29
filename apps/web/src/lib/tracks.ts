@@ -43,8 +43,17 @@ export function formatSearchSubtitle(track: Track): string {
   return channel;
 }
 
-export function extractTrackBadges(title: string, artist?: string | null): string[] {
+export function extractTrackBadges(
+  title: string,
+  artist?: string | null,
+  versionLabel?: string | null,
+): string[] {
   const badges: string[] = [];
+  // The server knows things the title cannot show, such as an upload being a
+  // cover by someone other than the artist who recorded the song.
+  if (versionLabel) {
+    badges.push(versionLabel);
+  }
   if (isTopicUpload(artist)) {
     badges.push("Official");
   }

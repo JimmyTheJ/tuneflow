@@ -1,7 +1,7 @@
 import type { SearchOptions, SearchResultGroup } from "@/types";
 
 export const DEFAULT_SEARCH_OPTIONS: SearchOptions = {
-  max_per_song: 1,
+  max_per_song: 3,
   hide_covers: false,
   hide_loops: false,
   results_per_page: 20,

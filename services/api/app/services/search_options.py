@@ -10,7 +10,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from app.models import Household, ParentalSettings
-from app.schemas import SearchExplanation, SearchOptions, SearchResult, SearchResultGroup
+from app.schemas import SearchExplanation, SearchOptions, SearchResult
 
 _FAN_UPLOAD_RE = re.compile(
     r"\b(cover|karaoke|tribute|nursery rhymes|wake up|reaction|reacts? to)\b",
@@ -102,35 +102,6 @@ def filter_search_results(
     return kept, removed
 
 
-def group_search_results(
-    results: list[SearchResult],
-    *,
-    max_per_song: int | None,
-    song_key_fn,
-) -> list[SearchResultGroup]:
-    if max_per_song == 1:
-        return [
-            SearchResultGroup(
-                group_key=song_key_fn(result) or result.video_id,
-                primary=result,
-                alternates=[],
-            )
-            for result in results
-        ]
-
-    groups: dict[str, SearchResultGroup] = {}
-    order: list[str] = []
-    for result in results:
-        key = song_key_fn(result) or result.video_id
-        existing = groups.get(key)
-        if existing is None:
-            groups[key] = SearchResultGroup(group_key=key, primary=result, alternates=[])
-            order.append(key)
-        else:
-            existing.alternates.append(result)
-    return [groups[key] for key in order]
-
-
 def build_search_explanation(
     *,
     options: SearchOptions,
@@ -175,8 +146,18 @@ def build_search_explanation(
 class SearchCursor(BaseModel):
     piped_nextpage: str | None = None
     seen_video_ids: list[str] = Field(default_factory=list)
-    song_counts: dict[str, int] = Field(default_factory=dict)
+    emitted_group_keys: list[str] = Field(default_factory=list)
     options_fingerprint: str = ""
+
+
+# The cursor travels as a base64 query parameter, so its history has to stay
+# small enough for a URL no matter how far infinite scroll runs.
+_MAX_CURSOR_HISTORY = 300
+
+
+def trim_cursor_history(values: list[str]) -> list[str]:
+    """Keep the most recent entries, dropping the oldest first."""
+    return values[-_MAX_CURSOR_HISTORY:]
 
 
 def options_fingerprint(options: SearchOptions) -> str:

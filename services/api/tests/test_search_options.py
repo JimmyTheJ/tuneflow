@@ -38,14 +38,14 @@ def test_resolve_search_options_blocks_session_override_when_locked():
         parental=parental,
         requested=SearchOptions(max_per_song=None),
     )
-    assert effective.max_per_song == 1
+    assert effective.max_per_song == SearchOptions().max_per_song
 
 
 def test_search_cursor_round_trip():
     cursor = SearchCursor(
         piped_nextpage="abc123",
         seen_video_ids=["vid1"],
-        song_counts={"adele|hello": 1},
+        emitted_group_keys=["song:babybeluga"],
         options_fingerprint="fp",
     )
     token = encode_search_cursor(cursor)
@@ -54,6 +54,7 @@ def test_search_cursor_round_trip():
     assert decoded is not None
     assert decoded.piped_nextpage == "abc123"
     assert decoded.seen_video_ids == ["vid1"]
+    assert decoded.emitted_group_keys == ["song:babybeluga"]
 
 
 def test_build_search_explanation_includes_filters():

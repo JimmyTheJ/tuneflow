@@ -64,6 +64,7 @@ export type SearchResultGroup = {
   group_key: string;
   primary: Track;
   alternates: Track[];
+  total_versions: number;
 };
 
 export type SearchResultsPage = {

@@ -61,6 +61,8 @@ export type Track = {
   blocked_reason?: string | null;
   source_title?: string | null;
   short_description?: string | null;
+  channel_id?: string | null;
+  version_label?: string | null;
 };
 
 export type SearchOptions = {
@@ -79,6 +81,7 @@ export type SearchResultGroup = {
   group_key: string;
   primary: Track;
   alternates: Track[];
+  total_versions: number;
 };
 
 export type SearchResultsPage = {

@@ -271,10 +271,12 @@ class SearchResult(TrackRead):
     blocked_reason: str | None = None
     source_title: str | None = None
     short_description: str | None = None
+    channel_id: str | None = None
+    version_label: str | None = None
 
 
 class SearchOptions(BaseModel):
-    max_per_song: int | None = 1
+    max_per_song: int | None = 3
     hide_covers: bool = False
     hide_loops: bool = False
     results_per_page: int = Field(default=20, ge=1, le=50)
@@ -319,6 +321,7 @@ class SearchResultGroup(BaseModel):
     group_key: str
     primary: SearchResult
     alternates: list[SearchResult] = Field(default_factory=list)
+    total_versions: int = 1
 
 
 class ArtistSearchHit(BaseModel):

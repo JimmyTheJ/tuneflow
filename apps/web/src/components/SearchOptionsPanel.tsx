@@ -3,9 +3,9 @@ import { DEFAULT_SEARCH_OPTIONS } from "@/lib/searchOptions";
 import type { SearchOptions } from "@/types";
 
 const VERSION_OPTIONS: Array<{ label: string; value: number | null }> = [
-  { label: "1 (default)", value: 1 },
+  { label: "1", value: 1 },
   { label: "2", value: 2 },
-  { label: "3", value: 3 },
+  { label: "3 (default)", value: 3 },
   { label: "5", value: 5 },
   { label: "Unlimited", value: null },
 ];

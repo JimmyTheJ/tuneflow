@@ -34,7 +34,7 @@ export function TrackRow({
 }: Props) {
   const title = displayTitle ?? track.title;
   const artistLine = subtitle ?? formatTrackArtist(track.artist);
-  const badges = showBadges ? extractTrackBadges(title, track.artist) : [];
+  const badges = showBadges ? extractTrackBadges(title, track.artist, track.version_label) : [];
   const detailLine = detail === undefined ? (showBadges ? trackDetailLine(track) : null) : detail;
   const duration =
     showDuration && track.duration_sec != null && track.duration_sec > 0

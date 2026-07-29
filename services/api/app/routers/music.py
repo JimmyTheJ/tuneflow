@@ -29,22 +29,41 @@ from app.schemas import (
 from app.services.cache_manager import resolve_audio, resolve_stream_with_cache
 from app.services.catalog_resolver import resolve_catalog_tracks
 from app.services.musicbrainz import musicbrainz_client
-from app.services.piped import song_dedupe_key, piped_client
+from app.services.piped import (
+    apply_channel_pin_boost,
+    drop_irrelevant_results,
+    normalize_text,
+    piped_client,
+    rank_search_results,
+    song_title_key,
+)
 from app.services.search_options import (
     SearchCursor,
     build_search_explanation,
     decode_search_cursor,
     encode_search_cursor,
     filter_search_results,
-    group_search_results,
     max_per_song_from_query,
     options_fingerprint,
     resolve_search_options,
+    trim_cursor_history,
+)
+from app.services.song_groups import (
+    SongIdentity,
+    artist_channel_ids,
+    build_song_groups,
+    candidate_titles_by_key,
+    identity_for_song,
 )
 from app.services.stream_resolver import stream_audio_chunks, stream_video_chunks
 from app.slugify import build_track_filename
 
 router = APIRouter(prefix="/music", tags=["music"])
+
+# MusicBrainz is rate limited to roughly one request per second, so only the
+# leading songs of a page get a per-song lookup; the rest rely on the artist
+# level match and duration consensus.
+_SONG_LOOKUP_BUDGET = 3
 
 
 def _piped_unavailable(exc: Exception) -> HTTPException:
@@ -115,6 +134,97 @@ async def _search_artists_for_query(query: str) -> list[ArtistSearchHit]:
     ]
 
 
+async def _canonical_song(artist: str | None, title: str):
+    try:
+        if artist:
+            return await musicbrainz_client.canonical_song_for_artist(artist, title)
+        return await musicbrainz_client.canonical_song_by_title(title)
+    except (httpx.HTTPError, ValueError):
+        return None
+
+
+def _dominant_uploader(results: list[SearchResult]) -> str | None:
+    """The uploader behind most of these results, if one clearly leads."""
+    counts: dict[str, int] = {}
+    for result in results:
+        name = (result.artist or "").strip()
+        if name:
+            counts[name] = counts.get(name, 0) + 1
+    if not counts:
+        return None
+    name, count = max(counts.items(), key=lambda item: item[1])
+    return name if count >= max(3, len(results) // 3) else None
+
+
+def _query_artist_name(
+    query: str,
+    *,
+    artist_hits: list[ArtistSearchHit],
+    results: list[SearchResult],
+) -> str | None:
+    """The artist this search is about, when the query itself implies one."""
+    normalized_query = normalize_text(query)
+    for hit in artist_hits:
+        hit_key = normalize_text(hit.name)
+        if hit_key and hit_key in normalized_query and artist_channel_ids(results, hit.name):
+            return hit.name
+    dominant = _dominant_uploader(results)
+    if dominant:
+        dominant_key = normalize_text(dominant)
+        if dominant_key and dominant_key in normalized_query:
+            return dominant
+    return None
+
+
+async def _resolve_song_identities(
+    query: str,
+    results: list[SearchResult],
+    *,
+    artist_hits: list[ArtistSearchHit],
+) -> dict[str, SongIdentity]:
+    """Work out, per song, who the canonical artist is and how long their take runs.
+
+    Resolving the artist once covers every song on the page without further
+    lookups. Per-song MusicBrainz calls are rate limited upstream, so they are
+    capped and best effort; duration consensus carries the remaining songs.
+    """
+    titles = candidate_titles_by_key(results)
+    if not titles:
+        return {}
+
+    identities: dict[str, SongIdentity] = {}
+    artist_name = _query_artist_name(query, artist_hits=artist_hits, results=results)
+    if artist_name:
+        channels = artist_channel_ids(results, artist_name)
+        for key in titles:
+            identities[key] = SongIdentity(artist_name=artist_name, artist_channel_ids=channels)
+
+    ordered_keys: list[str] = []
+    for result in results:
+        key = song_title_key(result)
+        if key and key in titles and key not in ordered_keys:
+            ordered_keys.append(key)
+
+    budget = _SONG_LOOKUP_BUDGET
+    for key in ordered_keys:
+        if budget <= 0:
+            break
+        existing = identities.get(key)
+        if existing is not None and existing.duration_sec:
+            continue
+        budget -= 1
+        song = await _canonical_song(artist_name, titles[key])
+        if song is None or not song.artist_name:
+            continue
+        identities[key] = identity_for_song(
+            canonical_artist=song.artist_name,
+            canonical_duration_sec=song.duration_sec,
+            recording_mbid=song.recording_mbid,
+            candidates=results,
+        )
+    return identities
+
+
 async def _load_channel_pins(db: AsyncSession, user_id: int) -> dict[str, str]:
     result = await db.execute(select(UserChannelPin).where(UserChannelPin.user_id == user_id))
     return {pin.artist_key: pin.channel_name for pin in result.scalars().all()}
@@ -133,18 +243,7 @@ def _apply_parental_blocks(
             title=track.title,
             artist=track.artist,
         )
-        filtered.append(
-            SearchResult(
-                video_id=track.video_id,
-                title=track.title,
-                artist=track.artist,
-                thumbnail_url=track.thumbnail_url,
-                duration_sec=track.duration_sec,
-                source_title=track.source_title,
-                short_description=track.short_description,
-                blocked_reason=reason,
-            )
-        )
+        filtered.append(track.model_copy(update={"blocked_reason": reason}))
     return filtered
 
 
@@ -221,59 +320,66 @@ async def search_music(
             search_advanced_hidden=search_advanced_hidden,
         )
 
-    artist_hits: list[ArtistSearchHit] = []
     cursor = decode_search_cursor(next_page, expected_fingerprint=fingerprint)
     if cursor is None and next_page:
         raise HTTPException(status_code=400, detail="Search session expired. Run the search again.")
 
-    if cursor is None:
-        artist_hits = await _search_artists_for_query(q)
+    # Cached upstream, so later pages reuse it to keep identifying canonical
+    # artists even though only the first page renders artist cards.
+    identity_hits = await _search_artists_for_query(q)
+    artist_hits: list[ArtistSearchHit] = identity_hits if cursor is None else []
 
-    seen_video_ids = set(cursor.seen_video_ids if cursor else [])
-    song_counts = dict(cursor.song_counts if cursor else {})
+    seen_video_ids = list(cursor.seen_video_ids if cursor else [])
+    emitted_group_keys = list(cursor.emitted_group_keys if cursor else [])
+    seen_lookup = set(seen_video_ids)
+    emitted_lookup = set(emitted_group_keys)
     piped_next = cursor.piped_nextpage if cursor else None
     channel_pins = await _load_channel_pins(db, current_user.id)
 
     try:
-        if piped_next:
-            raw_results, piped_token, song_counts, collapsed = await piped_client.search_piped_next(
-                q,
-                piped_next,
-                limit=effective_options.results_per_page,
-                max_per_song=effective_options.max_per_song,
-                version_preference=effective_options.version_preference,
-                song_counts=song_counts,
-                seen_video_ids=seen_video_ids,
-                channel_pins=channel_pins,
-            )
-        else:
-            raw_results, piped_token, song_counts, collapsed = await piped_client.search_piped(
-                q,
-                limit=effective_options.results_per_page,
-                max_per_song=effective_options.max_per_song,
-                version_preference=effective_options.version_preference,
-                song_counts=song_counts,
-                seen_video_ids=seen_video_ids,
-                channel_pins=channel_pins,
-            )
+        raw_results, piped_token = await piped_client.collect_candidates(
+            q,
+            target=effective_options.results_per_page,
+            next_page=piped_next,
+            seen_video_ids=seen_lookup,
+        )
     except httpx.HTTPError as exc:
         raise _piped_unavailable(exc) from exc
 
     for result in raw_results:
-        seen_video_ids.add(result.video_id)
+        if result.video_id not in seen_lookup:
+            seen_lookup.add(result.video_id)
+            seen_video_ids.append(result.video_id)
 
-    filtered_results, removed_count = filter_search_results(raw_results, options=effective_options)
+    if channel_pins:
+        for artist_key, channel_name in channel_pins.items():
+            raw_results = apply_channel_pin_boost(
+                raw_results, artist_key=artist_key, channel_name=channel_name
+            )
+    ranked_results = rank_search_results(
+        q,
+        drop_irrelevant_results(q, raw_results),
+        version_preference=effective_options.version_preference,
+    )
+
+    filtered_results, removed_count = filter_search_results(ranked_results, options=effective_options)
     blocked_results = _apply_parental_blocks(filtered_results, child_settings=child_settings)
-    groups = group_search_results(
+    identities = await _resolve_song_identities(q, blocked_results, artist_hits=identity_hits)
+    groups, collapsed = build_song_groups(
         blocked_results,
         max_per_song=effective_options.max_per_song,
-        song_key_fn=song_dedupe_key,
+        identities=identities,
+        skip_group_keys=emitted_lookup,
     )
+    for group in groups:
+        if group.group_key not in emitted_lookup:
+            emitted_lookup.add(group.group_key)
+            emitted_group_keys.append(group.group_key)
 
     next_cursor = SearchCursor(
         piped_nextpage=piped_token,
-        seen_video_ids=sorted(seen_video_ids),
-        song_counts=song_counts,
+        seen_video_ids=trim_cursor_history(seen_video_ids),
+        emitted_group_keys=trim_cursor_history(emitted_group_keys),
         options_fingerprint=fingerprint,
     )
     next_token = encode_search_cursor(next_cursor)

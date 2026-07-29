@@ -1,7 +1,7 @@
 import type { SearchOptions, SearchResultGroup } from "@/types";
 
 export const DEFAULT_SEARCH_OPTIONS: SearchOptions = {
-  max_per_song: 1,
+  max_per_song: 3,
   hide_covers: false,
   hide_loops: false,
   results_per_page: 20,
@@ -72,7 +72,15 @@ export function mergeSearchGroups(
       seen.add(alternate.video_id);
     }
 
-    map.set(group.group_key, { ...current, alternates });
+    map.set(group.group_key, {
+      ...current,
+      alternates,
+      total_versions: Math.max(
+        current.total_versions ?? 1,
+        group.total_versions ?? 1,
+        alternates.length + 1,
+      ),
+    });
   }
 
   return order.map((key) => map.get(key)!);

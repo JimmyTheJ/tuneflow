@@ -52,6 +52,19 @@ class CatalogTrack:
 
 
 @dataclass
+class CanonicalSong:
+    """The recording we believe a song title refers to, and who made it."""
+
+    title: str
+    artist_name: str
+    artist_mbid: str | None
+    recording_mbid: str | None
+    duration_sec: int | None
+    first_release_date: str | None
+    live_only: bool = False
+
+
+@dataclass
 class ArtistDetail:
     mbid: str
     name: str
@@ -75,8 +88,106 @@ class AlbumDetail:
     tracks: list[CatalogTrack]
 
 
+# A bare title with more matches than this is too common to attribute to one
+# artist from a single search page, so we decline to guess (e.g. "Hello" has
+# 24k recordings and the top-scored ones are not even the same title).
+_MAX_TITLE_MATCHES_FOR_ATTRIBUTION = 300
+
+
 def cover_art_url(release_mbid: str, size: str = "front-250") -> str:
     return f"{CAA_BASE_URL}/release/{release_mbid}/{size}"
+
+
+def _normalize_song_text(value: str | None) -> str:
+    return "".join(char for char in (value or "").lower() if char.isalnum())
+
+
+def _escape_lucene(value: str) -> str:
+    return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _credit_name_and_mbid(recording: dict) -> tuple[str, str | None]:
+    credits = [c for c in recording.get("artist-credit") or [] if isinstance(c, dict)]
+    if not credits:
+        return "", None
+    name = ", ".join(c.get("name", "") for c in credits if c.get("name")).strip()
+    primary = (credits[0].get("artist") or {}).get("id")
+    return name, primary
+
+
+def _recording_is_live_only(recording: dict) -> bool:
+    release_groups = [
+        (release.get("release-group") or {}) for release in recording.get("releases") or []
+    ]
+    if not release_groups:
+        return False
+    return all("Live" in (rg.get("secondary-types") or []) for rg in release_groups)
+
+
+def _recording_release_date(recording: dict) -> str | None:
+    dates = [recording.get("first-release-date") or ""]
+    dates.extend((release.get("date") or "") for release in recording.get("releases") or [])
+    present = sorted(date for date in dates if date)
+    return present[0] if present else None
+
+
+def _to_canonical_song(recording: dict, *, title: str) -> CanonicalSong:
+    credit_name, credit_mbid = _credit_name_and_mbid(recording)
+    length_ms = recording.get("length")
+    return CanonicalSong(
+        title=recording.get("title") or title,
+        artist_name=credit_name,
+        artist_mbid=credit_mbid,
+        recording_mbid=recording.get("id"),
+        duration_sec=round(length_ms / 1000) if length_ms else None,
+        first_release_date=_recording_release_date(recording),
+        live_only=_recording_is_live_only(recording),
+    )
+
+
+def _exact_title_matches(recordings: list[dict], *, title: str) -> list[dict]:
+    wanted = _normalize_song_text(title)
+    return [r for r in recordings if _normalize_song_text(r.get("title")) == wanted]
+
+
+def _pick_original_recording(recordings: list[dict], *, title: str) -> dict | None:
+    """Across artists, the earliest released exact-title match is the original."""
+    exact = _exact_title_matches(recordings, title=title)
+    if not exact:
+        return None
+
+    def sort_key(recording: dict) -> tuple[str, int, int]:
+        # Studio before live at the same date, and prefer entries carrying a length.
+        return (
+            _recording_release_date(recording) or "9999",
+            1 if _recording_is_live_only(recording) else 0,
+            0 if recording.get("length") else 1,
+        )
+
+    return sorted(exact, key=sort_key)[0]
+
+
+def _pick_definitive_recording(recordings: list[dict], *, title: str) -> dict | None:
+    """Within one artist, the most-released studio take is the definitive one.
+
+    Earliest-wins is wrong here: an artist may have an unrelated early live or
+    bootleg recording sharing the title, which would otherwise be mistaken for
+    the studio version and poison the canonical duration.
+    """
+    exact = _exact_title_matches(recordings, title=title)
+    if not exact:
+        return None
+
+    def sort_key(recording: dict) -> tuple[int, int, int, str]:
+        releases = recording.get("releases") or []
+        return (
+            1 if _recording_is_live_only(recording) else 0,
+            0 if recording.get("length") else 1,
+            -len(releases),
+            _recording_release_date(recording) or "9999",
+        )
+
+    return sorted(exact, key=sort_key)[0]
 
 
 def _parse_date(value: str | None) -> str | None:
@@ -200,6 +311,45 @@ class MusicBrainzClient:
                 )
             )
         return hits[:3]
+
+    async def canonical_song_for_artist(self, artist: str, title: str) -> CanonicalSong | None:
+        """Resolve a title within one artist's catalogue.
+
+        Artist-scoped lookup avoids guessing which of several same-titled songs
+        is meant, so it is the preferred path whenever the artist is known.
+        """
+        if not artist.strip() or not title.strip():
+            return None
+        query = f'recording:"{_escape_lucene(title)}" AND artist:"{_escape_lucene(artist)}"'
+        payload = await self._request(
+            "/recording",
+            params={"query": query, "fmt": "json", "limit": "25"},
+        )
+        wanted = _normalize_song_text(artist)
+        recordings = [
+            recording
+            for recording in payload.get("recordings", [])
+            if wanted in _normalize_song_text(_credit_name_and_mbid(recording)[0])
+        ]
+        original = _pick_definitive_recording(recordings, title=title)
+        if original is None:
+            return None
+        return _to_canonical_song(original, title=title)
+
+    async def canonical_song_by_title(self, title: str) -> CanonicalSong | None:
+        """Resolve a bare title, but only when it is rare enough to attribute."""
+        if not title.strip():
+            return None
+        payload = await self._request(
+            "/recording",
+            params={"query": f'recording:"{_escape_lucene(title)}"', "fmt": "json", "limit": "100"},
+        )
+        if int(payload.get("count") or 0) > _MAX_TITLE_MATCHES_FOR_ATTRIBUTION:
+            return None
+        original = _pick_original_recording(payload.get("recordings", []), title=title)
+        if original is None:
+            return None
+        return _to_canonical_song(original, title=title)
 
     def _release_is_better(self, candidate: dict, current: dict) -> bool:
         cand_official = candidate.get("status") == "Official"

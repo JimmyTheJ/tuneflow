@@ -31,6 +31,8 @@ export function SearchResultGroupRow({
   const hasAlternates = group.alternates.length > 0;
   const groupTracks = [group.primary, ...group.alternates];
   const playableGroup = groupTracks.filter((track) => !track.blocked_reason);
+  const shownVersions = groupTracks.length;
+  const withheldVersions = Math.max(0, (group.total_versions ?? shownVersions) - shownVersions);
 
   const renderTrack = (track: Track, isAlternate = false) => (
     <TrackRowWithActions
@@ -76,7 +78,18 @@ export function SearchResultGroupRow({
         <div className="min-w-0 flex-1">{renderTrack(group.primary)}</div>
       </div>
       {hasAlternates && expanded ? (
-        <div className="space-y-0.5">{group.alternates.map((track) => renderTrack(track, true))}</div>
+        <div className="space-y-0.5">
+          {group.alternates.map((track) => renderTrack(track, true))}
+          {withheldVersions > 0 && onMoreVersions ? (
+            <button
+              type="button"
+              className="ml-10 rounded-md border-0 bg-transparent px-2 py-1 text-left text-xs text-text-muted hover:bg-highlight hover:text-text"
+              onClick={() => onMoreVersions(group.primary)}
+            >
+              {withheldVersions} more {withheldVersions === 1 ? "version" : "versions"}
+            </button>
+          ) : null}
+        </div>
       ) : null}
     </div>
   );

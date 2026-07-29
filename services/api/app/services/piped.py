@@ -181,15 +181,29 @@ def _result_display_title(result: SearchResult) -> str:
     return (result.source_title or result.title or "").strip()
 
 
-def _result_candidate_title(result: SearchResult) -> str:
+def _parsed_source_parts(result: SearchResult) -> tuple[str | None, str]:
+    """Split "Artist - Title" only when that reading agrees with the result title.
+
+    yt-dlp stubs put the whole "Artist - Title" string in source_title and the
+    remainder in title, so the split is meaningful. Piped music_songs entries
+    put a bare song title in both and the artist in the uploader field, where
+    splitting would mangle titles like "Up On the House-Top" or "Medley: ...".
+    """
     display = _result_display_title(result)
-    _, parsed_title = parse_artist_title(display)
-    return parsed_title or result.title or ""
+    parsed_artist, parsed_title = parse_artist_title(display)
+    own_title = (result.title or "").strip()
+    if parsed_artist and own_title and _normalize_text(parsed_title) == _normalize_text(own_title):
+        return parsed_artist, parsed_title
+    return None, own_title or display
+
+
+def _result_candidate_title(result: SearchResult) -> str:
+    _, title = _parsed_source_parts(result)
+    return title
 
 
 def _result_candidate_artist(result: SearchResult) -> str:
-    display = _result_display_title(result)
-    parsed_artist, _ = parse_artist_title(display)
+    parsed_artist, _ = _parsed_source_parts(result)
     return (parsed_artist or result.artist or "").replace("- Topic", "").strip()
 
 
@@ -277,10 +291,76 @@ def song_dedupe_key(result: SearchResult) -> str | None:
     return _song_dedupe_key(result)
 
 
+def normalize_text(value: str) -> str:
+    return _normalize_text(value)
+
+
+def result_candidate_artist(result: SearchResult) -> str:
+    return _result_candidate_artist(result)
+
+
+def result_candidate_title(result: SearchResult) -> str:
+    return _result_candidate_title(result)
+
+
+def result_is_live(result: SearchResult) -> bool:
+    return _result_is_live(result)
+
+
+def song_title_key(result: SearchResult) -> str | None:
+    """Normalized song title with live/venue markers stripped, ignoring artist."""
+    _, parsed_title = _parsed_source_parts(result)
+    base_title = re.sub(r"[\(\[].*?[\)\]]", " ", parsed_title)
+    base_title = re.sub(
+        r"([-–—|:]\s*)?\blive\b.*$|\bunplugged\b.*$",
+        " ",
+        base_title,
+        flags=re.IGNORECASE,
+    )
+    return _normalize_text(base_title) or None
+
+
+_VERSION_LABEL_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (_LOOP_RE, "Long mix"),
+    (_FAN_UPLOAD_RE, "Cover"),
+    (re.compile(r"\bremix\b", re.IGNORECASE), "Remix"),
+    (re.compile(r"\bacoustic\b", re.IGNORECASE), "Acoustic"),
+    (re.compile(r"\b(instrumental|karaoke)\b", re.IGNORECASE), "Instrumental"),
+    (re.compile(r"\b(anniversary|re-?recorded|re-?recording)\b", re.IGNORECASE), "Re-recording"),
+)
+
+
+def version_marker_label(result: SearchResult) -> str | None:
+    """Label a version from explicit markers in its title, if any."""
+    display = _result_display_title(result)
+    if _result_is_live(result):
+        return "Live"
+    for pattern, label in _VERSION_LABEL_PATTERNS:
+        if pattern.search(display):
+            return label
+    return None
+
+
+def version_marker_penalty(result: SearchResult) -> int:
+    """Penalty (>=0) for title markers implying this is not the studio original."""
+    display = _result_display_title(result)
+    penalty = 0
+    if _result_is_live(result):
+        penalty += 4
+    if _ALT_RECORDING_RE.search(display):
+        penalty += 3
+    if _LOOP_RE.search(display):
+        penalty += 6
+    if _FAN_UPLOAD_RE.search(display):
+        penalty += 5
+    if _ANIMATED_RE.search(display):
+        penalty += 1
+    return penalty
+
+
 def _song_dedupe_key(result: SearchResult) -> str | None:
     """Collapse near-duplicate uploads of the same song (studio search only)."""
-    raw = _result_display_title(result)
-    _, parsed_title = parse_artist_title(raw)
+    _, parsed_title = _parsed_source_parts(result)
     # Strip live markers and trailing venue/date text so live variants share a key.
     base_title = re.sub(r"[\(\[].*?[\)\]]", " ", parsed_title)
     base_title = re.sub(
@@ -367,6 +447,17 @@ def rank_search_results(
     return [result for _, result in indexed]
 
 
+def drop_irrelevant_results(query: str, results: list[SearchResult]) -> list[SearchResult]:
+    """Discard results sharing nothing with the query.
+
+    Upstream pages drift off topic as you go deeper, so reading several pages to
+    fill a page of songs would otherwise pad the results with unrelated tracks.
+    """
+    scored = [(result, query_relevance_score(query, result)) for result in results]
+    relevant = [result for result, score in scored if score > 0]
+    return relevant or results
+
+
 def apply_channel_pin_boost(
     results: list[SearchResult],
     *,
@@ -438,15 +529,28 @@ def piped_instance_urls() -> list[str]:
     return ordered
 
 
+def _channel_id_from_uploader_url(uploader_url: str | None) -> str | None:
+    if not uploader_url:
+        return None
+    return uploader_url.rstrip("/").rsplit("/", 1)[-1] or None
+
+
 def _parse_search_items(payload: dict) -> list[SearchResult]:
     results: list[SearchResult] = []
     for item in payload.get("items", []):
         if item.get("type") != "stream":
             continue
         raw_title = (item.get("title") or "Unknown").strip()
-        artist, title = parse_artist_title(raw_title)
+        uploader = (item.get("uploaderName") or "").strip() or None
+        if uploader:
+            # music_songs entries already expose a clean song title plus the
+            # performing artist as the uploader, so splitting on punctuation
+            # only corrupts titles like "Up On the House-Top" or "Medley: ...".
+            title = raw_title
+            artist = uploader
+        else:
+            artist, title = parse_artist_title(raw_title)
         video_id = item["url"].split("=")[-1]
-        uploader = item.get("uploaderName") or artist
         short_description = item.get("shortDescription")
         if isinstance(short_description, str):
             short_description = short_description.strip() or None
@@ -456,11 +560,12 @@ def _parse_search_items(payload: dict) -> list[SearchResult]:
             SearchResult(
                 video_id=video_id,
                 title=title,
-                artist=uploader,
+                artist=artist,
                 thumbnail_url=youtube_thumbnail_url(video_id),
                 duration_sec=item.get("duration"),
                 source_title=raw_title,
                 short_description=short_description,
+                channel_id=_channel_id_from_uploader_url(item.get("uploaderUrl")),
             )
         )
     return results
@@ -506,6 +611,48 @@ class PipedClient:
                 errors.append(f"{base_url}: {exc}")
         detail = "; ".join(errors[:3])
         raise httpx.HTTPError(f"All Piped instances failed. {detail}")
+
+    async def _search_page(self, query: str, *, next_page: str | None) -> dict:
+        if next_page:
+            return await self._request_json(
+                "/nextpage/search",
+                params={"q": query, "filter": "music_songs", "nextpage": next_page},
+            )
+        return await self._request_json("/search", params={"q": query, "filter": "music_songs"})
+
+    async def collect_candidates(
+        self,
+        query: str,
+        *,
+        target: int,
+        next_page: str | None = None,
+        seen_video_ids: set[str] | None = None,
+        max_pages: int = 4,
+    ) -> tuple[list[SearchResult], str | None]:
+        """Pull upstream pages until we have ``target`` distinct songs.
+
+        A single Piped page holds ~20 items, so duplicate uploads of one song
+        are routinely split across pages. Grouping one page at a time can never
+        merge those, which is why so few groups ever showed alternates. Progress
+        is measured in distinct songs rather than raw results, because a page of
+        twenty uploads of one song is one row to the reader.
+        """
+        collected: list[SearchResult] = []
+        seen: set[str] = set(seen_video_ids or ())
+        songs: set[str] = set()
+        token = next_page
+        for _ in range(max(1, max_pages)):
+            payload = await self._search_page(query, next_page=token)
+            for result in _parse_search_items(payload):
+                if result.video_id in seen:
+                    continue
+                seen.add(result.video_id)
+                collected.append(result)
+                songs.add(song_title_key(result) or result.video_id)
+            token = _next_page_token(payload)
+            if not token or len(songs) >= target:
+                break
+        return collected, token
 
     async def search_piped(
         self,
