@@ -153,8 +153,17 @@ async function configureAudio() {
 }
 
 function currentQueueIndex(state: Pick<PlayerState, "current" | "queue">): number {
-  if (!state.current) return -1;
-  return state.queue.findIndex((track) => track.video_id === state.current!.video_id);
+  if (!state.current || state.queue.length === 0) return -1;
+
+  const current = state.current;
+  const byVideoId = state.queue.findIndex((track) => track.video_id === current.video_id);
+  if (byVideoId >= 0) return byVideoId;
+
+  const byIdentity = state.queue.findIndex(
+    (track) =>
+      track.title === current.title && (track.artist ?? "") === (current.artist ?? ""),
+  );
+  return byIdentity;
 }
 
 function buildShuffleOrder(length: number, currentIndex: number): number[] {
@@ -848,10 +857,17 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       return;
     }
 
-    const track = get().queue[action.queueIndex];
+    const state = get();
+    const rotated = rotateQueueFrom(state, action.queueIndex);
+    const track = rotated.queue[0];
     if (!track) return;
-    set({ shuffleStep: action.shuffleStep });
-    await get().playTrack(track, get().queue, { fromNavigation: true });
+
+    set({
+      shuffleOrder: rotated.shuffleOrder,
+      shuffleStep: rotated.shuffleStep,
+      queueInsertIndex: 1,
+    });
+    await get().playTrack(track, rotated.queue, { fromNavigation: true });
   },
 
   playNext: async (_fromAutoAdvance = false) => {
@@ -869,13 +885,20 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       return;
     }
 
-    const track = get().queue[action.queueIndex];
+    const state = get();
+    const rotated = rotateQueueFrom(state, action.queueIndex);
+    const track = rotated.queue[0];
     if (!track) {
       set({ isPlaying: false });
       return;
     }
-    set({ shuffleStep: action.shuffleStep });
-    await get().playTrack(track, get().queue, { fromNavigation: true });
+
+    set({
+      shuffleOrder: rotated.shuffleOrder,
+      shuffleStep: rotated.shuffleStep,
+      queueInsertIndex: 1,
+    });
+    await get().playTrack(track, rotated.queue, { fromNavigation: true });
   },
 
   playQueueIndex: async (queueIndex) => {
@@ -1112,7 +1135,7 @@ export function getQueueView(
     const step = state.shuffleOrder.indexOf(currentIndex);
     const activeStep = step >= 0 ? step : state.shuffleStep;
 
-    items.push({ track: state.queue[currentIndex], queueIndex: currentIndex, status: "playing" });
+    items.push({ track: state.current, queueIndex: currentIndex, status: "playing" });
     for (let index = activeStep + 1; index < state.shuffleOrder.length; index += 1) {
       const queueIndex = state.shuffleOrder[index];
       items.push({ track: state.queue[queueIndex], queueIndex, status: "upcoming" });
@@ -1122,7 +1145,7 @@ export function getQueueView(
 
   for (let index = currentIndex; index < state.queue.length; index += 1) {
     items.push({
-      track: state.queue[index],
+      track: index === currentIndex ? state.current : state.queue[index],
       queueIndex: index,
       status: index === currentIndex ? "playing" : "upcoming",
     });
