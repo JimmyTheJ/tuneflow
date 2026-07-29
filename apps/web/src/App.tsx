@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes, useParams } from "react-router-dom";
 import { Layout } from "@/components/Layout";
 import { MiniPlayer } from "@/components/MiniPlayer";
 import { api } from "@/lib/api";
@@ -22,6 +22,29 @@ import { AdminIntegrationsPage } from "@/pages/AdminIntegrationsPage";
 import { DeletedUsersPage } from "@/pages/DeletedUsersPage";
 import { DeletedPlaylistsPage } from "@/pages/DeletedPlaylistsPage";
 import { SettingsPage } from "@/pages/SettingsPage";
+
+function HouseholdEntryPage() {
+  const { householdSlug } = useParams();
+  const user = useAuthStore((s) => s.user);
+  const isReady = useAuthStore((s) => s.isReady);
+
+  if (!isReady) {
+    return (
+      <div className="grid min-h-screen place-items-center text-text-secondary">
+        <div className="flex items-center gap-3">
+          <span className="tf-spinner" aria-hidden="true" />
+          Loading…
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <Navigate to={`/h/${householdSlug}/login`} replace />;
+  }
+
+  return <Navigate to="/" replace />;
+}
 
 function Protected({ children }: { children: React.ReactNode }) {
   const user = useAuthStore((s) => s.user);
@@ -75,6 +98,7 @@ export function App() {
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/h/:householdSlug/login" element={<LoginPage />} />
+        <Route path="/h/:householdSlug" element={<HouseholdEntryPage />} />
         <Route path="/setup" element={<SetupPage />} />
         <Route
           element={
