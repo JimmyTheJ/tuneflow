@@ -41,8 +41,7 @@ from app.services.search_options import (
     options_fingerprint,
     resolve_search_options,
 )
-from app.services.stream_resolver import stream_video_chunks
-from app.services.ytdlp import stream_audio_via_ytdlp
+from app.services.stream_resolver import stream_audio_chunks, stream_video_chunks
 from app.slugify import build_track_filename
 
 router = APIRouter(prefix="/music", tags=["music"])
@@ -528,7 +527,7 @@ async def stream_audio(
 
     if resolution.stream:
         async def iter_bytes():
-            async for chunk in stream_audio_via_ytdlp(stream.video_id):
+            async for chunk in stream_audio_chunks(stream.video_id):
                 yield chunk
 
         return StreamingResponse(
