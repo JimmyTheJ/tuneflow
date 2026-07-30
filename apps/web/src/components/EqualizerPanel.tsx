@@ -3,6 +3,7 @@ import { EqBandSlider } from "@/components/EqBandSlider";
 import { EqProfilePickerModal } from "@/components/EqProfilePickerModal";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
+import { cn } from "@/lib/cn";
 import {
   bandsEqual,
   cloneBands,
@@ -53,6 +54,16 @@ export function EqualizerPanel({ className }: Props) {
   const [playlistPickerOpen, setPlaylistPickerOpen] = useState(false);
   const [queuePickerOpen, setQueuePickerOpen] = useState(false);
   const [dragHint, setDragHint] = useState<DragHint | null>(null);
+  const [touchUi, setTouchUi] = useState(false);
+  const [bandsExpanded, setBandsExpanded] = useState(false);
+
+  useEffect(() => {
+    const media = window.matchMedia("(pointer: coarse)");
+    const sync = () => setTouchUi(media.matches);
+    sync();
+    media.addEventListener("change", sync);
+    return () => media.removeEventListener("change", sync);
+  }, []);
 
   const resolved = useMemo(() => getResolvedEqForCurrentTrack(), [
     current?.video_id,
@@ -182,10 +193,20 @@ export function EqualizerPanel({ className }: Props) {
     }
   };
 
+  const activeLabel = resolved
+    ? `${resolved.profileName ?? resolved.source}${eqBroadcastActive ? " · broadcast on" : ""}`
+    : null;
+  const showBandSliders = enabled && (!touchUi || bandsExpanded);
+
   return (
     <section id="equalizer" className={className}>
-      <div className="relative rounded-2xl border border-border/80 bg-elevated/80 p-5 shadow-card backdrop-blur-sm">
-        {dragHint ? (
+      <div
+        className={cn(
+          "relative rounded-2xl border border-border/80 bg-elevated/80 shadow-card backdrop-blur-sm",
+          enabled ? "p-5" : "px-4 py-3",
+        )}
+      >
+        {enabled && dragHint ? (
           <div
             className="pointer-events-none absolute inset-x-0 top-3 z-20 flex justify-center"
             role="status"
@@ -198,25 +219,38 @@ export function EqualizerPanel({ className }: Props) {
             </span>
           </div>
         ) : null}
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h2 className="m-0 text-lg font-bold">Equalizer</h2>
-            <p className="mt-1 mb-0 text-sm text-text-secondary">
-              {resolved
-                ? `Active: ${resolved.profileName ?? resolved.source}${eqBroadcastActive ? " · broadcast on" : ""}`
-                : "Adjust frequency bands and save profiles"}
-            </p>
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            <h2 className="m-0 shrink-0 text-lg font-bold">Equalizer</h2>
+            {enabled ? (
+              <p className="m-0 truncate text-sm text-text-secondary">
+                {activeLabel ?? "Adjust frequency bands and save profiles"}
+              </p>
+            ) : (
+              <p className="m-0 truncate text-sm text-text-secondary">
+                {activeLabel ? `Active: ${activeLabel}` : "Disabled"}
+              </p>
+            )}
           </div>
-          <label className="flex items-center gap-2 text-sm text-text-secondary">
+          <label className="flex shrink-0 items-center gap-2 text-sm text-text-secondary">
             <input
               type="checkbox"
               checked={enabled}
-              onChange={(event) => setEnabled(event.target.checked)}
+              onChange={(event) => {
+                const nextEnabled = event.target.checked;
+                setEnabled(nextEnabled);
+                if (!nextEnabled) {
+                  setBandsExpanded(false);
+                  setDragHint(null);
+                }
+              }}
             />
             Enabled
           </label>
         </div>
 
+        {!enabled ? null : (
+          <>
         <div className="mt-4 flex flex-wrap items-end gap-3">
           <label className="min-w-[180px] flex-1 text-sm text-text-secondary">
             Profile
@@ -239,24 +273,44 @@ export function EqualizerPanel({ className }: Props) {
           </label>
         </div>
 
-        <div className="mt-5 flex items-center justify-between gap-3">
-          <p className="m-0 text-xs text-text-muted">Drag up to boost, down to cut</p>
-          <Button size="sm" variant="ghost" disabled={busy} onClick={handleResetBands}>
-            Reset to 0
-          </Button>
-        </div>
+        {touchUi && !bandsExpanded ? (
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+            <p className="m-0 text-sm text-text-secondary">Tap to adjust bands without accidental drags while scrolling</p>
+            <Button size="sm" variant="secondary" onClick={() => setBandsExpanded(true)}>
+              Adjust bands
+            </Button>
+          </div>
+        ) : null}
 
-        <div className="mt-3 flex items-end justify-between gap-3 overflow-x-auto pb-1">
-          {bands.map((band, index) => (
-            <EqBandSlider
-              key={band.freq}
-              band={band}
-              onChange={(gainDb) => updateBand(index, gainDb)}
-              onDragStart={() => setDragHint({ kind: "band", freq: band.freq, gainDb: band.gainDb })}
-              onDragEnd={() => setDragHint(null)}
-            />
-          ))}
-        </div>
+        {showBandSliders ? (
+          <>
+            <div className="mt-5 flex items-center justify-between gap-3">
+              <p className="m-0 text-xs text-text-muted">Drag up to boost, down to cut</p>
+              <div className="flex gap-2">
+                {touchUi ? (
+                  <Button size="sm" variant="ghost" onClick={() => setBandsExpanded(false)}>
+                    Done
+                  </Button>
+                ) : null}
+                <Button size="sm" variant="ghost" disabled={busy} onClick={handleResetBands}>
+                  Reset to 0
+                </Button>
+              </div>
+            </div>
+
+            <div className="mt-3 flex items-end justify-between gap-3 overflow-x-auto pb-1 touch-none">
+              {bands.map((band, index) => (
+                <EqBandSlider
+                  key={band.freq}
+                  band={band}
+                  onChange={(gainDb) => updateBand(index, gainDb)}
+                  onDragStart={() => setDragHint({ kind: "band", freq: band.freq, gainDb: band.gainDb })}
+                  onDragEnd={() => setDragHint(null)}
+                />
+              ))}
+            </div>
+          </>
+        ) : null}
 
         <label className="mt-4 block text-sm text-text-secondary">
           Preamp ({formatGainDb(preampDb)})
@@ -266,7 +320,7 @@ export function EqualizerPanel({ className }: Props) {
             max={12}
             step={0.5}
             value={preampDb}
-            className="tf-slider mt-2 w-full"
+            className="tf-slider mt-2 w-full touch-none"
             onPointerDown={() => setDragHint({ kind: "preamp", gainDb: preampDb })}
             onPointerUp={() => setDragHint(null)}
             onPointerCancel={() => setDragHint(null)}
@@ -333,6 +387,8 @@ export function EqualizerPanel({ className }: Props) {
             {status}
           </p>
         ) : null}
+          </>
+        )}
       </div>
 
       <EqProfilePickerModal
