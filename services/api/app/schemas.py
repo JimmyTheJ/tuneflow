@@ -281,6 +281,8 @@ class SearchOptions(BaseModel):
     hide_loops: bool = False
     results_per_page: int = Field(default=20, ge=1, le=50)
     version_preference: Literal["auto", "studio", "live", "any"] = "auto"
+    # Household playback UX: not a result filter, and not overridable via search query params.
+    play_on_select: Literal["all_results", "single_track"] = "all_results"
 
 
 class SearchOptionsUpdate(BaseModel):
@@ -289,6 +291,7 @@ class SearchOptionsUpdate(BaseModel):
     hide_loops: bool | None = None
     results_per_page: int | None = Field(default=None, ge=1, le=50)
     version_preference: Literal["auto", "studio", "live", "any"] | None = None
+    play_on_select: Literal["all_results", "single_track"] | None = None
 
 
 class HouseholdSearchSettingsRead(BaseModel):

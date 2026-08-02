@@ -25,7 +25,7 @@ import {
   isChildProfile,
 } from "@/lib/permissions";
 import { getApiUrl, setApiUrl } from "@/lib/settings";
-import { DEFAULT_SEARCH_OPTIONS } from "@/lib/searchOptions";
+import { DEFAULT_SEARCH_OPTIONS, normalizeSearchOptions } from "@/lib/searchOptions";
 import { useAuthStore } from "@/stores/authStore";
 import type { ParentalSettings, ScrobblerConnectionStatus, ScrobblerProviderInfo, SearchOptions } from "@/types";
 
@@ -93,7 +93,7 @@ export function SettingsPage() {
     if (!canEditHouseholdSearch || isRootAdmin) return;
     void api
       .getHouseholdSearchSettings()
-      .then((settings) => setHouseholdSearchDefaults(settings.search_defaults))
+      .then((settings) => setHouseholdSearchDefaults(normalizeSearchOptions(settings.search_defaults)))
       .catch(() => setHouseholdSearchDefaults(DEFAULT_SEARCH_OPTIONS));
   }, [canEditHouseholdSearch, isRootAdmin]);
 
@@ -216,7 +216,7 @@ export function SettingsPage() {
     setHouseholdSearchMessage(null);
     try {
       const settings = await api.updateHouseholdSearchSettings(householdSearchDefaults);
-      setHouseholdSearchDefaults(settings.search_defaults);
+      setHouseholdSearchDefaults(normalizeSearchOptions(settings.search_defaults));
       setHouseholdSearchMessage("Household search defaults saved.");
     } catch (err) {
       setHouseholdSearchMessage(err instanceof Error ? err.message : "Could not save search defaults");
@@ -344,7 +344,7 @@ export function SettingsPage() {
           <div>
             <h2 className="m-0 text-base font-bold">Search defaults</h2>
             <p className="mt-1 mb-0 text-sm text-text-secondary">
-              Default search behavior for everyone in your household.
+              Default search filters and what happens when someone plays a result.
             </p>
           </div>
           <SearchOptionsPanel
@@ -352,6 +352,7 @@ export function SettingsPage() {
             onChange={setHouseholdSearchDefaults}
             onReset={() => setHouseholdSearchDefaults(DEFAULT_SEARCH_OPTIONS)}
             compact
+            showPlayOnSelect
           />
           <Button
             variant="secondary"

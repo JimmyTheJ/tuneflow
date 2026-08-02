@@ -65,12 +65,16 @@ export type Track = {
   version_label?: string | null;
 };
 
+export type SearchPlayOnSelect = "all_results" | "single_track";
+
 export type SearchOptions = {
   max_per_song: number | null;
   hide_covers: boolean;
   hide_loops: boolean;
   results_per_page: number;
   version_preference: "auto" | "studio" | "live" | "any";
+  /** When selecting a search result, start a queue from all loaded results or only that track. */
+  play_on_select: SearchPlayOnSelect;
 };
 
 export type SearchExplanation = {

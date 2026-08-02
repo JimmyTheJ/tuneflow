@@ -22,7 +22,15 @@ import {
 } from "@/lib/searchOptions";
 import { formatTrackArtist } from "@/lib/tracks";
 import { usePlayerStore } from "@/stores/playerStore";
-import type { ArtistSearchHit, Playlist, SearchExplanation, SearchOptions, SearchResultGroup, Track } from "@/types";
+import type {
+  ArtistSearchHit,
+  Playlist,
+  SearchExplanation,
+  SearchOptions,
+  SearchPlayOnSelect,
+  SearchResultGroup,
+  Track,
+} from "@/types";
 
 export function SearchPage() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -44,6 +52,9 @@ export function SearchPage() {
   );
   const [explanation, setExplanation] = useState<SearchExplanation | null>(null);
   const [searchAdvancedHidden, setSearchAdvancedHidden] = useState(false);
+  const [playOnSelect, setPlayOnSelect] = useState<SearchPlayOnSelect>(
+    DEFAULT_SEARCH_OPTIONS.play_on_select,
+  );
   const loadMoreRef = useRef<HTMLDivElement>(null);
   const loadingMoreRef = useRef(false);
   const searchAbortRef = useRef<AbortController | null>(null);
@@ -143,6 +154,7 @@ export function SearchPage() {
         setNextPage(page.next_page);
         setExplanation(page.explanation);
         setSearchAdvancedHidden(page.search_advanced_hidden);
+        setPlayOnSelect(page.effective_options.play_on_select ?? DEFAULT_SEARCH_OPTIONS.play_on_select);
         setLastQuery(trimmed);
         recordQuery(trimmed);
       } catch (err) {
@@ -264,6 +276,7 @@ export function SearchPage() {
 
   const showSuggestions = inputFocused && suggestions.length > 0 && !loading;
   const playable = primaryPlayQueue(groups);
+  const defaultPlayQueue = playOnSelect === "single_track" ? [] : playable;
   const hasResults = groups.length > 0;
 
   return (
@@ -413,7 +426,7 @@ export function SearchPage() {
           <SearchResultGroupRow
             key={group.group_key}
             group={group}
-            playQueue={playable}
+            playQueue={defaultPlayQueue}
             likedVideoIds={likedVideoIds}
             playlists={playlists}
             onPlayTrack={handlePlayTrack}

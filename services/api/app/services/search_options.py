@@ -161,7 +161,10 @@ def trim_cursor_history(values: list[str]) -> list[str]:
 
 
 def options_fingerprint(options: SearchOptions) -> str:
-    return json.dumps(options.model_dump(mode="json"), sort_keys=True)
+    # Playback UX is household-owned and must not invalidate search pagination cursors.
+    data = options.model_dump(mode="json")
+    data.pop("play_on_select", None)
+    return json.dumps(data, sort_keys=True)
 
 
 def encode_search_cursor(cursor: SearchCursor) -> str | None:

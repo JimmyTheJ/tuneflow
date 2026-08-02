@@ -23,7 +23,7 @@ import {
 } from "@/lib/searchOptions";
 import { formatSearchSubtitle } from "@/lib/tracks";
 import { usePlayerStore } from "@/stores/player";
-import type { ArtistSearchHit, Playlist, SearchResultGroup, Track } from "@/types";
+import type { ArtistSearchHit, Playlist, SearchPlayOnSelect, SearchResultGroup, Track } from "@/types";
 
 export default function SearchScreen() {
   const [query, setQuery] = useState("");
@@ -39,6 +39,9 @@ export default function SearchScreen() {
   const [pendingQuery, setPendingQuery] = useState<string | null>(null);
   const [sessionOptions] = useState(DEFAULT_SEARCH_OPTIONS);
   const [explanation, setExplanation] = useState<string | null>(null);
+  const [playOnSelect, setPlayOnSelect] = useState<SearchPlayOnSelect>(
+    DEFAULT_SEARCH_OPTIONS.play_on_select,
+  );
   const loadingMoreRef = useRef(false);
   const searchAbortRef = useRef<AbortController | null>(null);
   const loadMoreAbortRef = useRef<AbortController | null>(null);
@@ -96,6 +99,7 @@ export default function SearchScreen() {
       setArtists(page.artists ?? []);
       setNextPage(page.next_page);
       setExplanation(page.explanation?.messages.join(" · ") ?? null);
+      setPlayOnSelect(page.effective_options.play_on_select ?? DEFAULT_SEARCH_OPTIONS.play_on_select);
       setLastQuery(trimmed);
       recordQuery(trimmed);
     } catch (err) {
@@ -150,6 +154,7 @@ export default function SearchScreen() {
   const showSuggestions = inputFocused && suggestions.length > 0 && !loading;
   const results = flattenGroupTracks(groups);
   const playable = primaryPlayQueue(groups);
+  const defaultPlayQueue = playOnSelect === "single_track" ? [] : playable;
 
   return (
     <View className="flex-1 bg-base px-4 pt-2">
@@ -249,7 +254,7 @@ export default function SearchScreen() {
         renderItem={({ item }) => (
           <TrackRowWithActions
             track={item}
-            playQueue={playable}
+            playQueue={defaultPlayQueue}
             playlists={playlists}
             displayTitle={item.source_title ?? item.title}
             showBadges
@@ -259,7 +264,7 @@ export default function SearchScreen() {
                 : formatSearchSubtitle(item)
             }
             disabled={Boolean(item.blocked_reason)}
-            onPlay={() => void playTrack(item, playable)}
+            onPlay={() => void playTrack(item, defaultPlayQueue.length > 0 ? defaultPlayQueue : [item])}
             onPlaylistsChange={() => void loadPlaylists()}
           />
         )}

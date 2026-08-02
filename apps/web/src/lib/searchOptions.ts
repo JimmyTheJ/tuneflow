@@ -1,4 +1,4 @@
-import type { SearchOptions, SearchResultGroup } from "@/types";
+import type { SearchOptions, SearchPlayOnSelect, SearchResultGroup, Track } from "@/types";
 
 export const DEFAULT_SEARCH_OPTIONS: SearchOptions = {
   max_per_song: 3,
@@ -6,15 +6,22 @@ export const DEFAULT_SEARCH_OPTIONS: SearchOptions = {
   hide_loops: false,
   results_per_page: 20,
   version_preference: "auto",
+  play_on_select: "all_results",
 };
 
 const SESSION_SEARCH_OPTIONS_KEY = "tuneflow.search.sessionOptions";
+
+export function normalizeSearchOptions(
+  partial: Partial<SearchOptions> | null | undefined,
+): SearchOptions {
+  return { ...DEFAULT_SEARCH_OPTIONS, ...(partial ?? {}) };
+}
 
 export function loadSessionSearchOptions(): SearchOptions | null {
   try {
     const raw = localStorage.getItem(SESSION_SEARCH_OPTIONS_KEY);
     if (!raw) return null;
-    return JSON.parse(raw) as SearchOptions;
+    return normalizeSearchOptions(JSON.parse(raw) as Partial<SearchOptions>);
   } catch {
     return null;
   }
@@ -25,7 +32,9 @@ export function saveSessionSearchOptions(options: SearchOptions | null): void {
     localStorage.removeItem(SESSION_SEARCH_OPTIONS_KEY);
     return;
   }
-  localStorage.setItem(SESSION_SEARCH_OPTIONS_KEY, JSON.stringify(options));
+  // Session overrides are filter-only; play_on_select is household-owned.
+  const { play_on_select: _ignored, ...sessionFilters } = options;
+  localStorage.setItem(SESSION_SEARCH_OPTIONS_KEY, JSON.stringify(sessionFilters));
 }
 
 export function countActiveSearchOptionChanges(
@@ -97,6 +106,16 @@ export function flattenGroupTracks(groups: SearchResultGroup[]): SearchResultGro
 
 export function primaryPlayQueue(groups: SearchResultGroup[]): SearchResultGroup["primary"][] {
   return groups.map((group) => group.primary).filter((track) => !track.blocked_reason);
+}
+
+/** Queue used when selecting a search result, based on household play_on_select. */
+export function queueForSearchPlay(
+  track: Track,
+  searchPrimaries: Track[],
+  mode: SearchPlayOnSelect = "all_results",
+): Track[] {
+  if (mode === "single_track") return [track];
+  return searchPrimaries.length > 0 ? searchPrimaries : [track];
 }
 
 export function buildMoreVersionsQuery(track: SearchResultGroup["primary"]): string {

@@ -41,6 +41,29 @@ def test_resolve_search_options_blocks_session_override_when_locked():
     assert effective.max_per_song == SearchOptions().max_per_song
 
 
+def test_resolve_search_options_keeps_household_play_on_select():
+    household = Household(
+        name="Test",
+        slug="test",
+        search_defaults_json='{"play_on_select": "single_track"}',
+    )
+    effective = resolve_search_options(
+        household=household,
+        parental=None,
+        requested=SearchOptions(max_per_song=5),
+    )
+    assert effective.play_on_select == "single_track"
+    assert effective.max_per_song == 5
+
+
+def test_options_fingerprint_ignores_play_on_select():
+    from app.services.search_options import options_fingerprint
+
+    a = SearchOptions(play_on_select="all_results")
+    b = SearchOptions(play_on_select="single_track")
+    assert options_fingerprint(a) == options_fingerprint(b)
+
+
 def test_search_cursor_round_trip():
     cursor = SearchCursor(
         piped_nextpage="abc123",

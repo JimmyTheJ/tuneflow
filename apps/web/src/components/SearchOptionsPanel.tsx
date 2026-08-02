@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/Button";
 import { DEFAULT_SEARCH_OPTIONS } from "@/lib/searchOptions";
-import type { SearchOptions } from "@/types";
+import type { SearchOptions, SearchPlayOnSelect } from "@/types";
 
 const VERSION_OPTIONS: Array<{ label: string; value: number | null }> = [
   { label: "1", value: 1 },
@@ -12,15 +12,37 @@ const VERSION_OPTIONS: Array<{ label: string; value: number | null }> = [
 
 const PAGE_SIZE_OPTIONS = [20, 30, 50] as const;
 
+const PLAY_ON_SELECT_OPTIONS: Array<{ label: string; value: SearchPlayOnSelect; hint: string }> = [
+  {
+    label: "All search results",
+    value: "all_results",
+    hint: "Selecting a track starts a queue from the loaded search results (great for discovery).",
+  },
+  {
+    label: "Only the selected track",
+    value: "single_track",
+    hint: "Selecting a track plays just that song. Use the menu to queue more.",
+  },
+];
+
 type Props = {
   value: SearchOptions;
   onChange: (next: SearchOptions) => void;
   onReset?: () => void;
   disabled?: boolean;
   compact?: boolean;
+  /** Household settings only — not shown for per-search session overrides. */
+  showPlayOnSelect?: boolean;
 };
 
-export function SearchOptionsPanel({ value, onChange, onReset, disabled, compact }: Props) {
+export function SearchOptionsPanel({
+  value,
+  onChange,
+  onReset,
+  disabled,
+  compact,
+  showPlayOnSelect = false,
+}: Props) {
   return (
     <div className={compact ? "space-y-4" : "space-y-5 rounded-xl border border-border bg-elevated p-4"}>
       <div className="space-y-2">
@@ -89,6 +111,35 @@ export function SearchOptionsPanel({ value, onChange, onReset, disabled, compact
         </label>
       </div>
 
+      {showPlayOnSelect ? (
+        <div className="space-y-2">
+          <label className="block text-sm font-semibold text-text">When you play a search result</label>
+          <div className="space-y-2">
+            {PLAY_ON_SELECT_OPTIONS.map((option) => {
+              const active = value.play_on_select === option.value;
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  disabled={disabled}
+                  className={
+                    active
+                      ? "flex w-full flex-col items-start gap-0.5 rounded-lg border border-accent bg-accent/15 px-3 py-2.5 text-left"
+                      : "flex w-full flex-col items-start gap-0.5 rounded-lg border border-border bg-transparent px-3 py-2.5 text-left hover:bg-highlight"
+                  }
+                  onClick={() => onChange({ ...value, play_on_select: option.value })}
+                >
+                  <span className={active ? "text-sm font-medium text-accent" : "text-sm font-medium text-text"}>
+                    {option.label}
+                  </span>
+                  <span className="text-xs text-text-secondary">{option.hint}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
+
       {onReset ? (
         <Button type="button" variant="secondary" disabled={disabled} onClick={onReset}>
           Reset to defaults
@@ -104,6 +155,7 @@ export function isDefaultSearchOptions(options: SearchOptions): boolean {
     options.hide_covers === DEFAULT_SEARCH_OPTIONS.hide_covers &&
     options.hide_loops === DEFAULT_SEARCH_OPTIONS.hide_loops &&
     options.results_per_page === DEFAULT_SEARCH_OPTIONS.results_per_page &&
-    options.version_preference === DEFAULT_SEARCH_OPTIONS.version_preference
+    options.version_preference === DEFAULT_SEARCH_OPTIONS.version_preference &&
+    options.play_on_select === DEFAULT_SEARCH_OPTIONS.play_on_select
   );
 }

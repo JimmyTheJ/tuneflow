@@ -1,4 +1,4 @@
-import type { SearchOptions, SearchResultGroup } from "@/types";
+import type { SearchOptions, SearchPlayOnSelect, SearchResultGroup, Track } from "@/types";
 
 export const DEFAULT_SEARCH_OPTIONS: SearchOptions = {
   max_per_song: 3,
@@ -6,6 +6,7 @@ export const DEFAULT_SEARCH_OPTIONS: SearchOptions = {
   hide_loops: false,
   results_per_page: 20,
   version_preference: "auto",
+  play_on_select: "all_results",
 };
 
 export function mergeSearchGroups(
@@ -56,4 +57,14 @@ export function flattenGroupTracks(groups: SearchResultGroup[]) {
 
 export function primaryPlayQueue(groups: SearchResultGroup[]) {
   return groups.map((group) => group.primary).filter((track) => !track.blocked_reason);
+}
+
+/** Queue used when selecting a search result, based on household play_on_select. */
+export function queueForSearchPlay(
+  track: Track,
+  searchPrimaries: Track[],
+  mode: SearchPlayOnSelect = "all_results",
+): Track[] {
+  if (mode === "single_track") return [track];
+  return searchPrimaries.length > 0 ? searchPrimaries : [track];
 }

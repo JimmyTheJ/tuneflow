@@ -30,7 +30,6 @@ export function SearchResultGroupRow({
   const [expanded, setExpanded] = useState(false);
   const hasAlternates = group.alternates.length > 0;
   const groupTracks = [group.primary, ...group.alternates];
-  const playableGroup = groupTracks.filter((track) => !track.blocked_reason);
   const shownVersions = groupTracks.length;
   const withheldVersions = Math.max(0, (group.total_versions ?? shownVersions) - shownVersions);
 
@@ -49,7 +48,7 @@ export function SearchResultGroupRow({
           : formatSearchSubtitle(track)
       }
       disabled={!!track.blocked_reason}
-      onPlay={() => onPlayTrack(track, playableGroup.length > 0 ? playableGroup : playQueue)}
+      onPlay={() => onPlayTrack(track, playQueue.length > 0 ? playQueue : [track])}
       onLikedChange={onLikedChange}
       onPlaylistsChange={onPlaylistsChange}
       groupTracks={groupTracks}
