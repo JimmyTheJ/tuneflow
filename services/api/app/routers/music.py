@@ -1,3 +1,5 @@
+import json
+
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse, StreamingResponse
@@ -439,6 +441,8 @@ async def stream_artist(
             async for event in musicbrainz_client.stream_artist_detail(mbid):
                 yield json.dumps(event) + "\n"
         except httpx.HTTPError as exc:
+            yield json.dumps({"event": "error", "data": {"message": str(exc)}}) + "\n"
+        except Exception as exc:
             yield json.dumps({"event": "error", "data": {"message": str(exc)}}) + "\n"
 
     return StreamingResponse(event_stream(), media_type="application/x-ndjson")
