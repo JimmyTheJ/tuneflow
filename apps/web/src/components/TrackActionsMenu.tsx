@@ -83,7 +83,7 @@ export const TrackActionsMenu = forwardRef<TrackActionsMenuHandle, Props>(functi
 
   const showStatus = useCallback((message: string) => {
     setStatus(message);
-    window.setTimeout(() => setStatus(null), 2200);
+    window.setTimeout(() => setStatus(null), 1100);
   }, []);
 
   const openAt = useCallback((next: MenuPosition) => {
@@ -158,7 +158,7 @@ export const TrackActionsMenu = forwardRef<TrackActionsMenuHandle, Props>(functi
   const handleAddToQueue = () => {
     addToQueue(track);
     showStatus("Added to queue");
-    window.setTimeout(close, 1200);
+    window.setTimeout(close, 600);
   };
 
   const handleToggleLike = async () => {

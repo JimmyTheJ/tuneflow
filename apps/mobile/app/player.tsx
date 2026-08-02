@@ -130,7 +130,7 @@ export default function PlayerScreen() {
 
   const showStatus = (message: string) => {
     setStatus(message);
-    setTimeout(() => setStatus(null), 2200);
+    setTimeout(() => setStatus(null), 1100);
   };
 
   const openSaveToPlaylist = async () => {

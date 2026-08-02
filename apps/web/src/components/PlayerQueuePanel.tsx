@@ -46,7 +46,7 @@ export function PlayerQueuePanel({ onClose, className }: Props) {
 
   const showStatus = useCallback((message: string) => {
     setStatus(message);
-    window.setTimeout(() => setStatus(null), 2200);
+    window.setTimeout(() => setStatus(null), 1100);
   }, []);
 
   const openSaveToPlaylist = async () => {
