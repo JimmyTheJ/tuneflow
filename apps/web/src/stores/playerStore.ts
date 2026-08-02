@@ -44,7 +44,11 @@ type PlayerState = {
   playTrack: (
     track: Track,
     queue?: Track[],
-    options?: { fromNavigation?: boolean; queueSource?: QueueSource | null },
+    options?: {
+      fromNavigation?: boolean;
+      queueSource?: QueueSource | null;
+      resumeSec?: number;
+    },
   ) => Promise<void>;
   togglePlayback: () => void;
   setStreamSelection: (selection: Partial<StreamSelection>) => Promise<void>;
@@ -235,6 +239,10 @@ function snapshotFromState(state: PlayerState): PlayerSessionSnapshot | null {
     shuffleOrder: state.shuffleOrder,
     shuffleStep: state.shuffleStep,
     repeatMode: state.repeatMode,
+    queueSource: state.queueSource,
+    queueInsertIndex: state.queueInsertIndex,
+    positionSec: state.media?.currentTime ?? state.positionSec,
+    durationSec: state.durationSec,
   };
 }
 
@@ -520,7 +528,8 @@ function attachMediaListeners(
     "pause",
     () => {
       if (!shouldHandle()) return;
-      set({ isPlaying: false });
+      set({ isPlaying: false, ...syncProgress(media, track) });
+      persistSnapshot(get());
     },
     { signal },
   );
@@ -794,6 +803,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
   setQueueSource: (queueSource) => {
     set({ queueSource });
+    persistSnapshot(get());
     void syncEqPlayback();
   },
 
@@ -839,6 +849,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       set({ shuffle: false, shuffleOrder: [], shuffleStep: currentQueueIndex(state) });
       invalidatePrefetch();
       syncPrefetchWithQueue(get);
+      persistSnapshot(get());
       return;
     }
 
@@ -846,6 +857,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     const shuffleOrder = buildShuffleOrder(state.queue.length, queueIndex >= 0 ? queueIndex : 0);
     set({ shuffle: true, shuffleOrder, shuffleStep: 0 });
     syncPrefetchWithQueue(get);
+    persistSnapshot(get());
   },
 
   cycleRepeatMode: () => {
@@ -856,6 +868,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     };
     set({ repeatMode: next[get().repeatMode] });
     syncPrefetchWithQueue(get);
+    persistSnapshot(get());
   },
 
   playTrack: async (track, queue = [], options) => {
@@ -923,9 +936,10 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       queueSource: nextQueueSource,
       streamSelection: adopted?.selection ?? selection,
       error: null,
-      positionSec: 0,
+      positionSec: options?.resumeSec ?? 0,
       durationSec: track.duration_sec ?? 0,
     });
+    persistSnapshot(get());
 
     let pendingMedia: HTMLMediaElement | null = adopted?.media ?? null;
 
@@ -946,10 +960,14 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
           generation,
           set,
           get,
+          options?.resumeSec ?? 0,
         );
       } else {
         applyVolume(pendingMedia, get().volume, resolvedSelection);
         attachMediaListeners(pendingMedia, track, generation, set, get);
+        if ((options?.resumeSec ?? 0) > 0) {
+          pendingMedia.currentTime = options!.resumeSec!;
+        }
         await pendingMedia.play();
         if (!isActiveGeneration(generation)) {
           disposeMedia(pendingMedia);
@@ -1035,8 +1053,15 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   },
 
   togglePlayback: () => {
-    const { media, isPlaying } = get();
-    if (!media) return;
+    const { media, isPlaying, current, queue, positionSec } = get();
+    if (!media) {
+      if (!current) return;
+      void get().playTrack(current, queue.length > 0 ? queue : [current], {
+        fromNavigation: true,
+        resumeSec: positionSec > 0 ? positionSec : undefined,
+      });
+      return;
+    }
     if (isPlaying) media.pause();
     else void media.play();
   },
@@ -1067,8 +1092,16 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     resetTrackRetryCount();
     const action = resolvePreviousAction(get());
     if (action.type === "restart") {
-      const { media } = get();
-      if (!media) return;
+      const { media, current, queue } = get();
+      if (!media) {
+        if (current) {
+          await get().playTrack(current, queue.length > 0 ? queue : [current], {
+            fromNavigation: true,
+            resumeSec: 0,
+          });
+        }
+        return;
+      }
       media.currentTime = 0;
       set({ positionSec: 0 });
       return;
@@ -1129,46 +1162,82 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     }
 
     const orphan = findDetachedTuneflowMedia();
-    if (!orphan?.src) return false;
+    if (orphan?.src) {
+      const snapshot = loadPlayerSession();
+      const parsed = parseTrackFromMediaUrl(orphan.src);
+      const track = snapshot?.current ?? parsed?.track;
+      if (!track) return false;
 
+      const streamSelection =
+        snapshot?.streamSelection ?? parsed?.streamSelection ?? DEFAULT_SELECTION;
+      const generation = getPlayGeneration();
+
+      attachMediaListeners(orphan, track, generation, set, get);
+      applyVolume(orphan, state.volume, streamSelection);
+      setRuntimeMedia(orphan);
+
+      const nextState: Partial<PlayerState> = {
+        media: orphan,
+        current: track,
+        queue: snapshot?.queue ?? (state.queue.length > 0 ? state.queue : [track]),
+        stream: snapshot?.stream ?? null,
+        streamSelection,
+        shuffle: snapshot?.shuffle ?? state.shuffle,
+        shuffleOrder: snapshot?.shuffleOrder ?? state.shuffleOrder,
+        shuffleStep: snapshot?.shuffleStep ?? state.shuffleStep,
+        repeatMode: snapshot?.repeatMode ?? state.repeatMode,
+        queueSource: snapshot?.queueSource ?? state.queueSource,
+        queueInsertIndex: snapshot?.queueInsertIndex ?? state.queueInsertIndex,
+        isPlaying: !orphan.paused,
+        isLoading: false,
+        error: null,
+        ...syncProgress(orphan, track),
+      };
+      set(nextState);
+      persistSnapshot({ ...get(), ...nextState } as PlayerState);
+      void syncEqPlayback(orphan);
+      return true;
+    }
+
+    // Already hydrated in this tab — keep live queue state.
+    if (state.current) return true;
+
+    // Cold refresh: restore queue / now-playing UI without orphaned media.
     const snapshot = loadPlayerSession();
-    const parsed = parseTrackFromMediaUrl(orphan.src);
-    const track = snapshot?.current ?? parsed?.track;
-    if (!track) return false;
+    if (!snapshot?.current) return false;
 
-    const streamSelection = snapshot?.streamSelection ?? parsed?.streamSelection ?? DEFAULT_SELECTION;
-    const generation = getPlayGeneration();
+    const queue = snapshot.queue.length > 0 ? snapshot.queue : [snapshot.current];
+    const currentIndex = currentQueueIndex({ current: snapshot.current, queue });
+    const queueInsertIndex =
+      snapshot.queueInsertIndex ?? (currentIndex >= 0 ? currentIndex + 1 : 1);
 
-    attachMediaListeners(orphan, track, generation, set, get);
-    applyVolume(orphan, state.volume, streamSelection);
-    setRuntimeMedia(orphan);
-
-    const nextState: Partial<PlayerState> = {
-      media: orphan,
-      current: track,
-      queue: snapshot?.queue ?? [track],
-      stream: snapshot?.stream ?? null,
-      streamSelection,
-      shuffle: snapshot?.shuffle ?? false,
-      shuffleOrder: snapshot?.shuffleOrder ?? [],
-      shuffleStep: snapshot?.shuffleStep ?? 0,
-      repeatMode: snapshot?.repeatMode ?? "none",
-      isPlaying: !orphan.paused,
+    set({
+      media: null,
+      current: snapshot.current,
+      queue,
+      stream: snapshot.stream,
+      streamSelection: snapshot.streamSelection ?? DEFAULT_SELECTION,
+      shuffle: snapshot.shuffle,
+      shuffleOrder: snapshot.shuffleOrder,
+      shuffleStep: snapshot.shuffleStep,
+      repeatMode: snapshot.repeatMode,
+      queueSource: snapshot.queueSource ?? null,
+      queueInsertIndex,
+      positionSec: snapshot.positionSec ?? 0,
+      durationSec: snapshot.durationSec ?? snapshot.current.duration_sec ?? 0,
+      isPlaying: false,
       isLoading: false,
       error: null,
-      ...syncProgress(orphan, track),
-    };
-    set(nextState);
-    persistSnapshot({ ...get(), ...nextState } as PlayerState);
-    void syncEqPlayback(orphan);
+    });
+    persistSnapshot(get());
     return true;
   },
 
   stopOrphanedPlayback: () => {
-    nextPlayGeneration();
     const orphan = findDetachedTuneflowMedia();
     if (orphan) disposeMedia(orphan);
-    clearPlayerSession();
+    // Clear store + session together so a disconnected orphan stop cannot leave a stale queue.
+    get().stop();
   },
 
   playQueueIndex: async (queueIndex: number) => {
@@ -1338,6 +1407,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       }
 
       set({ queue: nextQueue, shuffleOrder });
+      persistSnapshot(get());
       return;
     }
 
@@ -1392,6 +1462,12 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 if (import.meta.hot) {
   import.meta.hot.accept(() => {
     usePlayerStore.getState().recoverSession();
+  });
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener("pagehide", () => {
+    persistSnapshot(usePlayerStore.getState());
   });
 }
 

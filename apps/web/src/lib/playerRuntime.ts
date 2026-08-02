@@ -1,4 +1,4 @@
-import type { StreamInfo, StreamSelection, Track } from "@/types";
+import type { QueueSource, StreamInfo, StreamSelection, Track } from "@/types";
 
 export type PlayerSessionSnapshot = {
   current: Track;
@@ -9,6 +9,10 @@ export type PlayerSessionSnapshot = {
   shuffleOrder: number[];
   shuffleStep: number;
   repeatMode: "none" | "one" | "all";
+  queueSource?: QueueSource | null;
+  queueInsertIndex?: number | null;
+  positionSec?: number;
+  durationSec?: number;
 };
 
 export type PlayerRuntime = {
@@ -62,11 +66,31 @@ export function savePlayerSession(snapshot: PlayerSessionSnapshot): void {
   }
 }
 
+function isValidSnapshot(value: unknown): value is PlayerSessionSnapshot {
+  if (!value || typeof value !== "object") return false;
+  const snapshot = value as Partial<PlayerSessionSnapshot>;
+  if (!snapshot.current || typeof snapshot.current.video_id !== "string") return false;
+  if (!Array.isArray(snapshot.queue)) return false;
+  if (!snapshot.streamSelection || typeof snapshot.streamSelection !== "object") return false;
+  if (typeof snapshot.shuffle !== "boolean") return false;
+  if (!Array.isArray(snapshot.shuffleOrder)) return false;
+  if (typeof snapshot.shuffleStep !== "number") return false;
+  if (snapshot.repeatMode !== "none" && snapshot.repeatMode !== "one" && snapshot.repeatMode !== "all") {
+    return false;
+  }
+  return true;
+}
+
 export function loadPlayerSession(): PlayerSessionSnapshot | null {
   try {
     const raw = sessionStorage.getItem(SESSION_KEY);
     if (!raw) return null;
-    return JSON.parse(raw) as PlayerSessionSnapshot;
+    const parsed: unknown = JSON.parse(raw);
+    if (!isValidSnapshot(parsed)) {
+      sessionStorage.removeItem(SESSION_KEY);
+      return null;
+    }
+    return parsed;
   } catch {
     return null;
   }
