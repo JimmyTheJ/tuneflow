@@ -27,7 +27,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     try {
       const user = await api.me();
       set({ user, isReady: true });
-      void useEqStore.getState().load();
+      void useEqStore.getState().load(user.id);
     } catch {
       clearAccessToken();
       useEqStore.getState().reset();
@@ -39,14 +39,14 @@ export const useAuthStore = create<AuthState>((set) => ({
     const res = await api.login(householdSlug, username, password);
     setAccessToken(res.access_token);
     set({ user: res.user });
-    void useEqStore.getState().load();
+    void useEqStore.getState().load(res.user.id);
   },
 
   setup: async (username, password, displayName) => {
     const res = await api.setup(username, password, displayName);
     setAccessToken(res.access_token);
     set({ user: res.user });
-    void useEqStore.getState().load();
+    void useEqStore.getState().load(res.user.id);
   },
 
   logout: () => {

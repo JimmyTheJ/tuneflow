@@ -9,7 +9,7 @@ type EqState = {
   playlistAssignments: Record<number, number>;
   loaded: boolean;
   enabled: boolean;
-  load: () => Promise<void>;
+  load: (userId?: number | null) => Promise<void>;
   reset: () => void;
   setEnabled: (enabled: boolean) => void;
   createProfile: (name: string, bands: EqBand[], preampDb?: number) => Promise<EqProfile>;
@@ -28,11 +28,30 @@ type EqState = {
   ensureTrackAssignment: (videoId: string) => Promise<void>;
 };
 
+const EQ_ENABLED_KEY_PREFIX = "tuneflow.eq.enabled.";
+
+function eqEnabledStorageKey(userId: number): string {
+  return `${EQ_ENABLED_KEY_PREFIX}${userId}`;
+}
+
+function readStoredEnabled(userId: number | null): boolean {
+  if (userId == null) return true;
+  const raw = localStorage.getItem(eqEnabledStorageKey(userId));
+  if (raw == null) return true;
+  return raw === "true";
+}
+
+function writeStoredEnabled(userId: number | null, enabled: boolean): void {
+  if (userId == null) return;
+  localStorage.setItem(eqEnabledStorageKey(userId), String(enabled));
+}
+
 function refreshPlaybackEq(): Promise<void> {
   return syncEqPlayback();
 }
 
 let loadPromise: Promise<void> | null = null;
+let preferenceUserId: number | null = null;
 
 export const useEqStore = create<EqState>((set, get) => ({
   profiles: [],
@@ -41,7 +60,8 @@ export const useEqStore = create<EqState>((set, get) => ({
   loaded: false,
   enabled: true,
 
-  load: async () => {
+  load: async (userId) => {
+    if (userId != null) preferenceUserId = userId;
     if (get().loaded) return;
     if (loadPromise) return loadPromise;
 
@@ -50,6 +70,7 @@ export const useEqStore = create<EqState>((set, get) => ({
       set({
         profiles,
         loaded: true,
+        enabled: readStoredEnabled(preferenceUserId),
       });
       await refreshPlaybackEq();
     })().finally(() => {
@@ -61,6 +82,7 @@ export const useEqStore = create<EqState>((set, get) => ({
 
   reset: () => {
     loadPromise = null;
+    preferenceUserId = null;
     set({
       profiles: [],
       trackAssignments: {},
@@ -72,6 +94,7 @@ export const useEqStore = create<EqState>((set, get) => ({
 
   setEnabled: (enabled) => {
     set({ enabled });
+    writeStoredEnabled(preferenceUserId, enabled);
     refreshPlaybackEq();
   },
 
