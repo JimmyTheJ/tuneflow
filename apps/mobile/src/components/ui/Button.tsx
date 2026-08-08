@@ -12,6 +12,14 @@ type Props = PressableProps & {
   children: ReactNode;
 };
 
+/** JSX like `Connect {name}` yields a string array; RN requires those inside <Text>. */
+function isTextOnlyChildren(children: ReactNode): boolean {
+  if (children == null || typeof children === "boolean") return true;
+  if (typeof children === "string" || typeof children === "number") return true;
+  if (Array.isArray(children)) return children.every(isTextOnlyChildren);
+  return false;
+}
+
 const variantClass: Record<Variant, string> = {
   primary: "bg-accent active:bg-accent-hover",
   secondary: "bg-highlight border border-border active:bg-hover",
@@ -57,7 +65,7 @@ export function Button({
     >
       {loading ? (
         <ActivityIndicator color={variant === "primary" ? "#052e16" : "#fff"} />
-      ) : typeof children === "string" ? (
+      ) : isTextOnlyChildren(children) ? (
         <Text className={`${textClass[variant]} ${textSizeClass[size]}`}>{children}</Text>
       ) : (
         children
