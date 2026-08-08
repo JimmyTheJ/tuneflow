@@ -1,10 +1,19 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { Audio } from "expo-av";
 import { create } from "zustand";
 
 import { api } from "@/lib/api";
 import { getAccessToken, getApiUrl } from "@/lib/settings";
 import { withRetry } from "@/lib/retry";
+import {
+  attachAudioEngineListeners,
+  ensureTrackPlayerSetup,
+  loadAndPlayTrack,
+  pauseAudioEngine,
+  resumeAudioEngine,
+  seekAudioEngine,
+  setAudioEngineVolume,
+  stopAudioEngine,
+} from "@/playback/trackPlayer";
 import type { StreamInfo, StreamSelection, Track } from "@/types";
 
 export type RepeatMode = "none" | "one" | "all";
@@ -32,9 +41,9 @@ type PlayerState = {
   shuffleOrder: number[];
   shuffleStep: number;
   repeatMode: RepeatMode;
-  sound: Audio.Sound | null;
   videoControls: VideoControls | null;
   error: string | null;
+  audioActive: boolean;
   playTrack: (track: Track, queue?: Track[], options?: { fromNavigation?: boolean }) => Promise<void>;
   togglePlayback: () => Promise<void>;
   setStreamSelection: (selection: Partial<StreamSelection>) => Promise<void>;
@@ -131,23 +140,14 @@ export async function refreshPlayerMediaConfig(): Promise<void> {
   accessTokenCache = await getAccessToken();
 }
 
-async function disposeSound(sound: Audio.Sound | null): Promise<void> {
-  if (!sound) return;
-  try {
-    await sound.stopAsync();
-  } catch {
-    /* already stopped */
-  }
-  try {
-    await sound.unloadAsync();
-  } catch {
-    /* already unloaded */
-  }
+async function disposeAudioEngine(): Promise<void> {
+  await stopAudioEngine();
 }
 
 let trackRetryCount = 0;
 let consecutiveSkipCount = 0;
 let handlingPlaybackFailure = false;
+let audioListenersReady = false;
 
 const MAX_TRACK_RETRIES = 1;
 const MAX_CONSECUTIVE_SKIPS = 15;
@@ -159,6 +159,39 @@ function resetPlaybackFailureState(): void {
 
 function resetTrackRetryCount(): void {
   trackRetryCount = 0;
+}
+
+function ensureAudioListeners(
+  get: () => PlayerState,
+  set: (partial: Partial<PlayerState>) => void,
+): void {
+  if (audioListenersReady) return;
+  audioListenersReady = true;
+  attachAudioEngineListeners({
+    onProgress: (positionSec, durationSec) => {
+      const state = get();
+      if (state.playbackKind !== "audio") return;
+      set({
+        positionSec,
+        ...(durationSec > 0 ? { durationSec } : {}),
+      });
+    },
+    onPlayingChange: (isPlaying) => {
+      const state = get();
+      if (state.playbackKind !== "audio") return;
+      set({ isPlaying });
+    },
+    onTrackEnded: () => {
+      const state = get();
+      if (state.playbackKind !== "audio") return;
+      void get().onTrackEnded();
+    },
+    onError: (message) => {
+      const state = get();
+      if (state.playbackKind !== "audio") return;
+      void handlePlaybackFailure(message, get, set);
+    },
+  });
 }
 
 async function handlePlaybackFailure(
@@ -174,11 +207,11 @@ async function handlePlaybackFailure(
     const current = state.current;
     const queue = state.queue;
 
-    await disposeSound(state.sound);
+    await disposeAudioEngine();
     state.videoControls?.pause().catch(() => undefined);
     invalidatePrefetch();
     set({
-      sound: null,
+      audioActive: false,
       mediaUrl: null,
       isLoading: false,
       isPlaying: false,
@@ -223,11 +256,7 @@ async function handlePlaybackFailure(
 }
 
 async function configureAudio() {
-  await Audio.setAudioModeAsync({
-    playsInSilentModeIOS: true,
-    staysActiveInBackground: true,
-    shouldDuckAndroid: true,
-  });
+  await ensureTrackPlayerSetup();
 }
 
 function currentQueueIndex(state: Pick<PlayerState, "current" | "queue">): number {
@@ -466,15 +495,12 @@ type PrefetchEntry = {
   selection: StreamSelection;
   mediaUrl: string;
   playbackKind: "audio" | "video";
-  sound: Audio.Sound | null;
 };
 
 let prefetchToken = 0;
 let prefetchEntry: PrefetchEntry | null = null;
 
 async function clearPrefetch(): Promise<void> {
-  if (!prefetchEntry) return;
-  await disposeSound(prefetchEntry.sound);
   prefetchEntry = null;
 }
 
@@ -546,32 +572,14 @@ async function prefetchNextTrack(get: () => PlayerState): Promise<void> {
     const mediaUrl = buildMediaUrl(stream, resolvedSelection);
     const playbackKind = resolvedSelection.video ? "video" : "audio";
 
-    let sound: Audio.Sound | null = null;
-    if (playbackKind === "audio") {
-      const created = await withRetry(
-        () => Audio.Sound.createAsync({ uri: mediaUrl }, { shouldPlay: false, volume: get().volume }),
-        {
-          maxAttempts: 2,
-          shouldRetry: (error) => error instanceof Error,
-        },
-      );
-      if (token !== prefetchToken) {
-        await disposeSound(created.sound);
-        return;
-      }
-      sound = created.sound;
-    }
-
     const latest = get();
     const latestTrack = expectedNextTrack(latest);
     if (!latestTrack || latestTrack.video_id !== track.video_id) {
-      await disposeSound(sound);
       return;
     }
 
     const latestSelection = normalizeSelection(latest.streamSelection, latest.stream);
     if (!selectionMatches(latestSelection, resolvedSelection)) {
-      await disposeSound(sound);
       return;
     }
 
@@ -581,7 +589,6 @@ async function prefetchNextTrack(get: () => PlayerState): Promise<void> {
       selection: resolvedSelection,
       mediaUrl,
       playbackKind,
-      sound,
     };
   } catch {
     /* prefetch failure is non-fatal */
@@ -593,47 +600,32 @@ function schedulePrefetchNext(get: () => PlayerState): void {
 }
 
 async function loadAudioPlayback(
+  track: Track,
   mediaUrl: string,
   generation: number,
   set: (partial: Partial<PlayerState>) => void,
   get: () => PlayerState,
   autoplay: boolean,
-): Promise<Audio.Sound | null> {
-  const { sound } = await withRetry(
+  positionSec = 0,
+): Promise<boolean> {
+  ensureAudioListeners(get, set);
+  await withRetry(
     () =>
-      Audio.Sound.createAsync(
-        { uri: mediaUrl },
-        { shouldPlay: autoplay, volume: get().volume },
-      ),
+      loadAndPlayTrack(track, mediaUrl, {
+        autoplay,
+        volume: get().volume,
+        positionSec,
+      }),
     {
       maxAttempts: 2,
       shouldRetry: (error) => error instanceof Error,
     },
   );
   if (!isActiveGeneration(generation)) {
-    await disposeSound(sound);
-    return null;
+    await disposeAudioEngine();
+    return false;
   }
-
-  sound.setOnPlaybackStatusUpdate((status) => {
-    if (!isActiveGeneration(generation)) return;
-    if (!status.isLoaded) {
-      if ("error" in status && status.error) {
-        void handlePlaybackFailure(status.error, get, set);
-      }
-      return;
-    }
-    set({
-      isPlaying: status.isPlaying,
-      positionSec: (status.positionMillis ?? 0) / 1000,
-      durationSec: (status.durationMillis ?? 0) / 1000 || get().durationSec,
-    });
-    if (status.didJustFinish) {
-      void get().onTrackEnded();
-    }
-  });
-
-  return sound;
+  return true;
 }
 
 export const usePlayerStore = create<PlayerState>((set, get) => ({
@@ -653,9 +645,9 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   shuffleOrder: [],
   shuffleStep: 0,
   repeatMode: "none",
-  sound: null,
   videoControls: null,
   error: null,
+  audioActive: false,
 
   clearError: () => set({ error: null }),
 
@@ -672,10 +664,9 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     const clamped = Math.max(0, Math.min(1, volume));
     storedVolume = clamped;
     void AsyncStorage.setItem(VOLUME_KEY, String(clamped));
-    const { sound } = get();
-    if (sound) {
+    if (get().audioActive && get().playbackKind === "audio") {
       try {
-        await sound.setVolumeAsync(clamped);
+        await setAudioEngineVolume(clamped);
       } catch {
         /* ignore */
       }
@@ -684,7 +675,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   },
 
   seek: async (seconds) => {
-    const { sound, videoControls, playbackKind, durationSec } = get();
+    const { videoControls, playbackKind, durationSec, audioActive } = get();
     const max = durationSec || 0;
     const clamped = max > 0 ? Math.max(0, Math.min(seconds, max)) : Math.max(0, seconds);
     set({ positionSec: clamped });
@@ -693,9 +684,9 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       await videoControls?.setPositionSec(clamped);
       return;
     }
-    if (!sound) return;
+    if (!audioActive) return;
     try {
-      await sound.setPositionAsync(clamped * 1000);
+      await seekAudioEngine(clamped);
     } catch {
       /* ignore */
     }
@@ -741,7 +732,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     }
 
     const generation = ++playGeneration;
-    await disposeSound(get().sound);
+    await disposeAudioEngine();
     get().videoControls?.pause().catch(() => undefined);
     await refreshPlayerMediaConfig();
 
@@ -776,7 +767,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     }
 
     set({
-      sound: null,
+      audioActive: false,
       mediaUrl: null,
       stream: null,
       isLoading: true,
@@ -801,51 +792,37 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       const resolvedSelection = adopted?.selection ?? normalizeSelection(selection, stream);
       const mediaUrl = adopted?.mediaUrl ?? buildMediaUrl(stream, resolvedSelection);
       const playbackKind = adopted?.playbackKind ?? (resolvedSelection.video ? "video" : "audio");
+      const playableTrack = { ...track, video_id: playableIdFromStream(stream) };
 
       if (playbackKind === "audio") {
-        let sound = adopted?.sound ?? null;
-        if (!sound) {
-          sound = await loadAudioPlayback(mediaUrl, generation, set, get, true);
-        } else {
-          sound.setOnPlaybackStatusUpdate((status) => {
-            if (!isActiveGeneration(generation)) return;
-            if (!status.isLoaded) {
-              if ("error" in status && status.error) {
-                void handlePlaybackFailure(status.error, get, set);
-              }
-              return;
-            }
-            set({
-              isPlaying: status.isPlaying,
-              positionSec: (status.positionMillis ?? 0) / 1000,
-              durationSec: (status.durationMillis ?? 0) / 1000 || get().durationSec,
-            });
-            if (status.didJustFinish) {
-              void get().onTrackEnded();
-            }
-          });
-          await sound.setVolumeAsync(get().volume);
-          await sound.playAsync();
-        }
-        if (!sound) return;
+        const loaded = await loadAudioPlayback(
+          playableTrack,
+          mediaUrl,
+          generation,
+          set,
+          get,
+          true,
+        );
+        if (!loaded) return;
         set({
-          sound,
+          audioActive: true,
           stream,
           mediaUrl,
           playbackKind,
           streamSelection: resolvedSelection,
-          current: { ...track, video_id: playableIdFromStream(stream) },
+          current: playableTrack,
           isPlaying: true,
           isLoading: false,
         });
       } else {
+        await disposeAudioEngine();
         set({
-          sound: null,
+          audioActive: false,
           stream,
           mediaUrl,
           playbackKind,
           streamSelection: resolvedSelection,
-          current: { ...track, video_id: playableIdFromStream(stream) },
+          current: playableTrack,
           isPlaying: true,
           isLoading: false,
         });
@@ -862,7 +839,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   },
 
   setStreamSelection: async (patch) => {
-    const { current, stream, streamSelection, sound, videoControls, isPlaying, positionSec } = get();
+    const { current, stream, streamSelection, videoControls, isPlaying, positionSec } = get();
     if (!current || !stream) return;
 
     const nextSelection = normalizeSelection({ ...streamSelection, ...patch }, stream);
@@ -881,21 +858,38 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
         ? (videoControls?.getPositionSec() ?? positionSec)
         : positionSec;
 
-    await disposeSound(sound);
+    await disposeAudioEngine();
     videoControls?.pause().catch(() => undefined);
 
     const mediaUrl = buildMediaUrl(stream, nextSelection);
     const playbackKind = nextSelection.video ? "video" : "audio";
-    set({ sound: null, mediaUrl, playbackKind, streamSelection: nextSelection, isLoading: true, error: null });
+    set({
+      audioActive: false,
+      mediaUrl,
+      playbackKind,
+      streamSelection: nextSelection,
+      isLoading: true,
+      error: null,
+    });
 
     try {
       if (playbackKind === "audio") {
-        const nextSound = await loadAudioPlayback(mediaUrl, generation, set, get, isPlaying);
-        if (!nextSound) return;
-        if (resumeSec > 0) {
-          await nextSound.setPositionAsync(resumeSec * 1000);
-        }
-        set({ sound: nextSound, isLoading: false, isPlaying, positionSec: resumeSec });
+        const loaded = await loadAudioPlayback(
+          current,
+          mediaUrl,
+          generation,
+          set,
+          get,
+          isPlaying,
+          resumeSec,
+        );
+        if (!loaded) return;
+        set({
+          audioActive: true,
+          isLoading: false,
+          isPlaying,
+          positionSec: resumeSec,
+        });
       } else {
         if (resumeSec > 0) {
           await videoControls?.setPositionSec(resumeSec);
@@ -903,7 +897,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
         if (isPlaying) {
           await videoControls?.play();
         }
-        set({ sound: null, isLoading: false, isPlaying, positionSec: resumeSec });
+        set({ audioActive: false, isLoading: false, isPlaying, positionSec: resumeSec });
       }
       schedulePrefetchNext(get);
     } catch (error) {
@@ -914,7 +908,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   },
 
   togglePlayback: async () => {
-    const { playbackKind, sound, videoControls, isPlaying } = get();
+    const { playbackKind, videoControls, isPlaying, audioActive } = get();
     if (playbackKind === "video") {
       if (!videoControls) return;
       if (isPlaying) await videoControls.pause();
@@ -922,17 +916,17 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       set({ isPlaying: !isPlaying });
       return;
     }
-    if (!sound) return;
-    if (isPlaying) await sound.pauseAsync();
-    else await sound.playAsync();
+    if (!audioActive) return;
+    if (isPlaying) await pauseAudioEngine();
+    else await resumeAudioEngine();
   },
 
   onTrackEnded: async () => {
     if (get().repeatMode === "one") {
       await get().seek(0);
-      const { playbackKind, sound, videoControls } = get();
+      const { playbackKind, videoControls, audioActive } = get();
       if (playbackKind === "video") await videoControls?.play();
-      else await sound?.playAsync();
+      else if (audioActive) await resumeAudioEngine();
       set({ isPlaying: true });
       return;
     }
@@ -969,9 +963,9 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     const action = resolveNextAction(get());
     if (action.type === "repeat-one") {
       await get().seek(0);
-      const { playbackKind, sound, videoControls } = get();
+      const { playbackKind, videoControls, audioActive } = get();
       if (playbackKind === "video") await videoControls?.play();
-      else await sound?.playAsync();
+      else if (audioActive) await resumeAudioEngine();
       set({ isPlaying: true });
       return;
     }
@@ -1187,10 +1181,10 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   stop: async () => {
     playGeneration += 1;
     invalidatePrefetch();
-    await disposeSound(get().sound);
+    await disposeAudioEngine();
     get().videoControls?.pause().catch(() => undefined);
     set({
-      sound: null,
+      audioActive: false,
       current: null,
       stream: null,
       mediaUrl: null,

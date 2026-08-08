@@ -28,6 +28,9 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       supportsTablet: true,
       bundleIdentifier: "com.tuneflow.app",
       buildNumber: String(versionCode),
+      infoPlist: {
+        UIBackgroundModes: ["audio"],
+      },
     },
     android: {
       adaptiveIcon: {
@@ -35,9 +38,16 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       },
       package: "com.tuneflow.app",
       versionCode,
+      permissions: [
+        "WAKE_LOCK",
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_MEDIA_PLAYBACK",
+        "POST_NOTIFICATIONS",
+      ],
     },
     plugins: [
       "expo-router",
+      "expo-font",
       [
         "expo-build-properties",
         {
