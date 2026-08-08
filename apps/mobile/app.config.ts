@@ -17,6 +17,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     slug: "tuneflow",
     version: versionName,
     orientation: "portrait",
+    icon: "./assets/icon.png",
     scheme: "tuneflow",
     userInterfaceStyle: "dark",
     newArchEnabled: process.env.TUNEFLOW_DEV_BUILD === "1" ? false : true,
@@ -34,6 +35,8 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     },
     android: {
       adaptiveIcon: {
+        foregroundImage: "./assets/adaptive-icon.png",
+        monochromeImage: "./assets/monochrome-icon.png",
         backgroundColor: "#0a0a0a",
       },
       package: "com.tuneflow.app",
