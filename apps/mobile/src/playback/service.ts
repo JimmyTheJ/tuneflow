@@ -37,14 +37,10 @@ export async function playbackService(): Promise<void> {
   });
 
   TrackPlayer.addEventListener(Event.RemoteDuck, (event) => {
+    // Transient ducks (notifications, nav prompts) should not leave us paused.
+    // Permanent loss of audio focus still pauses.
     if (event.permanent) {
       void TrackPlayer.pause();
-      return;
-    }
-    if (event.paused) {
-      void TrackPlayer.pause();
-    } else {
-      void TrackPlayer.play();
     }
   });
 }

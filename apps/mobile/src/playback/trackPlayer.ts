@@ -14,6 +14,10 @@ import { trackThumbnailUrl } from "@/lib/thumbnails";
 
 let setupPromise: Promise<void> | null = null;
 let listenersAttached = false;
+let bufferingSince: number | null = null;
+let bufferingWatchdog: ReturnType<typeof setInterval> | null = null;
+
+const BUFFERING_STALL_MS = 45_000;
 
 export type AudioEngineHandlers = {
   onProgress: (positionSec: number, durationSec: number) => void;
@@ -57,6 +61,12 @@ export async function ensureTrackPlayerSetup(): Promise<void> {
       await ensureNotificationPermission();
       try {
         await TrackPlayer.setupPlayer({
+          // Cover long tracks even if a remote URL is used as a fallback.
+          minBuffer: 30,
+          maxBuffer: 600,
+          playBuffer: 5,
+          backBuffer: 30,
+          maxCacheSize: 1024 * 120,
           autoHandleInterruptions: true,
           iosCategory: IOSCategory.Playback,
           iosCategoryMode: IOSCategoryMode.Default,
@@ -73,7 +83,8 @@ export async function ensureTrackPlayerSetup(): Promise<void> {
       await TrackPlayer.updateOptions({
         android: {
           appKilledPlaybackBehavior: AppKilledPlaybackBehavior.ContinuePlayback,
-          alwaysPauseOnInterruption: true,
+          // Prefer transient ducking over hard pause; permanent ducks still pause in the service.
+          alwaysPauseOnInterruption: false,
         },
         capabilities: [
           Capability.Play,
@@ -99,6 +110,24 @@ export async function ensureTrackPlayerSetup(): Promise<void> {
   await setupPromise;
 }
 
+function clearBufferingWatchdog(): void {
+  bufferingSince = null;
+  if (bufferingWatchdog) {
+    clearInterval(bufferingWatchdog);
+    bufferingWatchdog = null;
+  }
+}
+
+function ensureBufferingWatchdog(onStall: () => void): void {
+  if (bufferingWatchdog) return;
+  bufferingWatchdog = setInterval(() => {
+    if (bufferingSince == null) return;
+    if (Date.now() - bufferingSince < BUFFERING_STALL_MS) return;
+    bufferingSince = null;
+    onStall();
+  }, 5_000);
+}
+
 export function attachAudioEngineListeners(handlers: AudioEngineHandlers): () => void {
   if (listenersAttached) {
     return () => undefined;
@@ -112,7 +141,15 @@ export function attachAudioEngineListeners(handlers: AudioEngineHandlers): () =>
   const stateSub = TrackPlayer.addEventListener(Event.PlaybackState, (event) => {
     const state = event.state;
     if (state === State.Playing) {
+      clearBufferingWatchdog();
       handlers.onPlayingChange(true);
+      return;
+    }
+    if (state === State.Buffering || state === State.Loading) {
+      if (bufferingSince == null) bufferingSince = Date.now();
+      ensureBufferingWatchdog(() => {
+        handlers.onError("Playback stalled while buffering");
+      });
       return;
     }
     if (
@@ -122,15 +159,18 @@ export function attachAudioEngineListeners(handlers: AudioEngineHandlers): () =>
       state === State.None ||
       state === State.Ended
     ) {
+      clearBufferingWatchdog();
       handlers.onPlayingChange(false);
     }
   });
 
   const endedSub = TrackPlayer.addEventListener(Event.PlaybackQueueEnded, () => {
+    clearBufferingWatchdog();
     handlers.onTrackEnded();
   });
 
   const errorSub = TrackPlayer.addEventListener(Event.PlaybackError, (event) => {
+    clearBufferingWatchdog();
     handlers.onError(event.message || "Playback failed");
   });
 
@@ -139,6 +179,7 @@ export function attachAudioEngineListeners(handlers: AudioEngineHandlers): () =>
     stateSub.remove();
     endedSub.remove();
     errorSub.remove();
+    clearBufferingWatchdog();
     listenersAttached = false;
   };
 }
@@ -149,6 +190,7 @@ export async function loadAndPlayTrack(
   options: { autoplay: boolean; volume: number; positionSec?: number },
 ): Promise<void> {
   await ensureTrackPlayerSetup();
+  clearBufferingWatchdog();
   await TrackPlayer.reset();
   await TrackPlayer.add(toPlayerTrack(track, url));
   await TrackPlayer.setVolume(options.volume);
@@ -161,6 +203,7 @@ export async function loadAndPlayTrack(
 }
 
 export async function stopAudioEngine(): Promise<void> {
+  clearBufferingWatchdog();
   try {
     await TrackPlayer.reset();
   } catch {

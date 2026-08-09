@@ -14,6 +14,7 @@ import {
   setAudioEngineVolume,
   stopAudioEngine,
 } from "@/playback/trackPlayer";
+import { cancelActiveAudioDownload, resolveLocalAudioUri } from "@/playback/localAudioCache";
 import type { StreamInfo, StreamSelection, Track } from "@/types";
 
 export type RepeatMode = "none" | "one" | "all";
@@ -141,6 +142,7 @@ export async function refreshPlayerMediaConfig(): Promise<void> {
 }
 
 async function disposeAudioEngine(): Promise<void> {
+  await cancelActiveAudioDownload();
   await stopAudioEngine();
 }
 
@@ -215,16 +217,17 @@ async function handlePlaybackFailure(
       mediaUrl: null,
       isLoading: false,
       isPlaying: false,
-      error: null,
+      error: reason,
     });
 
     if (!current) {
-      set({ error: reason, isPlaying: false });
+      set({ isPlaying: false });
       return;
     }
 
     if (trackRetryCount < MAX_TRACK_RETRIES) {
       trackRetryCount += 1;
+      set({ error: null });
       await get().playTrack(current, queue, { fromNavigation: true });
       return;
     }
@@ -233,7 +236,7 @@ async function handlePlaybackFailure(
     const hasNext = resolveNextAction(state).type === "track";
     if (!hasNext) {
       consecutiveSkipCount = 0;
-      set({ error: reason, isPlaying: false });
+      set({ isPlaying: false });
       return;
     }
 
@@ -243,6 +246,7 @@ async function handlePlaybackFailure(
       return;
     }
     consecutiveSkipCount += 1;
+    set({ error: null });
 
     const currentIndex = currentQueueIndex(state);
     if (currentIndex >= 0) {
@@ -572,6 +576,15 @@ async function prefetchNextTrack(get: () => PlayerState): Promise<void> {
     const mediaUrl = buildMediaUrl(stream, resolvedSelection);
     const playbackKind = resolvedSelection.video ? "video" : "audio";
 
+    if (playbackKind === "audio") {
+      try {
+        await resolveLocalAudioUri(track.video_id, mediaUrl, () => token === prefetchToken);
+      } catch {
+        /* prefetch download failure is non-fatal */
+      }
+      if (token !== prefetchToken) return;
+    }
+
     const latest = get();
     const latestTrack = expectedNextTrack(latest);
     if (!latestTrack || latestTrack.video_id !== track.video_id) {
@@ -609,9 +622,18 @@ async function loadAudioPlayback(
   positionSec = 0,
 ): Promise<boolean> {
   ensureAudioListeners(get, set);
+
+  const localUri = await resolveLocalAudioUri(track.video_id, mediaUrl, () =>
+    isActiveGeneration(generation),
+  );
+  if (!isActiveGeneration(generation)) {
+    await disposeAudioEngine();
+    return false;
+  }
+
   await withRetry(
     () =>
-      loadAndPlayTrack(track, mediaUrl, {
+      loadAndPlayTrack(track, localUri, {
         autoplay,
         volume: get().volume,
         positionSec,
@@ -834,6 +856,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     } catch (error) {
       if (!isActiveGeneration(generation)) return;
       const message = error instanceof Error ? error.message : "Playback failed";
+      if (message === "Playback cancelled") return;
       await handlePlaybackFailure(message, get, set);
     }
   },

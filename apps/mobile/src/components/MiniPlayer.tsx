@@ -14,6 +14,7 @@ export function MiniPlayer() {
   const isLoading = usePlayerStore((state) => state.isLoading);
   const positionSec = usePlayerStore((state) => state.positionSec);
   const durationSec = usePlayerStore((state) => state.durationSec);
+  const error = usePlayerStore((state) => state.error);
   const canNext = usePlayerStore((state) => canPlayNext(state));
   const togglePlayback = usePlayerStore((state) => state.togglePlayback);
   const playNext = usePlayerStore((state) => state.playNext);
@@ -49,8 +50,11 @@ export function MiniPlayer() {
           <Text className="text-[15px] font-semibold text-text" numberOfLines={1}>
             {current.title}
           </Text>
-          <Text className="text-[13px] text-text-secondary" numberOfLines={1}>
-            {current.artist ?? "Unknown artist"}
+          <Text
+            className={`text-[13px] ${error ? "text-red-400" : "text-text-secondary"}`}
+            numberOfLines={1}
+          >
+            {error ?? current.artist ?? "Unknown artist"}
           </Text>
         </View>
         <LikeButton track={current} size="sm" />
