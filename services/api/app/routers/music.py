@@ -697,7 +697,8 @@ async def stream_video(
         iter_bytes(),
         media_type=media_type,
         headers={
-            "Accept-Ranges": "bytes",
+            # Do not advertise byte ranges: this endpoint is a progressive pipe and
+            # ExoPlayer/expo-av can hang if they issue Range requests against it.
             "Cache-Control": "no-store",
         },
     )

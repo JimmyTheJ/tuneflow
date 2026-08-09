@@ -43,12 +43,16 @@ type PlayerState = {
   shuffleStep: number;
   repeatMode: RepeatMode;
   videoControls: VideoControls | null;
+  /** Seek target applied once the video surface finishes loading. */
+  videoResumeSec: number | null;
   error: string | null;
   audioActive: boolean;
   playTrack: (track: Track, queue?: Track[], options?: { fromNavigation?: boolean }) => Promise<void>;
   togglePlayback: () => Promise<void>;
   setStreamSelection: (selection: Partial<StreamSelection>) => Promise<void>;
   registerVideoControls: (controls: VideoControls | null) => void;
+  consumeVideoResumeSec: () => number | null;
+  markVideoReady: () => void;
   seek: (seconds: number) => Promise<void>;
   setVolume: (volume: number) => Promise<void>;
   toggleShuffle: () => void;
@@ -112,14 +116,21 @@ function buildMediaUrl(stream: StreamInfo, selection: StreamSelection): string {
   const playableId = playableIdFromStream(stream);
 
   if (selection.video) {
-    const query = new URLSearchParams({ token });
-    if (!selection.audio) {
-      query.set("video_only", "true");
-    }
+    // Always request video-only for the expo-av surface. Sound stays on
+    // react-native-track-player so the two engines do not fight for audio focus.
+    const query = new URLSearchParams({ token, video_only: "true" });
     return `${base}/api/music/video/${playableId}?${query.toString()}`;
   }
 
   return `${base}/api/music/audio/${playableId}?token=${token}`;
+}
+
+function buildAudioUrl(stream: StreamInfo): string {
+  return buildMediaUrl(stream, { video: false, audio: true });
+}
+
+function buildVideoSurfaceUrl(stream: StreamInfo): string {
+  return buildMediaUrl(stream, { video: true, audio: false });
 }
 
 let apiUrlCache = "http://localhost:8000";
@@ -172,7 +183,8 @@ function ensureAudioListeners(
   attachAudioEngineListeners({
     onProgress: (positionSec, durationSec) => {
       const state = get();
-      if (state.playbackKind !== "audio") return;
+      // TrackPlayer owns timing whenever audio is active (including dual video+audio).
+      if (!state.audioActive) return;
       set({
         positionSec,
         ...(durationSec > 0 ? { durationSec } : {}),
@@ -180,17 +192,17 @@ function ensureAudioListeners(
     },
     onPlayingChange: (isPlaying) => {
       const state = get();
-      if (state.playbackKind !== "audio") return;
+      if (!state.audioActive) return;
       set({ isPlaying });
     },
     onTrackEnded: () => {
       const state = get();
-      if (state.playbackKind !== "audio") return;
+      if (!state.audioActive) return;
       void get().onTrackEnded();
     },
     onError: (message) => {
       const state = get();
-      if (state.playbackKind !== "audio") return;
+      if (!state.audioActive) return;
       void handlePlaybackFailure(message, get, set);
     },
   });
@@ -573,12 +585,14 @@ async function prefetchNextTrack(get: () => PlayerState): Promise<void> {
     if (token !== prefetchToken) return;
 
     const resolvedSelection = normalizeSelection(selection, stream);
-    const mediaUrl = buildMediaUrl(stream, resolvedSelection);
     const playbackKind = resolvedSelection.video ? "video" : "audio";
+    const mediaUrl = resolvedSelection.video
+      ? buildVideoSurfaceUrl(stream)
+      : buildAudioUrl(stream);
 
-    if (playbackKind === "audio") {
+    if (resolvedSelection.audio) {
       try {
-        await resolveLocalAudioUri(track.video_id, mediaUrl, () => token === prefetchToken);
+        await resolveLocalAudioUri(track.video_id, buildAudioUrl(stream), () => token === prefetchToken);
       } catch {
         /* prefetch download failure is non-fatal */
       }
@@ -668,6 +682,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   shuffleStep: 0,
   repeatMode: "none",
   videoControls: null,
+  videoResumeSec: null,
   error: null,
   audioActive: false,
 
@@ -682,11 +697,23 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
   registerVideoControls: (controls) => set({ videoControls: controls }),
 
+  consumeVideoResumeSec: () => {
+    const resume = get().videoResumeSec;
+    if (resume != null) set({ videoResumeSec: null });
+    return resume;
+  },
+
+  markVideoReady: () => {
+    if (get().isLoading && get().playbackKind === "video" && !get().audioActive) {
+      set({ isLoading: false });
+    }
+  },
+
   setVolume: async (volume) => {
     const clamped = Math.max(0, Math.min(1, volume));
     storedVolume = clamped;
     void AsyncStorage.setItem(VOLUME_KEY, String(clamped));
-    if (get().audioActive && get().playbackKind === "audio") {
+    if (get().audioActive) {
       try {
         await setAudioEngineVolume(clamped);
       } catch {
@@ -702,15 +729,15 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     const clamped = max > 0 ? Math.max(0, Math.min(seconds, max)) : Math.max(0, seconds);
     set({ positionSec: clamped });
 
+    if (audioActive) {
+      try {
+        await seekAudioEngine(clamped);
+      } catch {
+        /* ignore */
+      }
+    }
     if (playbackKind === "video") {
       await videoControls?.setPositionSec(clamped);
-      return;
-    }
-    if (!audioActive) return;
-    try {
-      await seekAudioEngine(clamped);
-    } catch {
-      /* ignore */
     }
   },
 
@@ -812,14 +839,15 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       if (!isActiveGeneration(generation)) return;
 
       const resolvedSelection = adopted?.selection ?? normalizeSelection(selection, stream);
-      const mediaUrl = adopted?.mediaUrl ?? buildMediaUrl(stream, resolvedSelection);
-      const playbackKind = adopted?.playbackKind ?? (resolvedSelection.video ? "video" : "audio");
+      const playbackKind = resolvedSelection.video ? "video" : "audio";
       const playableTrack = { ...track, video_id: playableIdFromStream(stream) };
+      const audioUrl = buildAudioUrl(stream);
+      const videoUrl = buildVideoSurfaceUrl(stream);
 
-      if (playbackKind === "audio") {
+      if (resolvedSelection.audio) {
         const loaded = await loadAudioPlayback(
           playableTrack,
-          mediaUrl,
+          audioUrl,
           generation,
           set,
           get,
@@ -829,24 +857,26 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
         set({
           audioActive: true,
           stream,
-          mediaUrl,
+          mediaUrl: playbackKind === "video" ? videoUrl : audioUrl,
           playbackKind,
           streamSelection: resolvedSelection,
           current: playableTrack,
           isPlaying: true,
           isLoading: false,
+          videoResumeSec: playbackKind === "video" ? 0 : null,
         });
       } else {
         await disposeAudioEngine();
         set({
           audioActive: false,
           stream,
-          mediaUrl,
-          playbackKind,
+          mediaUrl: videoUrl,
+          playbackKind: "video",
           streamSelection: resolvedSelection,
           current: playableTrack,
           isPlaying: true,
-          isLoading: false,
+          isLoading: true,
+          videoResumeSec: 0,
         });
       }
 
@@ -862,7 +892,8 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   },
 
   setStreamSelection: async (patch) => {
-    const { current, stream, streamSelection, videoControls, isPlaying, positionSec } = get();
+    const { current, stream, streamSelection, videoControls, isPlaying, positionSec, audioActive } =
+      get();
     if (!current || !stream) return;
 
     const nextSelection = normalizeSelection({ ...streamSelection, ...patch }, stream);
@@ -881,46 +912,66 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
         ? (videoControls?.getPositionSec() ?? positionSec)
         : positionSec;
 
-    await disposeAudioEngine();
     videoControls?.pause().catch(() => undefined);
 
-    const mediaUrl = buildMediaUrl(stream, nextSelection);
     const playbackKind = nextSelection.video ? "video" : "audio";
+    const audioUrl = buildAudioUrl(stream);
+    const videoUrl = buildVideoSurfaceUrl(stream);
+
     set({
-      audioActive: false,
-      mediaUrl,
+      mediaUrl: playbackKind === "video" ? videoUrl : audioUrl,
       playbackKind,
       streamSelection: nextSelection,
       isLoading: true,
       error: null,
+      videoResumeSec: playbackKind === "video" ? resumeSec : null,
     });
 
     try {
-      if (playbackKind === "audio") {
-        const loaded = await loadAudioPlayback(
-          current,
-          mediaUrl,
-          generation,
-          set,
-          get,
-          isPlaying,
-          resumeSec,
-        );
-        if (!loaded) return;
+      if (nextSelection.audio) {
+        // Keep or start TrackPlayer for sound; video (if any) is a muted surface only.
+        if (!audioActive) {
+          const loaded = await loadAudioPlayback(
+            current,
+            audioUrl,
+            generation,
+            set,
+            get,
+            isPlaying,
+            resumeSec,
+          );
+          if (!loaded) return;
+        } else if (resumeSec > 0) {
+          try {
+            await seekAudioEngine(resumeSec);
+          } catch {
+            /* ignore */
+          }
+        }
+
+        if (!isActiveGeneration(generation)) return;
         set({
           audioActive: true,
+          mediaUrl: playbackKind === "video" ? videoUrl : audioUrl,
+          playbackKind,
           isLoading: false,
           isPlaying,
           positionSec: resumeSec,
+          videoResumeSec: playbackKind === "video" ? resumeSec : null,
         });
       } else {
-        if (resumeSec > 0) {
-          await videoControls?.setPositionSec(resumeSec);
-        }
-        if (isPlaying) {
-          await videoControls?.play();
-        }
-        set({ audioActive: false, isLoading: false, isPlaying, positionSec: resumeSec });
+        await disposeAudioEngine();
+        if (!isActiveGeneration(generation)) return;
+        const videoAlreadyReady = Boolean(get().videoControls);
+        set({
+          audioActive: false,
+          mediaUrl: videoUrl,
+          playbackKind: "video",
+          isLoading: !videoAlreadyReady,
+          isPlaying,
+          positionSec: resumeSec,
+          videoResumeSec: resumeSec,
+        });
       }
       schedulePrefetchNext(get);
     } catch (error) {
@@ -932,24 +983,34 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
   togglePlayback: async () => {
     const { playbackKind, videoControls, isPlaying, audioActive } = get();
-    if (playbackKind === "video") {
-      if (!videoControls) return;
-      if (isPlaying) await videoControls.pause();
-      else await videoControls.play();
+
+    if (audioActive) {
+      if (isPlaying) await pauseAudioEngine();
+      else await resumeAudioEngine();
+      if (playbackKind === "video") {
+        if (isPlaying) await videoControls?.pause();
+        else await videoControls?.play();
+      }
       set({ isPlaying: !isPlaying });
       return;
     }
-    if (!audioActive) return;
-    if (isPlaying) await pauseAudioEngine();
-    else await resumeAudioEngine();
+
+    if (playbackKind === "video") {
+      // Video surface may not be mounted yet (controls null); still flip intended state.
+      if (videoControls) {
+        if (isPlaying) await videoControls.pause();
+        else await videoControls.play();
+      }
+      set({ isPlaying: !isPlaying });
+    }
   },
 
   onTrackEnded: async () => {
     if (get().repeatMode === "one") {
       await get().seek(0);
       const { playbackKind, videoControls, audioActive } = get();
-      if (playbackKind === "video") await videoControls?.play();
-      else if (audioActive) await resumeAudioEngine();
+      if (audioActive) await resumeAudioEngine();
+      else if (playbackKind === "video") await videoControls?.play();
       set({ isPlaying: true });
       return;
     }
@@ -987,8 +1048,8 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     if (action.type === "repeat-one") {
       await get().seek(0);
       const { playbackKind, videoControls, audioActive } = get();
-      if (playbackKind === "video") await videoControls?.play();
-      else if (audioActive) await resumeAudioEngine();
+      if (audioActive) await resumeAudioEngine();
+      else if (playbackKind === "video") await videoControls?.play();
       set({ isPlaying: true });
       return;
     }
@@ -1221,6 +1282,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       shuffleOrder: [],
       shuffleStep: 0,
       streamSelection: DEFAULT_SELECTION,
+      videoResumeSec: null,
       error: null,
     });
   },

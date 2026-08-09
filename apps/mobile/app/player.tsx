@@ -35,11 +35,14 @@ export default function PlayerScreen() {
   const shuffle = usePlayerStore((state) => state.shuffle);
   const repeatMode = usePlayerStore((state) => state.repeatMode);
   const queue = usePlayerStore((state) => state.queue);
+  const audioActive = usePlayerStore((state) => state.audioActive);
   const canPrevious = usePlayerStore((state) => canPlayPrevious(state));
   const canNext = usePlayerStore((state) => canPlayNext(state));
   const togglePlayback = usePlayerStore((state) => state.togglePlayback);
   const setStreamSelection = usePlayerStore((state) => state.setStreamSelection);
   const registerVideoControls = usePlayerStore((state) => state.registerVideoControls);
+  const consumeVideoResumeSec = usePlayerStore((state) => state.consumeVideoResumeSec);
+  const markVideoReady = usePlayerStore((state) => state.markVideoReady);
   const playNext = usePlayerStore((state) => state.playNext);
   const playPrevious = usePlayerStore((state) => state.playPrevious);
   const seek = usePlayerStore((state) => state.seek);
@@ -50,6 +53,7 @@ export default function PlayerScreen() {
   const reportProgress = usePlayerStore((state) => state.reportProgress);
   const videoRef = useRef<Video>(null);
   const positionRef = useRef(0);
+  const appliedResumeForUrl = useRef<string | null>(null);
   const [artFailed, setArtFailed] = useState(false);
   const [seeking, setSeeking] = useState(false);
   const [seekValue, setSeekValue] = useState(0);
@@ -71,6 +75,10 @@ export default function PlayerScreen() {
   }, [registerVideoControls]);
 
   useEffect(() => {
+    appliedResumeForUrl.current = null;
+  }, [mediaUrl]);
+
+  useEffect(() => {
     if (playbackKind !== "video" || !isPlaying) return;
     void videoRef.current?.playAsync();
   }, [playbackKind, mediaUrl, isPlaying]);
@@ -78,11 +86,31 @@ export default function PlayerScreen() {
   const onVideoStatus = (status: AVPlaybackStatus) => {
     if (!status.isLoaded) {
       if ("error" in status && status.error) {
+        // Video is decorative when TrackPlayer owns sound — don't tear down playback.
+        if (usePlayerStore.getState().audioActive) {
+          markVideoReady();
+          return;
+        }
         void usePlayerStore.getState().onPlaybackError(status.error);
       }
       return;
     }
+
     positionRef.current = (status.positionMillis ?? 0) / 1000;
+    markVideoReady();
+
+    if (mediaUrl && appliedResumeForUrl.current !== mediaUrl) {
+      const resume = consumeVideoResumeSec();
+      appliedResumeForUrl.current = mediaUrl;
+      if (resume != null && resume > 0.5) {
+        void videoRef.current?.setPositionAsync(resume * 1000);
+        positionRef.current = resume;
+      }
+    }
+
+    // When TrackPlayer owns audio, it also owns progress and track-end.
+    if (audioActive) return;
+
     reportProgress(
       positionRef.current,
       status.durationMillis != null ? status.durationMillis / 1000 : undefined,
@@ -149,6 +177,7 @@ export default function PlayerScreen() {
         <View className="items-center px-6">
           {playbackKind === "video" && mediaUrl ? (
             <Video
+              key={mediaUrl}
               ref={videoRef}
               source={{ uri: mediaUrl }}
               style={{
@@ -159,9 +188,10 @@ export default function PlayerScreen() {
                 marginBottom: 28,
               }}
               resizeMode={ResizeMode.CONTAIN}
-              isMuted={!streamSelection.audio}
+              // Sound always comes from TrackPlayer when Audio is enabled.
+              isMuted
               shouldPlay={isPlaying}
-              useNativeControls
+              progressUpdateIntervalMillis={audioActive ? 1000 : 250}
               onPlaybackStatusUpdate={onVideoStatus}
             />
           ) : artFailed ? (
