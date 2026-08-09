@@ -5,22 +5,20 @@ import { router } from "expo-router";
 import { Video, ResizeMode, type AVPlaybackStatus } from "expo-av";
 import { useEffect, useRef, useState } from "react";
 import { Image, Pressable, Text, View } from "react-native";
+import { NestableScrollContainer } from "react-native-draggable-flatlist";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { LikeButton } from "@/components/ui/LikeButton";
 import { IconButton } from "@/components/ui/IconButton";
-import { PlaylistPickerModal } from "@/components/PlaylistPickerModal";
+import { PlayerQueuePanel } from "@/components/PlayerQueuePanel";
 import { formatDuration } from "@/lib/time";
 import { trackThumbnailUrl } from "@/lib/thumbnails";
-import { api } from "@/lib/api";
 import {
   canPlayNext,
   canPlayPrevious,
-  getQueueView,
   usePlayerStore,
   type RepeatMode,
 } from "@/stores/player";
-import type { Playlist } from "@/types";
 
 export default function PlayerScreen() {
   const insets = useSafeAreaInsets();
@@ -35,8 +33,6 @@ export default function PlayerScreen() {
   const durationSec = usePlayerStore((state) => state.durationSec);
   const volume = usePlayerStore((state) => state.volume);
   const shuffle = usePlayerStore((state) => state.shuffle);
-  const shuffleOrder = usePlayerStore((state) => state.shuffleOrder);
-  const shuffleStep = usePlayerStore((state) => state.shuffleStep);
   const repeatMode = usePlayerStore((state) => state.repeatMode);
   const queue = usePlayerStore((state) => state.queue);
   const canPrevious = usePlayerStore((state) => canPlayPrevious(state));
@@ -57,9 +53,6 @@ export default function PlayerScreen() {
   const [artFailed, setArtFailed] = useState(false);
   const [seeking, setSeeking] = useState(false);
   const [seekValue, setSeekValue] = useState(0);
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const [playlists, setPlaylists] = useState<Playlist[]>([]);
-  const [status, setStatus] = useState<string | null>(null);
 
   useEffect(() => {
     registerVideoControls({
@@ -119,29 +112,6 @@ export default function PlayerScreen() {
     repeatMode === "one" ? "repeat" : "repeat";
   const repeatActive = repeatMode !== "none";
 
-  const queueItems = getQueueView({
-    current,
-    queue,
-    shuffle,
-    shuffleOrder,
-    shuffleStep,
-  });
-  const queueTracks = queueItems.map((item) => item.track);
-
-  const showStatus = (message: string) => {
-    setStatus(message);
-    setTimeout(() => setStatus(null), 1100);
-  };
-
-  const openSaveToPlaylist = async () => {
-    try {
-      setPlaylists(await api.listPlaylists());
-      setPickerOpen(true);
-    } catch (err) {
-      showStatus(err instanceof Error ? err.message : "Could not load playlists");
-    }
-  };
-
   return (
     <View className="flex-1 bg-base" style={{ paddingTop: insets.top }}>
       <Image
@@ -172,192 +142,174 @@ export default function PlayerScreen() {
         />
       </View>
 
-      <View className="flex-1 items-center px-6 pb-6">
-        {playbackKind === "video" && mediaUrl ? (
-          <Video
-            ref={videoRef}
-            source={{ uri: mediaUrl }}
-            style={{ width: "100%", aspectRatio: 1, borderRadius: 20, backgroundColor: "#000", marginBottom: 28 }}
-            resizeMode={ResizeMode.CONTAIN}
-            isMuted={!streamSelection.audio}
-            shouldPlay={isPlaying}
-            useNativeControls
-            onPlaybackStatusUpdate={onVideoStatus}
-          />
-        ) : artFailed ? (
-          <View className="mb-7 aspect-square w-[78%] items-center justify-center rounded-2xl bg-highlight">
-            <Ionicons name="musical-notes" size={64} color="#6a6a6a" />
-          </View>
-        ) : (
-          <Image
-            source={{ uri: artUrl }}
-            className="mb-7 aspect-square w-[78%] rounded-2xl bg-highlight"
-            style={{ width: "78%", aspectRatio: 1, borderRadius: 20, marginBottom: 28 }}
-            onError={() => setArtFailed(true)}
-          />
-        )}
-
-        <View className="w-full flex-row items-center gap-3">
-          <View className="min-w-0 flex-1">
-            <Text className="text-2xl font-bold text-text" numberOfLines={2}>
-              {current.title}
-            </Text>
-            <Text className="mt-1 text-lg text-text-secondary" numberOfLines={1}>
-              {current.artist ?? "Unknown artist"}
-            </Text>
-          </View>
-          <LikeButton track={current} size="lg" />
-        </View>
-
-        <View className="mt-5 flex-row gap-1 rounded-full bg-elevated p-1">
-          <Pressable
-            className={`rounded-full px-4 py-2 ${streamSelection.audio ? "bg-highlight" : ""}`}
-            disabled={isLoading || (streamSelection.audio && !streamSelection.video)}
-            onPress={() => void setStreamSelection({ audio: !streamSelection.audio })}
-          >
-            <Text className="text-sm font-semibold text-text">Audio</Text>
-          </Pressable>
-          <Pressable
-            className={`rounded-full px-4 py-2 ${streamSelection.video ? "bg-highlight" : ""} ${videoDisabled ? "opacity-40" : ""}`}
-            disabled={isLoading || videoDisabled || (streamSelection.video && !streamSelection.audio)}
-            onPress={() => void setStreamSelection({ video: !streamSelection.video })}
-          >
-            <Text className="text-sm font-semibold text-text">Video</Text>
-          </Pressable>
-        </View>
-
-        <View className="mt-6 w-full">
-          <Slider
-            minimumValue={0}
-            maximumValue={max || 1}
-            value={Math.min(displayPosition, max || 1)}
-            disabled={max <= 0}
-            minimumTrackTintColor="#1db954"
-            maximumTrackTintColor="#3a3a3a"
-            thumbTintColor="#fff"
-            onSlidingStart={() => {
-              setSeeking(true);
-              setSeekValue(positionSec);
-            }}
-            onValueChange={(value) => setSeekValue(value)}
-            onSlidingComplete={(value) => {
-              setSeeking(false);
-              void seek(value);
-            }}
-          />
-          <View className="mt-1 flex-row justify-between">
-            <Text className="text-xs tabular-nums text-text-muted">
-              {formatDuration(displayPosition)}
-            </Text>
-            <Text className="text-xs tabular-nums text-text-muted">
-              {formatDuration(durationSec)}
-            </Text>
-          </View>
-        </View>
-
-        <View className="mt-4 w-full flex-row items-center justify-center gap-5">
-          <IconButton
-            name="shuffle"
-            label={shuffle ? "Shuffle on" : "Shuffle off"}
-            active={shuffle}
-            disabled={queue.length <= 1}
-            onPress={() => toggleShuffle()}
-          />
-          <IconButton
-            name="play-skip-back"
-            label="Previous"
-            color="#fff"
-            size="lg"
-            disabled={!canPrevious}
-            onPress={() => void playPrevious()}
-          />
-          <Pressable
-            accessibilityLabel={isPlaying ? "Pause" : "Play"}
-            disabled={isLoading}
-            onPress={() => void togglePlayback()}
-            className="h-16 w-16 items-center justify-center rounded-full bg-text active:opacity-90"
-          >
-            <Ionicons
-              name={isLoading ? "hourglass-outline" : isPlaying ? "pause" : "play"}
-              size={32}
-              color="#0a0a0a"
-              style={isPlaying || isLoading ? undefined : { marginLeft: 3 }}
+      <NestableScrollContainer
+        style={{ flex: 1 }}
+        contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 24) }}
+      >
+        <View className="items-center px-6">
+          {playbackKind === "video" && mediaUrl ? (
+            <Video
+              ref={videoRef}
+              source={{ uri: mediaUrl }}
+              style={{
+                width: "100%",
+                aspectRatio: 1,
+                borderRadius: 20,
+                backgroundColor: "#000",
+                marginBottom: 28,
+              }}
+              resizeMode={ResizeMode.CONTAIN}
+              isMuted={!streamSelection.audio}
+              shouldPlay={isPlaying}
+              useNativeControls
+              onPlaybackStatusUpdate={onVideoStatus}
             />
-          </Pressable>
-          <IconButton
-            name="play-skip-forward"
-            label="Next"
-            color="#fff"
-            size="lg"
-            disabled={!canNext}
-            onPress={() => void playNext()}
-          />
-          <IconButton
-            name={repeatIcon}
-            label={repeatLabel(repeatMode)}
-            active={repeatActive}
-            onPress={() => cycleRepeatMode()}
-          />
-        </View>
-        {repeatMode === "one" ? (
-          <Text className="-mt-1 text-center text-[10px] font-bold text-accent">1</Text>
-        ) : (
-          <View className="h-3" />
-        )}
+          ) : artFailed ? (
+            <View className="mb-7 aspect-square w-[78%] items-center justify-center rounded-2xl bg-highlight">
+              <Ionicons name="musical-notes" size={64} color="#6a6a6a" />
+            </View>
+          ) : (
+            <Image
+              source={{ uri: artUrl }}
+              className="mb-7 aspect-square w-[78%] rounded-2xl bg-highlight"
+              style={{ width: "78%", aspectRatio: 1, borderRadius: 20, marginBottom: 28 }}
+              onError={() => setArtFailed(true)}
+            />
+          )}
 
-        <View className="mt-4 w-full flex-row items-center gap-3">
-          <Ionicons
-            name={volume === 0 ? "volume-mute" : volume < 0.5 ? "volume-low" : "volume-high"}
-            size={18}
-            color="#b3b3b3"
-          />
-          <Slider
-            style={{ flex: 1 }}
-            minimumValue={0}
-            maximumValue={1}
-            value={volume}
-            minimumTrackTintColor="#1db954"
-            maximumTrackTintColor="#3a3a3a"
-            thumbTintColor="#fff"
-            onValueChange={(value) => void setVolume(value)}
-          />
-          {queueTracks.length > 0 ? (
+          <View className="w-full flex-row items-center gap-3">
+            <View className="min-w-0 flex-1">
+              <Text className="text-2xl font-bold text-text" numberOfLines={2}>
+                {current.title}
+              </Text>
+              <Text className="mt-1 text-lg text-text-secondary" numberOfLines={1}>
+                {current.artist ?? "Unknown artist"}
+              </Text>
+            </View>
+            <LikeButton track={current} size="lg" />
+          </View>
+
+          <View className="mt-5 flex-row gap-1 rounded-full bg-elevated p-1">
+            <Pressable
+              className={`rounded-full px-4 py-2 ${streamSelection.audio ? "bg-highlight" : ""}`}
+              disabled={isLoading || (streamSelection.audio && !streamSelection.video)}
+              onPress={() => void setStreamSelection({ audio: !streamSelection.audio })}
+            >
+              <Text className="text-sm font-semibold text-text">Audio</Text>
+            </Pressable>
+            <Pressable
+              className={`rounded-full px-4 py-2 ${streamSelection.video ? "bg-highlight" : ""} ${videoDisabled ? "opacity-40" : ""}`}
+              disabled={
+                isLoading || videoDisabled || (streamSelection.video && !streamSelection.audio)
+              }
+              onPress={() => void setStreamSelection({ video: !streamSelection.video })}
+            >
+              <Text className="text-sm font-semibold text-text">Video</Text>
+            </Pressable>
+          </View>
+
+          <View className="mt-6 w-full">
+            <Slider
+              minimumValue={0}
+              maximumValue={max || 1}
+              value={Math.min(displayPosition, max || 1)}
+              disabled={max <= 0}
+              minimumTrackTintColor="#1db954"
+              maximumTrackTintColor="#3a3a3a"
+              thumbTintColor="#fff"
+              onSlidingStart={() => {
+                setSeeking(true);
+                setSeekValue(positionSec);
+              }}
+              onValueChange={(value) => setSeekValue(value)}
+              onSlidingComplete={(value) => {
+                setSeeking(false);
+                void seek(value);
+              }}
+            />
+            <View className="mt-1 flex-row justify-between">
+              <Text className="text-xs tabular-nums text-text-muted">
+                {formatDuration(displayPosition)}
+              </Text>
+              <Text className="text-xs tabular-nums text-text-muted">
+                {formatDuration(durationSec)}
+              </Text>
+            </View>
+          </View>
+
+          <View className="mt-4 w-full flex-row items-center justify-center gap-5">
             <IconButton
-              name="bookmark-outline"
-              label="Save queue to playlist"
-              color="#fff"
-              onPress={() => void openSaveToPlaylist()}
+              name="shuffle"
+              label={shuffle ? "Shuffle on" : "Shuffle off"}
+              active={shuffle}
+              disabled={queue.length <= 1}
+              onPress={() => toggleShuffle()}
             />
-          ) : null}
-          <IconButton
-            name="list"
-            label="Open queue"
-            color="#fff"
-            onPress={() => router.push("/queue")}
-          />
-        </View>
-        {status ? (
-          <Text className="mt-2 text-center text-sm text-accent" role="status">
-            {status}
-          </Text>
-        ) : null}
-      </View>
+            <IconButton
+              name="play-skip-back"
+              label="Previous"
+              color="#fff"
+              size="lg"
+              disabled={!canPrevious}
+              onPress={() => void playPrevious()}
+            />
+            <Pressable
+              accessibilityLabel={isPlaying ? "Pause" : "Play"}
+              disabled={isLoading}
+              onPress={() => void togglePlayback()}
+              className="h-16 w-16 items-center justify-center rounded-full bg-text active:opacity-90"
+            >
+              <Ionicons
+                name={isLoading ? "hourglass-outline" : isPlaying ? "pause" : "play"}
+                size={32}
+                color="#0a0a0a"
+                style={isPlaying || isLoading ? undefined : { marginLeft: 3 }}
+              />
+            </Pressable>
+            <IconButton
+              name="play-skip-forward"
+              label="Next"
+              color="#fff"
+              size="lg"
+              disabled={!canNext}
+              onPress={() => void playNext()}
+            />
+            <IconButton
+              name={repeatIcon}
+              label={repeatLabel(repeatMode)}
+              active={repeatActive}
+              onPress={() => cycleRepeatMode()}
+            />
+          </View>
+          {repeatMode === "one" ? (
+            <Text className="-mt-1 text-center text-[10px] font-bold text-accent">1</Text>
+          ) : (
+            <View className="h-3" />
+          )}
 
-      <PlaylistPickerModal
-        visible={pickerOpen}
-        title="Save queue to playlist"
-        tracks={queueTracks}
-        playlists={playlists}
-        onClose={() => setPickerOpen(false)}
-        onComplete={showStatus}
-        onPlaylistsChange={async () => {
-          try {
-            setPlaylists(await api.listPlaylists());
-          } catch {
-            /* ignore */
-          }
-        }}
-      />
+          <View className="mt-4 w-full flex-row items-center gap-3">
+            <Ionicons
+              name={volume === 0 ? "volume-mute" : volume < 0.5 ? "volume-low" : "volume-high"}
+              size={18}
+              color="#b3b3b3"
+            />
+            <Slider
+              style={{ flex: 1 }}
+              minimumValue={0}
+              maximumValue={1}
+              value={volume}
+              minimumTrackTintColor="#1db954"
+              maximumTrackTintColor="#3a3a3a"
+              thumbTintColor="#fff"
+              onValueChange={(value) => void setVolume(value)}
+            />
+          </View>
+        </View>
+
+        <View className="px-5">
+          <PlayerQueuePanel embedded />
+        </View>
+      </NestableScrollContainer>
     </View>
   );
 }

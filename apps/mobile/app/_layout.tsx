@@ -1,7 +1,10 @@
 import "../global.css";
+import { Ionicons } from "@expo/vector-icons";
+import { useFonts } from "expo-font";
 import { Stack, router, useSegments, type Href } from "expo-router";
 import { useEffect } from "react";
 import { ActivityIndicator, View } from "react-native";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 
 import { useAuthStore } from "@/stores/auth";
 import { useBootstrapStore } from "@/stores/bootstrap";
@@ -9,6 +12,7 @@ import { useBootstrapStore } from "@/stores/bootstrap";
 const SERVER_ROUTE = "/(auth)/server" as Href;
 
 export default function RootLayout() {
+  const [fontsLoaded] = useFonts(Ionicons.font);
   const hydrate = useAuthStore((state) => state.hydrate);
   const user = useAuthStore((state) => state.user);
   const isReady = useAuthStore((state) => state.isReady);
@@ -26,7 +30,7 @@ export default function RootLayout() {
   }, [runServerCheck]);
 
   useEffect(() => {
-    if (!isReady || serverCheck === "pending") {
+    if (!fontsLoaded || !isReady || serverCheck === "pending") {
       return;
     }
 
@@ -57,9 +61,9 @@ export default function RootLayout() {
     if (user && inAuth && !onServer) {
       router.replace("/(tabs)");
     }
-  }, [isReady, serverCheck, needsSetup, user, segments]);
+  }, [fontsLoaded, isReady, serverCheck, needsSetup, user, segments]);
 
-  if (!isReady || serverCheck === "pending") {
+  if (!fontsLoaded || !isReady || serverCheck === "pending") {
     return (
       <View className="flex-1 items-center justify-center bg-base">
         <ActivityIndicator color="#1db954" size="large" />
@@ -76,21 +80,23 @@ export default function RootLayout() {
   };
 
   return (
-    <Stack
-      screenOptions={{
-        headerShown: false,
-        contentStyle: { backgroundColor: "#0a0a0a" },
-      }}
-    >
-      <Stack.Screen name="(auth)" />
-      <Stack.Screen name="(tabs)" />
-      <Stack.Screen name="player" options={{ presentation: "modal" }} />
-      <Stack.Screen name="queue" options={{ ...headerOptions, presentation: "modal", title: "Queue" }} />
-      <Stack.Screen name="family" options={{ ...headerOptions, title: "Family" }} />
-      <Stack.Screen name="parental" options={{ ...headerOptions, title: "Parental controls" }} />
-      <Stack.Screen name="playlist/[id]" options={{ ...headerOptions, title: "Playlist" }} />
-      <Stack.Screen name="artist/[id]" options={{ ...headerOptions, title: "Artist" }} />
-      <Stack.Screen name="album/[id]" options={{ ...headerOptions, title: "Album" }} />
-    </Stack>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <Stack
+        screenOptions={{
+          headerShown: false,
+          contentStyle: { backgroundColor: "#0a0a0a" },
+        }}
+      >
+        <Stack.Screen name="(auth)" />
+        <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="player" options={{ presentation: "modal" }} />
+        <Stack.Screen name="queue" options={{ ...headerOptions, presentation: "modal", title: "Queue" }} />
+        <Stack.Screen name="family" options={{ ...headerOptions, title: "Family" }} />
+        <Stack.Screen name="parental" options={{ ...headerOptions, title: "Parental controls" }} />
+        <Stack.Screen name="playlist/[id]" options={{ ...headerOptions, title: "Playlist" }} />
+        <Stack.Screen name="artist/[id]" options={{ ...headerOptions, title: "Artist" }} />
+        <Stack.Screen name="album/[id]" options={{ ...headerOptions, title: "Album" }} />
+      </Stack>
+    </GestureHandlerRootView>
   );
 }
