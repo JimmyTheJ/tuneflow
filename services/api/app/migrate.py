@@ -246,3 +246,117 @@ async def run_migrations() -> None:
             await conn.execute(
                 text("CREATE INDEX ix_user_channel_pins_user_id ON user_channel_pins (user_id)")
             )
+
+        import_jobs_result = await conn.execute(
+            text("SELECT name FROM sqlite_master WHERE type='table' AND name='import_jobs'")
+        )
+        if import_jobs_result.fetchone() is None:
+            await conn.execute(
+                text(
+                    """
+                    CREATE TABLE import_jobs (
+                        id INTEGER NOT NULL PRIMARY KEY,
+                        user_id INTEGER NOT NULL,
+                        provider VARCHAR(20) NOT NULL,
+                        status VARCHAR(20) NOT NULL DEFAULT 'queued',
+                        source_url TEXT,
+                        source_external_id VARCHAR(120),
+                        requested_name VARCHAR(200),
+                        visibility VARCHAR(20) NOT NULL DEFAULT 'private',
+                        progress_done INTEGER NOT NULL DEFAULT 0,
+                        progress_total INTEGER NOT NULL DEFAULT 0,
+                        message VARCHAR(500),
+                        error TEXT,
+                        result_playlist_id INTEGER,
+                        options_json TEXT NOT NULL DEFAULT '{}',
+                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                        finished_at DATETIME,
+                        FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE
+                    )
+                    """
+                )
+            )
+            await conn.execute(text("CREATE INDEX ix_import_jobs_user_id ON import_jobs (user_id)"))
+            await conn.execute(
+                text("CREATE INDEX ix_import_jobs_result_playlist_id ON import_jobs (result_playlist_id)")
+            )
+
+        playlist_columns = await conn.execute(text("PRAGMA table_info(playlists)"))
+        playlist_cols = {row[1] for row in playlist_columns.fetchall()}
+        if playlist_cols:
+            if "visibility" not in playlist_cols:
+                await conn.execute(
+                    text("ALTER TABLE playlists ADD COLUMN visibility VARCHAR(20) NOT NULL DEFAULT 'private'")
+                )
+            if "source_type" not in playlist_cols:
+                await conn.execute(
+                    text("ALTER TABLE playlists ADD COLUMN source_type VARCHAR(20) NOT NULL DEFAULT 'manual'")
+                )
+            if "source_url" not in playlist_cols:
+                await conn.execute(text("ALTER TABLE playlists ADD COLUMN source_url TEXT"))
+            if "source_external_id" not in playlist_cols:
+                await conn.execute(text("ALTER TABLE playlists ADD COLUMN source_external_id VARCHAR(120)"))
+            if "import_job_id" not in playlist_cols:
+                await conn.execute(text("ALTER TABLE playlists ADD COLUMN import_job_id INTEGER"))
+                await conn.execute(
+                    text("CREATE INDEX IF NOT EXISTS ix_playlists_import_job_id ON playlists (import_job_id)")
+                )
+
+        track_columns = await conn.execute(text("PRAGMA table_info(playlist_tracks)"))
+        track_cols = {row[1] for row in track_columns.fetchall()}
+        if track_cols and "match_status" not in track_cols:
+            await conn.execute(text("DROP INDEX IF EXISTS uq_playlist_video"))
+            await conn.execute(
+                text(
+                    """
+                    CREATE TABLE playlist_tracks_new (
+                        id INTEGER NOT NULL PRIMARY KEY,
+                        playlist_id INTEGER NOT NULL,
+                        video_id VARCHAR(20),
+                        title VARCHAR(500) NOT NULL,
+                        artist VARCHAR(300),
+                        thumbnail_url TEXT,
+                        duration_sec INTEGER,
+                        position INTEGER NOT NULL DEFAULT 0,
+                        match_status VARCHAR(20) NOT NULL DEFAULT 'matched',
+                        match_score INTEGER,
+                        source_title VARCHAR(500),
+                        source_artist VARCHAR(300),
+                        source_duration_ms INTEGER,
+                        source_spotify_id VARCHAR(64),
+                        added_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                        FOREIGN KEY(playlist_id) REFERENCES playlists (id) ON DELETE CASCADE
+                    )
+                    """
+                )
+            )
+            await conn.execute(
+                text(
+                    """
+                    INSERT INTO playlist_tracks_new (
+                        id, playlist_id, video_id, title, artist, thumbnail_url, duration_sec,
+                        position, match_status, match_score, source_title, source_artist,
+                        source_duration_ms, source_spotify_id, added_at
+                    )
+                    SELECT
+                        id, playlist_id, video_id, title, artist, thumbnail_url, duration_sec,
+                        position, 'matched', NULL, NULL, NULL, NULL, NULL, added_at
+                    FROM playlist_tracks
+                    """
+                )
+            )
+            await conn.execute(text("DROP TABLE playlist_tracks"))
+            await conn.execute(text("ALTER TABLE playlist_tracks_new RENAME TO playlist_tracks"))
+            await conn.execute(
+                text("CREATE INDEX IF NOT EXISTS ix_playlist_tracks_playlist_id ON playlist_tracks (playlist_id)")
+            )
+            await conn.execute(
+                text("CREATE INDEX IF NOT EXISTS ix_playlist_tracks_video_id ON playlist_tracks (video_id)")
+            )
+            await conn.execute(
+                text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_playlist_video "
+                    "ON playlist_tracks (playlist_id, video_id) WHERE video_id IS NOT NULL"
+                )
+            )

@@ -1,7 +1,8 @@
-import { Heart, Plus, Search } from "lucide-react";
+import { Download, Heart, Plus, Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { MediaCard } from "@/components/MediaCard";
 import { CreatePlaylistDialog } from "@/components/CreatePlaylistDialog";
+import { ImportPlaylistWizard } from "@/components/ImportPlaylistWizard";
 import { TrackRowWithActions } from "@/components/TrackRowWithActions";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
@@ -15,11 +16,13 @@ import type { LikeEntry, Playlist } from "@/types";
 
 export function LibraryPage() {
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
+  const [householdPlaylists, setHouseholdPlaylists] = useState<Playlist[]>([]);
   const [likes, setLikes] = useState<LikeEntry[]>([]);
   const [playlistQuery, setPlaylistQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [createOpen, setCreateOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [createBusy, setCreateBusy] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const playTrack = usePlayerStore((s) => s.playTrack);
@@ -28,9 +31,14 @@ export function LibraryPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [p, l] = await Promise.all([api.listPlaylists(), api.listLikes()]);
-      setPlaylists(p);
-      setLikes(l);
+      const [mine, household, liked] = await Promise.all([
+        api.listPlaylists("mine"),
+        api.listPlaylists("household"),
+        api.listLikes(),
+      ]);
+      setPlaylists(mine);
+      setHouseholdPlaylists(household);
+      setLikes(liked);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load library");
@@ -46,6 +54,11 @@ export function LibraryPage() {
   const filteredPlaylists = useMemo(
     () => filterPlaylists(playlists, playlistQuery),
     [playlists, playlistQuery],
+  );
+
+  const filteredHousehold = useMemo(
+    () => filterPlaylists(householdPlaylists, playlistQuery),
+    [householdPlaylists, playlistQuery],
   );
 
   const createPlaylist = async (name: string) => {
@@ -66,17 +79,23 @@ export function LibraryPage() {
     <div className="space-y-8">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="m-0 text-3xl font-bold tracking-tight md:text-4xl">Your library</h1>
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={() => {
-            setCreateError(null);
-            setCreateOpen(true);
-          }}
-        >
-          <Plus className="size-4" />
-          New playlist
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="secondary" size="sm" onClick={() => setImportOpen(true)}>
+            <Download className="size-4" />
+            Import
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => {
+              setCreateError(null);
+              setCreateOpen(true);
+            }}
+          >
+            <Plus className="size-4" />
+            New playlist
+          </Button>
+        </div>
       </div>
 
       {error ? <p className="text-danger-fg">{error}</p> : null}
@@ -91,7 +110,7 @@ export function LibraryPage() {
         <>
           <section>
             <SectionHeader title="Playlists" />
-            {playlists.length > 0 ? (
+            {playlists.length > 0 || householdPlaylists.length > 0 ? (
               <div className="relative mb-4 max-w-md">
                 <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-text-muted" />
                 <Input
@@ -121,7 +140,7 @@ export function LibraryPage() {
                 <MediaCard
                   key={p.id}
                   title={p.name}
-                  subtitle={`${p.track_count} tracks`}
+                  subtitle={`${p.track_count} tracks${p.visibility === "household" ? " · Household" : ""}`}
                   href={`/playlist/${p.id}`}
                 />
               ))}
@@ -130,6 +149,22 @@ export function LibraryPage() {
               <p className="mt-3 text-sm text-text-muted">No playlists match your search.</p>
             ) : null}
           </section>
+
+          {householdPlaylists.length > 0 ? (
+            <section>
+              <SectionHeader title="Household playlists" />
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+                {filteredHousehold.map((p) => (
+                  <MediaCard
+                    key={p.id}
+                    title={p.name}
+                    subtitle={`${p.track_count} tracks · ${p.owner_display_name ?? "Household"}`}
+                    href={`/playlist/${p.id}`}
+                  />
+                ))}
+              </div>
+            </section>
+          ) : null}
 
           <section>
             <SectionHeader title="Liked songs" subtitle={`${likes.length} songs`} />
@@ -173,6 +208,13 @@ export function LibraryPage() {
           if (createBusy) return;
           setCreateOpen(false);
           setCreateError(null);
+        }}
+      />
+      <ImportPlaylistWizard
+        visible={importOpen}
+        onClose={() => {
+          setImportOpen(false);
+          void load();
         }}
       />
     </div>

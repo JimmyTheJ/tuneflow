@@ -201,32 +201,58 @@ class ChildProfile(BaseModel):
 class PlaylistCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     description: str | None = None
+    visibility: Literal["private", "household"] = "private"
 
 
 class PlaylistUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
     description: str | None = None
+    visibility: Literal["private", "household"] | None = None
 
 
 class PlaylistTrackCreate(TrackBase):
     position: int | None = None
 
 
-class PlaylistTrackRead(TrackBase):
+class PlaylistTrackRead(BaseModel):
     id: int
+    video_id: str | None = None
+    title: str
+    artist: str | None = None
+    thumbnail_url: str | None = None
+    duration_sec: int | None = None
     position: int
     added_at: datetime
+    match_status: Literal["pending", "matched", "unmatched"] = "matched"
+    match_score: int | None = None
+    source_title: str | None = None
+    source_artist: str | None = None
+    source_duration_ms: int | None = None
+    source_spotify_id: str | None = None
 
     model_config = {"from_attributes": True}
+
+
+class PlaylistMatchSummary(BaseModel):
+    matched: int = 0
+    unmatched: int = 0
+    pending: int = 0
 
 
 class PlaylistRead(BaseModel):
     id: int
     name: str
     description: str | None
+    visibility: Literal["private", "household"] = "private"
+    source_type: Literal["manual", "youtube", "spotify"] = "manual"
+    source_url: str | None = None
+    owner_id: int | None = None
+    owner_display_name: str | None = None
+    is_owner: bool = True
     created_at: datetime
     updated_at: datetime
     track_count: int = 0
+    match_summary: PlaylistMatchSummary | None = None
 
     model_config = {"from_attributes": True}
 
@@ -246,6 +272,40 @@ class DeletedPlaylistRead(BaseModel):
     owner_display_name: str
     owner_username: str
     expires_at: datetime | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class ImportJobCreate(BaseModel):
+    provider: Literal["youtube", "spotify"]
+    url: str = Field(min_length=8, max_length=2000)
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    visibility: Literal["private", "household"] = "private"
+
+
+class ImportJobRead(BaseModel):
+    id: int
+    provider: Literal["youtube", "spotify"]
+    status: Literal["queued", "running", "completed", "failed", "cancelled"]
+    source_url: str | None = None
+    source_external_id: str | None = None
+    requested_name: str | None = None
+    visibility: Literal["private", "household"]
+    progress_done: int = 0
+    progress_total: int = 0
+    message: str | None = None
+    error: str | None = None
+    result_playlist_id: int | None = None
+    created_at: datetime
+    updated_at: datetime
+    finished_at: datetime | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class ImportProvidersStatus(BaseModel):
+    youtube: bool = True
+    spotify: bool = False
 
 
 class PlayHistoryCreate(TrackBase):

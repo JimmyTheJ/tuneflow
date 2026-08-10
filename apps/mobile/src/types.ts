@@ -153,13 +153,32 @@ export type Playlist = {
   id: number;
   name: string;
   description?: string | null;
+  visibility?: "private" | "household";
+  source_type?: "manual" | "youtube" | "spotify";
+  source_url?: string | null;
+  owner_id?: number | null;
+  owner_display_name?: string | null;
+  is_owner?: boolean;
   created_at: string;
   updated_at: string;
   track_count: number;
+  match_summary?: {
+    matched: number;
+    unmatched: number;
+    pending: number;
+  } | null;
 };
 
 export type PlaylistDetail = Playlist & {
-  tracks: Array<Track & { id: number; position: number; added_at: string }>;
+  tracks: Array<
+    Track & {
+      id: number;
+      position: number;
+      added_at: string;
+      video_id?: string | null;
+      match_status?: "pending" | "matched" | "unmatched";
+    }
+  >;
 };
 
 export type StreamInfo = Track & {

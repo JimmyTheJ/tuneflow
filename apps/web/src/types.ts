@@ -177,17 +177,74 @@ export type AlbumResolveResult = {
   tracks: CatalogTrack[];
 };
 
+export type PlaylistVisibility = "private" | "household";
+export type PlaylistSourceType = "manual" | "youtube" | "spotify";
+export type MatchStatus = "pending" | "matched" | "unmatched";
+
+export type PlaylistMatchSummary = {
+  matched: number;
+  unmatched: number;
+  pending: number;
+};
+
 export type Playlist = {
   id: number;
   name: string;
   description?: string | null;
+  visibility?: PlaylistVisibility;
+  source_type?: PlaylistSourceType;
+  source_url?: string | null;
+  owner_id?: number | null;
+  owner_display_name?: string | null;
+  is_owner?: boolean;
   created_at: string;
   updated_at: string;
   track_count: number;
+  match_summary?: PlaylistMatchSummary | null;
+};
+
+export type PlaylistTrack = {
+  id: number;
+  position: number;
+  added_at: string;
+  video_id?: string | null;
+  title: string;
+  artist?: string | null;
+  thumbnail_url?: string | null;
+  duration_sec?: number | null;
+  match_status?: MatchStatus;
+  match_score?: number | null;
+  source_title?: string | null;
+  source_artist?: string | null;
+  source_duration_ms?: number | null;
+  source_spotify_id?: string | null;
 };
 
 export type PlaylistDetail = Playlist & {
-  tracks: Array<Track & { id: number; position: number; added_at: string }>;
+  tracks: PlaylistTrack[];
+};
+
+export type ImportJob = {
+  id: number;
+  provider: "youtube" | "spotify";
+  status: "queued" | "running" | "completed" | "failed" | "cancelled";
+  source_url?: string | null;
+  source_external_id?: string | null;
+  requested_name?: string | null;
+  visibility: PlaylistVisibility;
+  progress_done: number;
+  progress_total: number;
+  message?: string | null;
+  error?: string | null;
+  result_playlist_id?: number | null;
+  created_at: string;
+  updated_at: string;
+  finished_at?: string | null;
+};
+
+export type ImportProvidersStatus = {
+  youtube: boolean;
+  spotify: boolean;
 };
 
 export type DeletedPlaylist = {

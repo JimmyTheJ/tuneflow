@@ -8,9 +8,10 @@ type Props = {
   name: string;
   onSave: (name: string) => Promise<void>;
   className?: string;
+  readOnly?: boolean;
 };
 
-export function EditablePlaylistTitle({ name, onSave, className }: Props) {
+export function EditablePlaylistTitle({ name, onSave, className, readOnly = false }: Props) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(name);
   const [busy, setBusy] = useState(false);
@@ -77,6 +78,7 @@ export function EditablePlaylistTitle({ name, onSave, className }: Props) {
       <h1 className={cn("m-0 text-4xl font-extrabold tracking-tight md:text-5xl", className)}>
         {name}
       </h1>
+      {readOnly ? null : (
       <IconButton
         label="Rename playlist"
         size="sm"
@@ -85,6 +87,7 @@ export function EditablePlaylistTitle({ name, onSave, className }: Props) {
       >
         <Pencil className="size-4" />
       </IconButton>
+      )}
     </div>
   );
 }

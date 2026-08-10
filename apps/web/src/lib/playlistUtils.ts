@@ -1,5 +1,5 @@
 import { ApiError } from "@/lib/retry";
-import type { Playlist, Track } from "@/types";
+import type { Playlist, PlaylistTrack, Track } from "@/types";
 
 export function filterPlaylists(playlists: Playlist[], query: string): Playlist[] {
   const normalized = query.trim().toLowerCase();
@@ -9,6 +9,32 @@ export function filterPlaylists(playlists: Playlist[], query: string): Playlist[
 
 export function suggestedPlaylistName(existingCount: number): string {
   return `Playlist ${existingCount + 1}`;
+}
+
+export function isPlayablePlaylistTrack(
+  track: PlaylistTrack,
+): track is PlaylistTrack & { video_id: string } {
+  return Boolean(track.video_id) && (track.match_status ?? "matched") !== "unmatched";
+}
+
+export function playablePlaylistTracks(tracks: PlaylistTrack[]): Track[] {
+  return tracks.filter(isPlayablePlaylistTrack).map((track) => ({
+    video_id: track.video_id,
+    title: track.title,
+    artist: track.artist,
+    thumbnail_url: track.thumbnail_url,
+    duration_sec: track.duration_sec,
+  }));
+}
+
+export function asTrackRow(track: PlaylistTrack): Track {
+  return {
+    video_id: track.video_id || `unmatched-${track.id}`,
+    title: track.title,
+    artist: track.artist,
+    thumbnail_url: track.thumbnail_url,
+    duration_sec: track.duration_sec,
+  };
 }
 
 export type BulkAddResult = {
@@ -27,7 +53,6 @@ export async function addTracksToPlaylist(
   for (const track of tracks) {
     try {
       await addTrack(playlistId, track);
-      added += 1;
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
         skipped += 1;

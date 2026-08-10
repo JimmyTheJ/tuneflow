@@ -67,6 +67,9 @@ class Settings(BaseSettings):
     scrobbler_librefm_api_key: str = ""
     scrobbler_librefm_api_secret: str = ""
 
+    spotify_client_id: str = ""
+    spotify_client_secret: str = ""
+
     musicbrainz_user_agent: str = "TuneFlow/0.3.0 ( https://github.com/tuneflow )"
 
     @field_validator("tuneflow_data_dir", mode="before")

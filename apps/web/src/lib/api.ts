@@ -17,6 +17,8 @@ import type {
   Playlist,
   PlaylistDetail,
   DeletedPlaylist,
+  ImportJob,
+  ImportProvidersStatus,
   RoleProfile,
   ScrobblerConnection,
   ScrobblerConnectionStatus,
@@ -187,16 +189,20 @@ export const api = {
     const query = params.toString();
     return request<StreamInfo>(`/api/music/stream/${videoId}${query ? `?${query}` : ""}`);
   },
-  listPlaylists: () => request<Playlist[]>("/api/playlists"),
+  listPlaylists: (scope: "mine" | "household" = "mine") =>
+    request<Playlist[]>(`/api/playlists?scope=${scope}`),
   getPlaylist: (id: number) => request<PlaylistDetail>(`/api/playlists/${id}`),
-  createPlaylist: (name: string) => request<Playlist>("/api/playlists", { method: "POST", body: { name } }),
+  createPlaylist: (name: string, visibility: "private" | "household" = "private") =>
+    request<Playlist>("/api/playlists", { method: "POST", body: { name, visibility } }),
   addPlaylistTrack: (playlistId: number, track: Track) =>
     request<PlaylistDetail["tracks"][number]>(`/api/playlists/${playlistId}/tracks`, {
       method: "POST",
       body: track,
     }),
-  updatePlaylist: (id: number, payload: { name?: string; description?: string }) =>
-    request<Playlist>(`/api/playlists/${id}`, { method: "PATCH", body: payload }),
+  updatePlaylist: (
+    id: number,
+    payload: { name?: string; description?: string; visibility?: "private" | "household" },
+  ) => request<Playlist>(`/api/playlists/${id}`, { method: "PATCH", body: payload }),
   removePlaylistTrack: (playlistId: number, trackId: number) =>
     request<void>(`/api/playlists/${playlistId}/tracks/${trackId}`, { method: "DELETE" }),
   reorderPlaylistTracks: (playlistId: number, trackIds: number[]) =>
@@ -205,9 +211,20 @@ export const api = {
       body: { track_ids: trackIds },
     }),
   deletePlaylist: (id: number) => request<void>(`/api/playlists/${id}`, { method: "DELETE" }),
+  copyPlaylist: (id: number) =>
+    request<Playlist>(`/api/playlists/${id}/copy`, { method: "POST" }),
   listDeletedPlaylists: () => request<DeletedPlaylist[]>("/api/playlists/deleted"),
   restorePlaylist: (id: number) =>
     request<Playlist>(`/api/playlists/${id}/restore`, { method: "POST" }),
+  getImportProviders: () => request<ImportProvidersStatus>("/api/imports/providers"),
+  createImportJob: (payload: {
+    provider: "youtube" | "spotify";
+    url: string;
+    name?: string;
+    visibility?: "private" | "household";
+  }) => request<ImportJob>("/api/imports", { method: "POST", body: payload }),
+  getImportJob: (id: number) => request<ImportJob>(`/api/imports/${id}`),
+  listImportJobs: () => request<ImportJob[]>("/api/imports"),
   listHistory: () => request<PlayHistoryEntry[]>("/api/history"),
   recordPlay: (track: Track) => request<PlayHistoryEntry>("/api/history", { method: "POST", body: track }),
   listLikes: () => request<LikeEntry[]>("/api/likes"),

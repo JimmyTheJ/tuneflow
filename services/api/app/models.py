@@ -12,6 +12,36 @@ class ScrobblerProvider(str, enum.Enum):
     librefm = "librefm"
 
 
+class PlaylistVisibility(str, enum.Enum):
+    private = "private"
+    household = "household"
+
+
+class PlaylistSourceType(str, enum.Enum):
+    manual = "manual"
+    youtube = "youtube"
+    spotify = "spotify"
+
+
+class MatchStatus(str, enum.Enum):
+    pending = "pending"
+    matched = "matched"
+    unmatched = "unmatched"
+
+
+class ImportJobProvider(str, enum.Enum):
+    youtube = "youtube"
+    spotify = "spotify"
+
+
+class ImportJobStatus(str, enum.Enum):
+    queued = "queued"
+    running = "running"
+    completed = "completed"
+    failed = "failed"
+    cancelled = "cancelled"
+
+
 class Household(Base):
     __tablename__ = "households"
     __table_args__ = (UniqueConstraint("slug", name="uq_household_slug"),)
@@ -142,6 +172,15 @@ class Playlist(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    visibility: Mapped[PlaylistVisibility] = mapped_column(
+        Enum(PlaylistVisibility), nullable=False, default=PlaylistVisibility.private
+    )
+    source_type: Mapped[PlaylistSourceType] = mapped_column(
+        Enum(PlaylistSourceType), nullable=False, default=PlaylistSourceType.manual
+    )
+    source_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_external_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    import_job_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     deleted_by_user_id: Mapped[int | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True
@@ -160,19 +199,56 @@ class Playlist(Base):
 
 class PlaylistTrack(Base):
     __tablename__ = "playlist_tracks"
-    __table_args__ = (UniqueConstraint("playlist_id", "video_id", name="uq_playlist_video"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    playlist_id: Mapped[int] = mapped_column(ForeignKey("playlists.id", ondelete="CASCADE"))
-    video_id: Mapped[str] = mapped_column(String(20), nullable=False)
+    playlist_id: Mapped[int] = mapped_column(ForeignKey("playlists.id", ondelete="CASCADE"), index=True)
+    video_id: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)
     title: Mapped[str] = mapped_column(String(500), nullable=False)
     artist: Mapped[str | None] = mapped_column(String(300), nullable=True)
     thumbnail_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     duration_sec: Mapped[int | None] = mapped_column(Integer, nullable=True)
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    match_status: Mapped[MatchStatus] = mapped_column(
+        Enum(MatchStatus), nullable=False, default=MatchStatus.matched
+    )
+    match_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    source_title: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    source_artist: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    source_duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    source_spotify_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     playlist: Mapped[Playlist] = relationship(back_populates="tracks")
+
+
+class ImportJob(Base):
+    __tablename__ = "import_jobs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    provider: Mapped[ImportJobProvider] = mapped_column(Enum(ImportJobProvider), nullable=False)
+    status: Mapped[ImportJobStatus] = mapped_column(
+        Enum(ImportJobStatus), nullable=False, default=ImportJobStatus.queued
+    )
+    source_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_external_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    requested_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    visibility: Mapped[PlaylistVisibility] = mapped_column(
+        Enum(PlaylistVisibility), nullable=False, default=PlaylistVisibility.private
+    )
+    progress_done: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    progress_total: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    message: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    result_playlist_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    options_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    user: Mapped[User] = relationship()
 
 
 class PlayHistory(Base):

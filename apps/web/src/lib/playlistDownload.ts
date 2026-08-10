@@ -1,6 +1,7 @@
 import JSZip from "jszip";
 
 import { api } from "@/lib/api";
+import { playablePlaylistTracks } from "@/lib/playlistUtils";
 import { getAccessToken, getApiUrl } from "@/lib/settings";
 import {
   buildTrackBaseName,
@@ -394,28 +395,29 @@ export async function downloadPlaylist(
     });
   const signal = options.signal ?? new AbortController().signal;
 
-  if (playlist.tracks.length === 0) {
-    throw new Error("This playlist has no tracks to download");
+  const tracks = playablePlaylistTracks(playlist.tracks);
+  if (tracks.length === 0) {
+    throw new Error("This playlist has no playable tracks to download");
   }
 
   onProgress({
     phase: "preparing",
     current: 0,
-    total: playlist.tracks.length,
+    total: tracks.length,
     trackTitle: "",
   });
 
   const useDirectory = options.preferDirectory !== false && supportsDirectoryPicker();
   if (useDirectory) {
-    await downloadToDirectory(playlist.name, playlist.tracks, onProgress, signal, playlist);
+    await downloadToDirectory(playlist.name, tracks, onProgress, signal, playlist);
   } else {
-    await downloadAsZip(playlist.name, playlist.tracks, onProgress, signal, playlist);
+    await downloadAsZip(playlist.name, tracks, onProgress, signal, playlist);
   }
 
   onProgress({
     phase: "done",
-    current: playlist.tracks.length,
-    total: playlist.tracks.length,
+    current: tracks.length,
+    total: tracks.length,
     trackTitle: "",
   });
 }

@@ -13,6 +13,7 @@ import { IconButton } from "@/components/ui/IconButton";
 import { Skeleton, TrackRowSkeleton } from "@/components/ui/Skeleton";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/cn";
+import { asTrackRow, isPlayablePlaylistTrack, playablePlaylistTracks } from "@/lib/playlistUtils";
 import { useEqStore } from "@/stores/eqStore";
 import { usePlayerStore } from "@/stores/playerStore";
 import type { PlaylistDetail } from "@/types";
@@ -29,6 +30,7 @@ export function PlaylistPage() {
   const [clearWarningOpen, setClearWarningOpen] = useState(false);
   const [deleteWarningOpen, setDeleteWarningOpen] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const [copyBusy, setCopyBusy] = useState(false);
   const [eqStatus, setEqStatus] = useState<string | null>(null);
   const playTrack = usePlayerStore((s) => s.playTrack);
   const profiles = useEqStore((s) => s.profiles);
@@ -66,6 +68,29 @@ export function PlaylistPage() {
     if (!playlist) return;
     const updated = await api.updatePlaylist(playlist.id, { name });
     setPlaylist({ ...playlist, name: updated.name });
+  };
+
+  const handleVisibility = async (visibility: "private" | "household") => {
+    if (!playlist || playlist.is_owner === false) return;
+    try {
+      const updated = await api.updatePlaylist(playlist.id, { visibility });
+      setPlaylist({ ...playlist, visibility: updated.visibility });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not update visibility");
+    }
+  };
+
+  const handleCopy = async () => {
+    if (!playlist) return;
+    setCopyBusy(true);
+    try {
+      const copied = await api.copyPlaylist(playlist.id);
+      navigate(`/playlist/${copied.id}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not copy playlist");
+    } finally {
+      setCopyBusy(false);
+    }
   };
 
   const handleDeletePlaylist = async () => {
@@ -164,10 +189,13 @@ export function PlaylistPage() {
     );
   }
 
-  const coverId = playlist.tracks[0]?.video_id;
+  const coverId = playlist.tracks.find(isPlayablePlaylistTrack)?.video_id;
+  const playable = playablePlaylistTracks(playlist.tracks);
+  const unmatchedCount = playlist.match_summary?.unmatched ?? playlist.tracks.filter((t) => !isPlayablePlaylistTrack(t)).length;
+  const isOwner = playlist.is_owner !== false;
   const playAll = () => {
-    if (playlist.tracks.length === 0) return;
-    void playTrack(playlist.tracks[0], playlist.tracks, {
+    if (playable.length === 0) return;
+    void playTrack(playable[0], playable, {
       queueSource: { type: "playlist", id: playlist.id },
     });
   };
@@ -193,21 +221,57 @@ export function PlaylistPage() {
             <p className="m-0 text-xs font-bold uppercase tracking-widest text-text-secondary">
               Playlist
             </p>
-            <EditablePlaylistTitle name={playlist.name} onSave={handleRename} />
+            <EditablePlaylistTitle
+              name={playlist.name}
+              readOnly={!isOwner}
+              onSave={handleRename}
+            />
             <p className="m-0 text-sm text-text-secondary">
               {playlist.tracks.length} {playlist.tracks.length === 1 ? "track" : "tracks"}
             </p>
             <div className="mt-5 flex flex-wrap items-start gap-3">
               <Button
                 size="lg"
-                disabled={playlist.tracks.length === 0}
+                disabled={playable.length === 0}
                 onClick={playAll}
                 className="!rounded-full gap-2"
               >
                 <Play className="size-5 fill-current" />
                 Play
               </Button>
-              <PlaylistDownloadButton playlist={playlist} />
+              <PlaylistDownloadButton playlist={playlist} disabled={!isOwner} />
+              {isOwner ? (
+                <>
+                  <Button
+                    variant={playlist.visibility === "private" ? "secondary" : "ghost"}
+                    size="lg"
+                    className="!rounded-full"
+                    onClick={() => void handleVisibility("private")}
+                  >
+                    Private
+                  </Button>
+                  <Button
+                    variant={playlist.visibility === "household" ? "secondary" : "ghost"}
+                    size="lg"
+                    className="!rounded-full"
+                    onClick={() => void handleVisibility("household")}
+                  >
+                    Household
+                  </Button>
+                </>
+              ) : (
+                <Button
+                  variant="secondary"
+                  size="lg"
+                  className="!rounded-full"
+                  disabled={copyBusy}
+                  onClick={() => void handleCopy()}
+                >
+                  {copyBusy ? "Saving…" : "Save a copy"}
+                </Button>
+              )}
+              {isOwner ? (
+                <>
               <Button variant="secondary" size="lg" className="!rounded-full" onClick={() => setEqPickerOpen(true)}>
                 {playlistEqProfile ? `EQ: ${playlistEqProfile.name}` : "Assign playlist EQ"}
               </Button>
@@ -238,7 +302,20 @@ export function PlaylistPage() {
                 <Trash2 className="size-4" />
                 Delete playlist
               </Button>
+                </>
+              ) : null}
             </div>
+            {unmatchedCount > 0 ? (
+              <p className="mt-3 mb-0 text-sm text-text-secondary">
+                {playlist.match_summary
+                  ? `${playlist.match_summary.matched} matched · ${playlist.match_summary.unmatched} unmatched`
+                  : `${unmatchedCount} tracks could not be matched and will be skipped when playing`}
+                {playlist.match_summary?.pending ? ` · ${playlist.match_summary.pending} pending` : ""}
+              </p>
+            ) : null}
+            {!isOwner && playlist.owner_display_name ? (
+              <p className="mt-2 mb-0 text-sm text-text-muted">Shared by {playlist.owner_display_name}</p>
+            ) : null}
           </div>
         </div>
       </div>
@@ -267,6 +344,7 @@ export function PlaylistPage() {
               onDragLeave={() => setDropTargetIndex(null)}
               onDrop={(event) => handleDrop(event, index)}
             >
+              {isOwner ? (
               <button
                 type="button"
                 className="cursor-grab touch-none px-1 py-2 text-text-muted hover:text-text active:cursor-grabbing"
@@ -277,17 +355,32 @@ export function PlaylistPage() {
               >
                 <GripVertical className="size-4" />
               </button>
+              ) : (
+                <div className="w-6" />
+              )}
               <div className="min-w-0 flex-1">
                 <TrackRow
-                  track={track}
+                  track={asTrackRow(track)}
                   index={index + 1}
-                  onClick={() =>
-                    void playTrack(track, playlist.tracks, {
-                      queueSource: { type: "playlist", id: playlist.id },
-                    })
+                  disabled={!isPlayablePlaylistTrack(track)}
+                  detail={
+                    isPlayablePlaylistTrack(track)
+                      ? undefined
+                      : track.match_status === "pending"
+                        ? "Matching…"
+                        : "No YouTube match"
+                  }
+                  onClick={
+                    isPlayablePlaylistTrack(track)
+                      ? () =>
+                          void playTrack(asTrackRow(track), playable, {
+                            queueSource: { type: "playlist", id: playlist.id },
+                          })
+                      : undefined
                   }
                 />
               </div>
+              {isOwner ? (
               <IconButton
                 label={`Remove ${track.title} from playlist`}
                 size="sm"
@@ -296,6 +389,9 @@ export function PlaylistPage() {
               >
                 <X className="size-3.5" />
               </IconButton>
+              ) : (
+                <div className="w-8" />
+              )}
             </div>
           );
         })}

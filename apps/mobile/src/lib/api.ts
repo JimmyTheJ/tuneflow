@@ -168,7 +168,8 @@ export const api = {
     const query = params.toString();
     return request<StreamInfo>(`/api/music/stream/${videoId}${query ? `?${query}` : ""}`);
   },
-  listPlaylists: () => request<Playlist[]>("/api/playlists"),
+  listPlaylists: (scope: "mine" | "household" = "mine") =>
+    request<Playlist[]>(`/api/playlists?scope=${scope}`),
   getPlaylist: (id: number) => request<PlaylistDetail>(`/api/playlists/${id}`),
   createPlaylist: (name: string, description?: string) =>
     request<Playlist>("/api/playlists", { method: "POST", body: { name, description } }),
