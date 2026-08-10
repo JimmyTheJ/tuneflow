@@ -1,7 +1,13 @@
 import { create } from "zustand";
-import { disconnectEq } from "@/lib/eqAudioGraph";
+import { disconnectEq, installEqAudioContextKeepAlive } from "@/lib/eqAudioGraph";
 import { getResolvedEqForCurrentTrack, syncEqPlayback } from "@/lib/eqSync";
 import { api } from "@/lib/api";
+import {
+  clearMediaSession,
+  installMediaSessionHandlers,
+  syncMediaSession,
+  updateMediaSessionPosition,
+} from "@/lib/mediaSession";
 import {
   clearPlayerSession,
   findDetachedTuneflowMedia,
@@ -193,6 +199,7 @@ async function handlePlaybackFailure(
 
     if (!current) {
       set({ error: reason, isPlaying: false });
+      clearMediaSession();
       return;
     }
 
@@ -207,12 +214,14 @@ async function handlePlaybackFailure(
     if (!hasNext) {
       consecutiveSkipCount = 0;
       set({ error: reason, isPlaying: false });
+      syncMediaSessionFromState({ ...get(), isPlaying: false });
       return;
     }
 
     if (consecutiveSkipCount >= MAX_CONSECUTIVE_SKIPS) {
       consecutiveSkipCount = 0;
       set({ error: "Multiple tracks failed to play", isPlaying: false });
+      syncMediaSessionFromState({ ...get(), isPlaying: false });
       return;
     }
     consecutiveSkipCount += 1;
@@ -258,6 +267,17 @@ function syncProgress(media: HTMLMediaElement, track: Track) {
     positionSec: media.currentTime || 0,
     durationSec: duration > 0 ? duration : (track.duration_sec ?? 0),
   };
+}
+
+function syncMediaSessionFromState(
+  state: Pick<PlayerState, "current" | "isPlaying" | "positionSec" | "durationSec">,
+): void {
+  syncMediaSession({
+    track: state.current,
+    isPlaying: state.isPlaying,
+    positionSec: state.positionSec,
+    durationSec: state.durationSec,
+  });
 }
 
 function currentQueueIndex(state: Pick<PlayerState, "current" | "queue">): number {
@@ -502,7 +522,9 @@ function attachMediaListeners(
 
   const updateProgress = () => {
     if (!shouldHandle()) return;
-    set(syncProgress(media, track));
+    const progress = syncProgress(media, track);
+    set(progress);
+    updateMediaSessionPosition(progress.positionSec, progress.durationSec);
   };
 
   media.addEventListener("loadedmetadata", updateProgress, { signal });
@@ -521,6 +543,7 @@ function attachMediaListeners(
     () => {
       if (!shouldHandle()) return;
       set({ isPlaying: true });
+      syncMediaSessionFromState({ ...get(), isPlaying: true });
     },
     { signal },
   );
@@ -528,8 +551,10 @@ function attachMediaListeners(
     "pause",
     () => {
       if (!shouldHandle()) return;
-      set({ isPlaying: false, ...syncProgress(media, track) });
+      const progress = syncProgress(media, track);
+      set({ isPlaying: false, ...progress });
       persistSnapshot(get());
+      syncMediaSessionFromState({ ...get(), isPlaying: false, ...progress });
     },
     { signal },
   );
@@ -989,6 +1014,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       });
       void syncEqPlayback(pendingMedia);
       persistSnapshot(get());
+      syncMediaSessionFromState(get());
       pendingMedia = null;
       void api.recordPlay(track).catch(() => undefined);
       resetPlaybackFailureState();
@@ -1043,6 +1069,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       });
       void syncEqPlayback(pendingMedia);
       persistSnapshot(get());
+      syncMediaSessionFromState(get());
       schedulePrefetchNext(get);
     } catch (error) {
       if (pendingMedia) disposeMedia(pendingMedia);
@@ -1074,6 +1101,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     const clamped = max > 0 ? Math.max(0, Math.min(seconds, max)) : Math.max(0, seconds);
     media.currentTime = clamped;
     set({ positionSec: clamped });
+    updateMediaSessionPosition(clamped, max || get().durationSec, { force: true });
   },
 
   onTrackEnded: async () => {
@@ -1134,6 +1162,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     }
     if (action.type === "stop") {
       set({ isPlaying: false });
+      syncMediaSessionFromState({ ...get(), isPlaying: false });
       return;
     }
 
@@ -1142,6 +1171,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     const track = rotated.queue[0];
     if (!track) {
       set({ isPlaying: false });
+      syncMediaSessionFromState({ ...get(), isPlaying: false });
       return;
     }
 
@@ -1196,6 +1226,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       set(nextState);
       persistSnapshot({ ...get(), ...nextState } as PlayerState);
       void syncEqPlayback(orphan);
+      syncMediaSessionFromState(get());
       return true;
     }
 
@@ -1230,6 +1261,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       error: null,
     });
     persistSnapshot(get());
+    syncMediaSessionFromState(get());
     return true;
   },
 
@@ -1438,6 +1470,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     invalidatePrefetch();
     disposeMedia(get().media);
     clearPlayerSession();
+    clearMediaSession();
     set({
       media: null,
       stream: null,
@@ -1466,6 +1499,44 @@ if (import.meta.hot) {
 }
 
 if (typeof window !== "undefined") {
+  installMediaSessionHandlers({
+    play: () => {
+      const state = usePlayerStore.getState();
+      if (state.isPlaying) return;
+      state.togglePlayback();
+    },
+    pause: () => {
+      const state = usePlayerStore.getState();
+      if (!state.isPlaying) return;
+      state.togglePlayback();
+    },
+    stop: () => {
+      usePlayerStore.getState().stop();
+    },
+    nexttrack: () => {
+      void usePlayerStore.getState().playNext();
+    },
+    previoustrack: () => {
+      void usePlayerStore.getState().playPrevious();
+    },
+    seekto: (seconds) => {
+      usePlayerStore.getState().seek(seconds);
+    },
+    seekbackward: (offsetSec) => {
+      const state = usePlayerStore.getState();
+      state.seek(Math.max(0, state.positionSec - offsetSec));
+    },
+    seekforward: (offsetSec) => {
+      const state = usePlayerStore.getState();
+      state.seek(state.positionSec + offsetSec);
+    },
+  });
+
+  installEqAudioContextKeepAlive(() => {
+    const state = usePlayerStore.getState();
+    return Boolean(state.isPlaying && state.media);
+  });
+
   window.addEventListener("pagehide", () => {
     persistSnapshot(usePlayerStore.getState());
   });

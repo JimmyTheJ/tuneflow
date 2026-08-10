@@ -12,10 +12,17 @@ type MediaGraph = {
 let audioContext: AudioContext | null = null;
 const graphs = new WeakMap<HTMLMediaElement, MediaGraph>();
 const elementSources = new WeakMap<HTMLMediaElement, MediaElementAudioSourceNode>();
+let shouldKeepAudioContextRunning: (() => boolean) | null = null;
+let keepAliveInstalled = false;
 
 function getContext(): AudioContext {
   if (!audioContext) {
     audioContext = new AudioContext();
+    audioContext.addEventListener("statechange", () => {
+      if (audioContext?.state === "suspended" && shouldKeepAudioContextRunning?.()) {
+        void ensureEqAudioContextRunning();
+      }
+    });
   }
   return audioContext;
 }
@@ -25,6 +32,36 @@ async function resumeContext(): Promise<void> {
   if (context.state === "suspended") {
     await context.resume();
   }
+}
+
+/** Resume the EQ AudioContext if the browser suspended it (common in background tabs). */
+export async function ensureEqAudioContextRunning(): Promise<void> {
+  if (!audioContext) return;
+  if (audioContext.state !== "suspended") return;
+  try {
+    await audioContext.resume();
+  } catch {
+    /* resume may fail without a user gesture; retry on visibility/focus */
+  }
+}
+
+/**
+ * Keep EQ audio alive when the tab is backgrounded. Browsers often suspend
+ * AudioContext while leaving HTMLMediaElement "playing", which silences EQ output.
+ */
+export function installEqAudioContextKeepAlive(shouldResume: () => boolean): void {
+  shouldKeepAudioContextRunning = shouldResume;
+  if (typeof window === "undefined" || keepAliveInstalled) return;
+  keepAliveInstalled = true;
+
+  const tryResume = () => {
+    if (!shouldKeepAudioContextRunning?.()) return;
+    void ensureEqAudioContextRunning();
+  };
+
+  document.addEventListener("visibilitychange", tryResume);
+  window.addEventListener("pageshow", tryResume);
+  window.addEventListener("focus", tryResume);
 }
 
 function getOrCreateSource(media: HTMLMediaElement): MediaElementAudioSourceNode {
