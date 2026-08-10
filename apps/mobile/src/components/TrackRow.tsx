@@ -16,6 +16,7 @@ import type { Track } from "@/types";
 type Props = {
   track: Track;
   onPress?: () => void;
+  onLongPress?: () => void;
   subtitle?: string;
   displayTitle?: string;
   showDuration?: boolean;
@@ -28,6 +29,7 @@ type Props = {
 export function TrackRow({
   track,
   onPress,
+  onLongPress,
   subtitle,
   displayTitle,
   showDuration = true,
@@ -50,7 +52,9 @@ export function TrackRow({
     <Pressable
       className={`flex-row items-center gap-3 rounded-lg px-1 py-2 active:bg-highlight/80 ${active ? "bg-accent/10" : ""}`}
       onPress={onPress}
-      disabled={!onPress}
+      onLongPress={onLongPress}
+      delayLongPress={350}
+      disabled={!onPress && !onLongPress}
     >
       {index != null ? (
         <Text className="w-5 text-center text-sm tabular-nums text-text-muted">{index}</Text>

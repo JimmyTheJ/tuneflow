@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { View } from "react-native";
 
 import { TrackActionsMenu } from "@/components/TrackActionsMenu";
@@ -29,6 +30,8 @@ export function TrackRowWithActions({
   onPlay,
   onPlaylistsChange,
 }: Props) {
+  const [menuOpen, setMenuOpen] = useState(false);
+
   return (
     <View className="flex-row items-center gap-1">
       <View className="min-w-0 flex-1">
@@ -39,6 +42,7 @@ export function TrackRowWithActions({
           subtitle={subtitle}
           index={index}
           onPress={disabled ? undefined : onPlay}
+          onLongPress={disabled ? undefined : () => setMenuOpen(true)}
         />
       </View>
       <TrackActionsMenu
@@ -46,6 +50,8 @@ export function TrackRowWithActions({
         playQueue={playQueue}
         playlists={playlists}
         disabled={disabled}
+        menuOpen={menuOpen}
+        onMenuOpenChange={setMenuOpen}
         onPlaylistsChange={onPlaylistsChange}
       />
     </View>

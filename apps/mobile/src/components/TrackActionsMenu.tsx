@@ -13,6 +13,8 @@ type Props = {
   playQueue?: Track[];
   playlists: Playlist[];
   disabled?: boolean;
+  menuOpen: boolean;
+  onMenuOpenChange: (open: boolean) => void;
   onPlaylistsChange: () => void;
 };
 
@@ -21,11 +23,12 @@ export function TrackActionsMenu({
   playQueue = [],
   playlists,
   disabled = false,
+  menuOpen,
+  onMenuOpenChange,
   onPlaylistsChange,
 }: Props) {
   const playTrack = usePlayerStore((state) => state.playTrack);
   const addToQueue = usePlayerStore((state) => state.addToQueue);
-  const [menuOpen, setMenuOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
 
@@ -35,14 +38,14 @@ export function TrackActionsMenu({
   };
 
   const handlePlay = () => {
-    setMenuOpen(false);
+    onMenuOpenChange(false);
     const queue = playQueue.length > 0 ? playQueue : [track];
     void playTrack(track, queue);
   };
 
   const handleAddToQueue = () => {
     addToQueue(track);
-    setMenuOpen(false);
+    onMenuOpenChange(false);
     showStatus("Added to queue");
   };
 
@@ -53,11 +56,11 @@ export function TrackActionsMenu({
         label={`Actions for ${track.title}`}
         size="sm"
         disabled={disabled}
-        onPress={() => setMenuOpen(true)}
+        onPress={() => onMenuOpenChange(true)}
       />
 
-      <Modal visible={menuOpen} transparent animationType="fade" onRequestClose={() => setMenuOpen(false)}>
-        <Pressable className="flex-1 justify-end bg-black/70" onPress={() => setMenuOpen(false)}>
+      <Modal visible={menuOpen} transparent animationType="fade" onRequestClose={() => onMenuOpenChange(false)}>
+        <Pressable className="flex-1 justify-end bg-black/70" onPress={() => onMenuOpenChange(false)}>
           <Pressable className="rounded-t-2xl border border-border bg-elevated p-2" onPress={(event) => event.stopPropagation()}>
             <Text className="px-3 py-2 text-base font-semibold text-text" numberOfLines={2}>
               {track.title}
@@ -71,13 +74,13 @@ export function TrackActionsMenu({
             <Pressable
               className="rounded-lg px-3 py-3 active:bg-highlight"
               onPress={() => {
-                setMenuOpen(false);
+                onMenuOpenChange(false);
                 setPickerOpen(true);
               }}
             >
               <Text className="text-base text-text">Add to playlist…</Text>
             </Pressable>
-            <Pressable className="mt-1 rounded-lg px-3 py-3 active:bg-highlight" onPress={() => setMenuOpen(false)}>
+            <Pressable className="mt-1 rounded-lg px-3 py-3 active:bg-highlight" onPress={() => onMenuOpenChange(false)}>
               <Text className="text-center text-base font-semibold text-text-secondary">Cancel</Text>
             </Pressable>
             {status ? (
