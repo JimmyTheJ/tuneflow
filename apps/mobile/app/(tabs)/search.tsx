@@ -183,7 +183,7 @@ export default function SearchScreen() {
         <Button
           onPress={() => (loading ? cancelSearch() : void runSearch())}
           disabled={!loading && !query.trim()}
-          loading={loading}
+          variant={loading ? "secondary" : "primary"}
           className="px-5"
         >
           {loading ? "Cancel" : "Search"}
