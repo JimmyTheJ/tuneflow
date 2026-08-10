@@ -58,6 +58,7 @@ from app.services.song_groups import (
     identity_for_song,
 )
 from app.services.stream_resolver import stream_audio_chunks, stream_video_chunks
+from app.services.ytdlp import search_music_candidates
 from app.slugify import build_track_filename
 
 router = APIRouter(prefix="/music", tags=["music"])
@@ -338,6 +339,7 @@ async def search_music(
     piped_next = cursor.piped_nextpage if cursor else None
     channel_pins = await _load_channel_pins(db, current_user.id)
 
+    degraded_source = False
     try:
         raw_results, piped_token = await piped_client.collect_candidates(
             q,
@@ -346,7 +348,18 @@ async def search_music(
             seen_video_ids=seen_lookup,
         )
     except httpx.HTTPError as exc:
-        raise _piped_unavailable(exc) from exc
+        # Pagination tokens are Piped-specific; only fall back on a fresh search.
+        if cursor is not None:
+            raise _piped_unavailable(exc) from exc
+        raw_results = await search_music_candidates(
+            q,
+            limit=min(50, max(effective_options.results_per_page * 2, 20)),
+            enrich=True,
+        )
+        if not raw_results:
+            raise _piped_unavailable(exc) from exc
+        piped_token = None
+        degraded_source = True
 
     for result in raw_results:
         if result.video_id not in seen_lookup:
@@ -392,6 +405,9 @@ async def search_music(
         parental=child_settings,
         filtered_count=removed_count,
         collapsed_count=collapsed,
+        extra_messages=(
+            ["Using backup search — Piped was unavailable"] if degraded_source else None
+        ),
     )
 
     return SearchResultsPage(

@@ -578,6 +578,9 @@ def _next_page_token(payload: dict) -> str | None:
     return str(next_page)
 
 
+_PIPED_REQUEST_TIMEOUT_SEC = 12.0
+
+
 class PipedClient:
     def __init__(self) -> None:
         self._active_base_url: str | None = None
@@ -589,25 +592,43 @@ class PipedClient:
         urls = piped_instance_urls()
         return urls[0] if urls else settings.piped_base_url.rstrip("/")
 
+    def _urls_for_request(self) -> list[str]:
+        urls = piped_instance_urls()
+        active = self._active_base_url
+        if active and active in urls:
+            return [active, *[url for url in urls if url != active]]
+        return urls
+
     async def _request_json(self, path: str, *, params: dict | None = None) -> dict:
         errors: list[str] = []
-        for base_url in piped_instance_urls():
+        for base_url in self._urls_for_request():
             try:
 
                 async def fetch_from_instance() -> dict:
-                    async with httpx.AsyncClient(timeout=20.0) as client:
+                    async with httpx.AsyncClient(timeout=_PIPED_REQUEST_TIMEOUT_SEC) as client:
                         response = await client.get(f"{base_url}{path}", params=params)
                         response.raise_for_status()
-                        return response.json()
+                        try:
+                            payload = response.json()
+                        except ValueError as exc:
+                            raise httpx.HTTPError(
+                                f"Non-JSON response from {base_url}"
+                            ) from exc
+                        if not isinstance(payload, dict):
+                            raise httpx.HTTPError(f"Unexpected JSON payload from {base_url}")
+                        return payload
 
+                # Prefer failing over to the next instance over retrying a dead one.
                 payload = await with_retry(
                     fetch_from_instance,
-                    max_attempts=2,
+                    max_attempts=1,
                     should_retry=is_transient_http_error,
                 )
                 self._active_base_url = base_url
                 return payload
             except httpx.HTTPError as exc:
+                if self._active_base_url == base_url:
+                    self._active_base_url = None
                 errors.append(f"{base_url}: {exc}")
         detail = "; ".join(errors[:3])
         raise httpx.HTTPError(f"All Piped instances failed. {detail}")

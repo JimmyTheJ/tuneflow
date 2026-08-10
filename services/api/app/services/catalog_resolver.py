@@ -17,12 +17,10 @@ from app.services.piped import (
     is_topic_upload,
     looks_like_live_version,
     matches_requested_track,
-    parse_artist_title,
     piped_client,
     studio_quality_score,
     title_matches,
 )
-from app.services.thumbnails import youtube_thumbnail_url
 
 
 def _duration_score(wanted_ms: int | None, candidate_sec: int | None) -> int:
@@ -153,7 +151,7 @@ def _pick_best_match(
 
 
 async def _ytdlp_search_stubs(query: str, *, limit: int = 15) -> list[SearchResult]:
-    from app.services.ytdlp import search_video_entries
+    from app.services.ytdlp import entry_to_search_result, search_video_entries
 
     try:
         entries = await search_video_entries(query, limit=limit)
@@ -162,22 +160,9 @@ async def _ytdlp_search_stubs(query: str, *, limit: int = 15) -> list[SearchResu
 
     results: list[SearchResult] = []
     for entry in entries:
-        video_id = entry.get("id")
-        if not video_id:
-            continue
-        raw_title = (entry.get("title") or "").strip()
-        parsed_artist, parsed_title = parse_artist_title(raw_title)
-        uploader = entry.get("uploader") or entry.get("channel") or parsed_artist
-        results.append(
-            SearchResult(
-                video_id=video_id,
-                title=parsed_title or raw_title,
-                artist=uploader,
-                thumbnail_url=youtube_thumbnail_url(video_id),
-                duration_sec=entry.get("duration"),
-                source_title=raw_title or None,
-            )
-        )
+        result = entry_to_search_result(entry)
+        if result is not None:
+            results.append(result)
     return results
 
 

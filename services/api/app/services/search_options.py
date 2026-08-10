@@ -109,9 +109,13 @@ def build_search_explanation(
     parental: ParentalSettings | None,
     filtered_count: int,
     collapsed_count: int,
+    extra_messages: list[str] | None = None,
 ) -> SearchExplanation | None:
     messages: list[str] = []
     household_defaults = parse_household_search_defaults(household)
+
+    if extra_messages:
+        messages.extend(extra_messages)
 
     if options.max_per_song is None:
         messages.append("Showing all versions per song")

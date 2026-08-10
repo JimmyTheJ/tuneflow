@@ -27,7 +27,16 @@ class Settings(BaseSettings):
     tuneflow_data_dir: Path = Path("data")
     database_url: str = _DEFAULT_DATABASE_URL
     piped_base_url: str = "https://api.piped.private.coffee"
-    piped_fallback_urls: str = "https://api.piped.private.coffee,https://pipedapi-libre.kavin.rocks,https://pipedapi.kavin.rocks"
+    # Public Piped instances rotate in and out of health; keep a diverse failover list.
+    # Self-host with compose profile `piped` when public instances are unreliable.
+    piped_fallback_urls: str = (
+        "https://pipedapi.kavin.rocks,"
+        "https://pipedapi-libre.kavin.rocks,"
+        "https://pipedapi.leptons.xyz,"
+        "https://pdapi.vern.cc,"
+        "https://piped-api.lunar.icu,"
+        "https://yapi.vyper.me"
+    )
     cors_origins: str = "*"
 
     jwt_secret: str = "change-me-to-a-long-random-jwt-secret"

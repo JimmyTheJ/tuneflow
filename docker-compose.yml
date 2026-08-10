@@ -16,7 +16,7 @@ services:
     environment:
       TUNEFLOW_DATA_DIR: /app/data
       PIPED_BASE_URL: ${PIPED_BASE_URL:-https://api.piped.private.coffee}
-      PIPED_FALLBACK_URLS: ${PIPED_FALLBACK_URLS:-https://api.piped.private.coffee,https://pipedapi-libre.kavin.rocks,https://pipedapi.kavin.rocks}
+      PIPED_FALLBACK_URLS: ${PIPED_FALLBACK_URLS:-https://pipedapi.kavin.rocks,https://pipedapi-libre.kavin.rocks,https://pipedapi.leptons.xyz,https://pdapi.vern.cc,https://piped-api.lunar.icu,https://yapi.vyper.me}
     volumes:
       - ${TUNEFLOW_DATA_HOST_PATH:-tuneflow-data}:/app/data
     restart: unless-stopped

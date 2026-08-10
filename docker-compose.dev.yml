@@ -4,5 +4,6 @@
 services:
   tuneflow-api:
     environment:
-      PIPED_BASE_URL: https://pipedapi.kavin.rocks
+      PIPED_BASE_URL: https://api.piped.private.coffee
+      PIPED_FALLBACK_URLS: https://pipedapi.kavin.rocks,https://pipedapi-libre.kavin.rocks,https://pipedapi.leptons.xyz,https://pdapi.vern.cc,https://piped-api.lunar.icu,https://yapi.vyper.me
     depends_on: []
