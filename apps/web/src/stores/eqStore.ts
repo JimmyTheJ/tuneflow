@@ -203,6 +203,7 @@ export const useEqStore = create<EqState>((set, get) => ({
       set((state) => {
         const next = { ...state.trackAssignments };
         for (const track of playlist.tracks) {
+          if (!track.video_id) continue;
           next[track.video_id] = profileId;
         }
         return { trackAssignments: next };
@@ -218,6 +219,7 @@ export const useEqStore = create<EqState>((set, get) => ({
     set((state) => {
       const next = { ...state.trackAssignments };
       for (const track of playlist.tracks) {
+        if (!track.video_id) continue;
         delete next[track.video_id];
       }
       return { trackAssignments: next };
