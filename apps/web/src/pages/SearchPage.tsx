@@ -245,14 +245,14 @@ export function SearchPage() {
     if (!trimmed) return;
     setInputFocused(false);
     if (trimmed !== urlQuery.trim()) {
-      setSearchParams({ q: trimmed });
+      setSearchParams({ q: trimmed, source });
     }
   };
 
   const selectSuggestion = (text: string) => {
     setQuery(text);
     setInputFocused(false);
-    setSearchParams({ q: text });
+    setSearchParams({ q: text, source });
   };
 
   const handlePlayTrack = (track: Track, queue: Track[]) => {
@@ -263,7 +263,7 @@ export function SearchPage() {
     const nextQuery = buildMoreVersionsQuery(track);
     setSessionOptions((current) => ({ ...current, max_per_song: null }));
     setQuery(nextQuery);
-    setSearchParams({ q: nextQuery });
+    setSearchParams({ q: nextQuery, source });
     setOptionsOpen(true);
   };
 

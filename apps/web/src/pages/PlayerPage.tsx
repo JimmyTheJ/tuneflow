@@ -100,18 +100,18 @@ export function PlayerPage() {
     );
   }
 
-  const artUrl = trackThumbnailUrl(current.video_id);
+  const artUrl = current.thumbnail_url || trackThumbnailUrl(current.video_id);
 
   return (
     <div className="relative -mx-4 -mt-6 overflow-hidden md:-mx-8 md:-mt-8">
       {/* Blurred backdrop */}
       <div className="pointer-events-none absolute inset-0 -z-10">
-        <img
+        {artUrl ? <img
           src={artUrl}
           alt=""
           className="size-full scale-125 object-cover opacity-40 blur-3xl"
           aria-hidden="true"
-        />
+        /> : null}
         <div className="absolute inset-0 bg-gradient-to-b from-base/40 via-base/80 to-base" />
       </div>
 

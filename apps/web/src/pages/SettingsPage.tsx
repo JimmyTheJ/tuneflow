@@ -462,7 +462,7 @@ export function SettingsPage() {
         <Card className="space-y-3">
           <h2 className="m-0 text-base font-bold">Server</h2>
           <p className="m-0 text-sm text-text-secondary">
-            API URL for this browser app (default: localhost:8010)
+            API URL for this browser app (blank uses this site's /api proxy)
           </p>
           <Input value={apiUrl} onChange={(e) => setApiUrlState(e.target.value)} />
           <Button

@@ -35,11 +35,20 @@ pub fn token(s: &Shared, uid: i64, media: Option<String>) -> Result<String> {
     .map_err(|_| ApiError::upstream("Could not create session"))
 }
 pub async fn authenticate(s: &Shared, h: &HeaderMap, q: &Params, path: &str) -> Result<Value> {
-    let t = h
+    let bearer = h
         .get("authorization")
         .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer "))
-        .or_else(|| q.get("token").map(String::as_str))
+        .and_then(|v| v.strip_prefix("Bearer "));
+    let media_path = path.starts_with("music/audio/")
+        || path.starts_with("music/video/")
+        || path.starts_with("library/images/");
+    let query_token = if media_path {
+        q.get("token").map(String::as_str)
+    } else {
+        None
+    };
+    let t = bearer
+        .or(query_token)
         .ok_or_else(|| ApiError(StatusCode::UNAUTHORIZED, "Sign in required".into()))?;
     let c = decode::<Claims>(
         t,
@@ -48,6 +57,9 @@ pub async fn authenticate(s: &Shared, h: &HeaderMap, q: &Params, path: &str) -> 
     )
     .map_err(|_| ApiError(StatusCode::UNAUTHORIZED, "Session expired".into()))?
     .claims;
+    if bearer.is_none() && c.media.is_none() {
+        return Err(ApiError::forbidden("A media token is required in the URL"));
+    }
     if let Some(media) = c.media
         && ![
             format!("music/audio/{media}"),

@@ -25,6 +25,7 @@ function isSupported(): boolean {
 
 function artworkFor(track: Track): MediaImage[] {
   const src = track.thumbnail_url || trackThumbnailUrl(track.video_id);
+  if (!src) return [];
   return [
     { src, sizes: "480x360", type: "image/jpeg" },
     { src, sizes: "320x180", type: "image/jpeg" },

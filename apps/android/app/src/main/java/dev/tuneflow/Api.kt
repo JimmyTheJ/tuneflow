@@ -28,6 +28,7 @@ class Api(private val session: Session, private val fixedToken: String? = null, 
     suspend fun call(path: String, method: String = "GET", body: JSONObject? = null, authenticated: Boolean = true): String {
         val base = fixedServer ?: session.server
         require(base.startsWith("http://") || base.startsWith("https://")) { "Enter the Tuneflow server address" }
+        require(BuildConfig.DEBUG || base.startsWith("https://")) { "Release builds require an HTTPS Tuneflow server" }
         val request = Request.Builder().url("$base/api/$path")
         if (authenticated) request.header("Authorization", "Bearer ${fixedToken ?: session.token}")
         request.method(method, if (method in listOf("POST", "PUT", "PATCH")) (body ?: JSONObject()).toString().toRequestBody("application/json".toMediaType()) else null)

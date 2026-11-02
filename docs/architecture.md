@@ -22,6 +22,10 @@ field keeps existing playlists and web player contracts usable during migration.
 
 Jellyfin authentication is separate from Tuneflow login. Each user links an account;
 there is no server-wide Jellyfin API key granting every household access to all music.
+The link URL must match `JELLYFIN_URL` or one of `JELLYFIN_ALLOWED_URLS` exactly,
+so users cannot direct the server to arbitrary network services. Existing links
+remain stored after an upgrade, but playback and sync require their addresses to
+be configured. Unlinking remains possible even if an address is no longer allowed.
 Tokens are AES-GCM encrypted at rest. Changing JWT_SECRET invalidates existing JWTs
 and makes stored Jellyfin tokens unreadable, requiring users to relink.
 

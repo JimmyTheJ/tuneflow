@@ -12,6 +12,17 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::time::Duration;
 
+fn allowed(s: &Shared, base: &str) -> bool {
+    s.config
+        .jellyfin_url
+        .as_deref()
+        .is_some_and(|v| v.trim_end_matches('/') == base)
+        || s.config
+            .jellyfin_allowed_urls
+            .iter()
+            .any(|v| v.trim_end_matches('/') == base)
+}
+
 fn seal(s: &Shared, token: &str) -> Result<String> {
     let key = Sha256::digest(s.config.jwt_secret.as_bytes());
     let cipher = Aes256Gcm::new_from_slice(&key).unwrap();
@@ -37,13 +48,19 @@ pub fn unseal(s: &Shared, v: &str) -> Result<String> {
     String::from_utf8(bytes).map_err(|_| ApiError::upstream("Invalid Jellyfin connection"))
 }
 pub async fn connection(s: &Shared, u: &Value) -> Result<Value> {
-    db::optional(
+    let c = db::optional(
         &s.db,
         "SELECT * FROM jellyfin_connections WHERE user_id=?",
         vec![json!(id(u))],
     )
     .await?
-    .ok_or_else(|| ApiError::bad("Link your Jellyfin account in Settings"))
+    .ok_or_else(|| ApiError::bad("Link your Jellyfin account in Settings"))?;
+    if !allowed(s, text(&c, "server_url")) {
+        return Err(ApiError::forbidden(
+            "Jellyfin server is not allowed by this Tuneflow server",
+        ));
+    }
+    Ok(c)
 }
 pub async fn status(s: &Shared, u: &Value) -> Result<Value> {
     let c=db::optional(&s.db,"SELECT server_url,display_name,synced_at,sync_error FROM jellyfin_connections WHERE user_id=?",vec![json!(id(u))]).await?;
@@ -77,6 +94,11 @@ pub async fn link(s: &Shared, u: &Value, b: &Value) -> Result<Value> {
     url.set_query(None);
     url.set_fragment(None);
     let base = url.as_str().trim_end_matches('/').to_string();
+    if !allowed(s, &base) {
+        return Err(ApiError::forbidden(
+            "Jellyfin server is not allowed by this Tuneflow server",
+        ));
+    }
     let res=s.http.post(format!("{base}/Users/AuthenticateByName")).header("X-Emby-Authorization",format!("MediaBrowser Client=\"Tuneflow\", Device=\"Tuneflow server\", DeviceId=\"tuneflow-{}\", Version=\"0.4.0\"",id(u))).json(&json!({"Username":required(b,"username",200)?,"Pw":text(b,"password")})).timeout(Duration::from_secs(12)).send().await?;
     if !res.status().is_success() {
         return Err(ApiError::bad(
@@ -212,8 +234,16 @@ pub async fn sync(s: &Shared, u: &Value) -> Result<Value> {
     status(s, u).await
 }
 pub async fn unlink(s: &Shared, u: &Value) -> Result<()> {
-    let c = connection(s, u).await?;
-    if let Ok(token) = unseal(s, text(&c, "token_ciphertext")) {
+    let c = db::optional(
+        &s.db,
+        "SELECT * FROM jellyfin_connections WHERE user_id=?",
+        vec![json!(id(u))],
+    )
+    .await?
+    .ok_or_else(|| ApiError::bad("Link your Jellyfin account in Settings"))?;
+    if allowed(s, text(&c, "server_url"))
+        && let Ok(token) = unseal(s, text(&c, "token_ciphertext"))
+    {
         let _ = s
             .http
             .post(format!("{}/Sessions/Logout", text(&c, "server_url")))

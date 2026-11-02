@@ -8,8 +8,11 @@ const DEV_PROXY_API_URLS = new Set([
 
 export function getApiUrl(): string {
   const stored = localStorage.getItem(API_URL_KEY);
-  const defaultUrl =
-    import.meta.env.VITE_API_URL ?? (import.meta.env.DEV ? "" : "http://localhost:8010");
+  const defaultUrl = import.meta.env.VITE_API_URL ?? "";
+  if (stored && DEV_PROXY_API_URLS.has(stored) && !["localhost", "127.0.0.1"].includes(window.location.hostname)) {
+    localStorage.removeItem(API_URL_KEY);
+    return defaultUrl;
+  }
   if (import.meta.env.DEV && stored && DEV_PROXY_API_URLS.has(stored)) {
     return "";
   }

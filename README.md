@@ -21,8 +21,10 @@ external `yt-dlp` executable; its Python implementation is not reimplemented in 
 
 1. Copy `.env.example` to `.env` and set `JWT_SECRET` to a private value of at least
    32 bytes. Retain your existing secret when migrating an existing installation.
-2. Optionally set `JELLYFIN_URL` to your server's base URL, including any subpath.
-   This is a convenience default, not a shared Jellyfin administrator credential.
+2. Set `JELLYFIN_URL` to your trusted Jellyfin server's base URL, including any
+   subpath. This is both the allowed linking address and the default shown in
+   Settings, not a shared Jellyfin administrator credential. Add other trusted
+   addresses to `JELLYFIN_ALLOWED_URLS` if needed.
 3. Run:
 
 ```bash
@@ -34,9 +36,12 @@ image includes yt-dlp, its challenge components, Deno, and FFmpeg. It does not
 require Piped or rotate through public Piped instances.
 
 Use a TLS reverse proxy for remote access. For one public hostname, leave
-`VITE_API_URL` empty and set `CORS_ORIGINS` to the web origin. The web container
+`VITE_API_URL` and `CORS_ORIGINS` empty. Set `CORS_ORIGINS` to the web origin
+only when the browser reaches the API at a separate origin. The web container
 proxies `/api` to `tuneflow-api:8000`. Existing `compose.sh`/`compose.ps1` shared
 network support and persistent-data volume settings remain available.
+Release Android builds require HTTPS for the Tuneflow server. Debug builds allow
+HTTP for local development.
 
 ### First use
 
@@ -86,9 +91,10 @@ Important environment settings:
 | `JWT_SECRET` | Required, at least 32 bytes; also protects linked Jellyfin tokens |
 | `TUNEFLOW_DATA_DIR` | `data`; database, media cache, migration backups |
 | `BIND_ADDRESS` | `0.0.0.0:8000` |
-| `JELLYFIN_URL` | Optional per-user linking default |
+| `JELLYFIN_URL` | Trusted Jellyfin address and per-user linking default |
+| `JELLYFIN_ALLOWED_URLS` | Additional trusted Jellyfin addresses, comma separated |
 | `YTDLP_BIN` | `yt-dlp` |
-| `CORS_ORIGINS` | `*`; restrict to your web origin for deployment |
+| `CORS_ORIGINS` | Empty (same-origin); set explicit browser origins if needed |
 | `RUST_LOG` | Request and provider diagnostics without credential-bearing URLs |
 
 The native server uses port 8000 unless overridden; set `BIND_ADDRESS=0.0.0.0:8010`

@@ -1,5 +1,6 @@
 import { Download, Heart, Plus, Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { MediaCard } from "@/components/MediaCard";
 import { CreatePlaylistDialog } from "@/components/CreatePlaylistDialog";
 import { ImportPlaylistWizard } from "@/components/ImportPlaylistWizard";
@@ -12,12 +13,13 @@ import { useLikedTracks } from "@/hooks/useLikedTracks";
 import { api } from "@/lib/api";
 import { filterPlaylists, suggestedPlaylistName } from "@/lib/playlistUtils";
 import { usePlayerStore } from "@/stores/playerStore";
-import type { LikeEntry, Playlist } from "@/types";
+import type { LikeEntry, Playlist, Track } from "@/types";
 
 export function LibraryPage() {
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [householdPlaylists, setHouseholdPlaylists] = useState<Playlist[]>([]);
   const [likes, setLikes] = useState<LikeEntry[]>([]);
+  const [libraryTracks, setLibraryTracks] = useState<Track[]>([]);
   const [playlistQuery, setPlaylistQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -31,14 +33,16 @@ export function LibraryPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [mine, household, liked] = await Promise.all([
+      const [mine, household, liked, indexed] = await Promise.all([
         api.listPlaylists("mine"),
         api.listPlaylists("household"),
         api.listLikes(),
+        api.libraryTracks(),
       ]);
       setPlaylists(mine);
       setHouseholdPlaylists(household);
       setLikes(liked);
+      setLibraryTracks(indexed);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load library");
@@ -165,6 +169,32 @@ export function LibraryPage() {
               </div>
             </section>
           ) : null}
+
+          <section>
+            <SectionHeader
+              title="Jellyfin library"
+              subtitle={`${libraryTracks.length} tracks shown`}
+              action={<Link to="/search?source=library" className="text-sm font-semibold text-accent">Search library</Link>}
+            />
+            {libraryTracks.length === 0 ? (
+              <p className="text-text-secondary">Link Jellyfin and sync your music in <Link to="/settings" className="text-accent">Settings</Link>.</p>
+            ) : (
+              <div className="space-y-0.5">
+                {libraryTracks.map((track) => (
+                  <TrackRowWithActions
+                    key={track.video_id}
+                    track={track}
+                    playQueue={libraryTracks}
+                    likedVideoIds={likedVideoIds}
+                    playlists={playlists}
+                    onPlay={() => void playTrack(track, libraryTracks)}
+                    onLikedChange={() => void refreshLikedTracks()}
+                    onPlaylistsChange={() => void load()}
+                  />
+                ))}
+              </div>
+            )}
+          </section>
 
           <section>
             <SectionHeader title="Liked songs" subtitle={`${likes.length} songs`} />

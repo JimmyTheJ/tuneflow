@@ -16,6 +16,7 @@ async fn test_app() -> (TempDir, Shared, Router) {
         jwt_secret: "test-secret-of-at-least-thirty-two-bytes".into(),
         youtube_bin: "/nonexistent/tuneflow-ytdlp".into(),
         jellyfin_url: None,
+        jellyfin_allowed_urls: vec![],
     })
     .await
     .unwrap();
@@ -197,7 +198,7 @@ async fn library_search_never_calls_youtube_and_media_tokens_are_scoped() {
         )
         .await
         .0,
-        403
+        401
     );
     assert_eq!(
         request(
@@ -265,6 +266,7 @@ async fn legacy_database_defaults_are_migrated_without_losing_accounts() {
         jwt_secret: "test-secret-of-at-least-thirty-two-bytes".into(),
         youtube_bin: "missing".into(),
         jellyfin_url: None,
+        jellyfin_allowed_urls: vec![],
     })
     .await
     .unwrap();
@@ -319,4 +321,38 @@ async fn listening_progress_is_idempotent_and_does_not_duplicate_history() {
     assert_eq!(third["listened_sec"], 60);
     let (_, history) = request(&app, "GET", "/api/history", &root, json!({})).await;
     assert_eq!(history.as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn cache_delete_returns_purge_result_for_web_client() {
+    let (_d, _s, app) = test_app().await;
+    let root = setup(&app).await;
+    let (status, result) = request(&app, "DELETE", "/api/admin/cache", &root, json!({})).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(result["deleted_entries"], 0);
+    assert_eq!(result["freed_bytes"], 0);
+}
+
+#[tokio::test]
+async fn login_tokens_are_not_accepted_in_query_strings() {
+    let (_d, _s, app) = test_app().await;
+    let root = setup(&app).await;
+    let (status, _) = request(
+        &app,
+        "GET",
+        &format!("/api/auth/me?token={root}"),
+        "",
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (status, _) = request(
+        &app,
+        "GET",
+        &format!("/api/library/images/jf_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?token={root}"),
+        "",
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
 }

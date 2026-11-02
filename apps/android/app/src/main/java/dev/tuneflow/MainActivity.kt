@@ -254,7 +254,7 @@ class MainActivity : Activity() {
         target.addView(row, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) })
     }
     private fun item(track: Track): MediaItem {
-        val artworkPath = if (track.id.startsWith("jf_")) "/api/library/images/${track.id}?token=${Api.encode(session.token)}" else track.artwork
+        val artworkPath = track.artwork
         val artwork = artworkPath.takeIf { it.isNotEmpty() }?.let { Uri.parse(if (it.startsWith('/')) session.server + it else it) }
         return MediaItem.Builder().setMediaId(track.id).setUri("${session.server}/api/music/audio/${Api.encode(track.id)}")
             .setCustomCacheKey("${session.server}|${session.userId}|${track.id}")

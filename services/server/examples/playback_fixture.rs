@@ -49,6 +49,7 @@ async fn main() -> anyhow::Result<()> {
         jwt_secret: "fixture-only-not-for-production-secret".into(),
         youtube_bin: "missing".into(),
         jellyfin_url: Some(base.clone()),
+        jellyfin_allowed_urls: vec![],
     })
     .await?;
     let hash = bcrypt::hash("fixture-password", 4)?;

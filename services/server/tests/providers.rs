@@ -100,13 +100,17 @@ async fn fixture() -> (String, Arc<Mock>, tokio::task::JoinHandle<()>) {
     });
     (base, state, task)
 }
-async fn app() -> (tempfile::TempDir, Shared, Value) {
+async fn app(allowed_jellyfin_url: Option<&str>) -> (tempfile::TempDir, Shared, Value) {
     let dir = tempfile::tempdir().unwrap();
     let s = App::open(Config {
         data_dir: dir.path().into(),
         jwt_secret: "tests-with-at-least-thirty-two-secret-bytes".into(),
         youtube_bin: "missing".into(),
         jellyfin_url: None,
+        jellyfin_allowed_urls: allowed_jellyfin_url
+            .into_iter()
+            .map(str::to_owned)
+            .collect(),
     })
     .await
     .unwrap();
@@ -115,9 +119,23 @@ async fn app() -> (tempfile::TempDir, Shared, Value) {
     (dir, s, u)
 }
 #[tokio::test]
+async fn jellyfin_link_rejects_unapproved_server_before_network_request() {
+    let (base, _mock, upstream) = fixture().await;
+    let (_dir, s, u) = app(None).await;
+    let error = jellyfin::link(
+        &s,
+        &u,
+        &json!({"server_url":base,"username":"listener","password":"password"}),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error.0, StatusCode::FORBIDDEN);
+    upstream.abort();
+}
+#[tokio::test]
 async fn jellyfin_sync_is_private_atomic_and_searchable() {
     let (base, mock, upstream) = fixture().await;
-    let (_dir, s, u) = app().await;
+    let (_dir, s, u) = app(Some(&base)).await;
     jellyfin::link(
         &s,
         &u,
@@ -171,7 +189,7 @@ async fn jellyfin_sync_is_private_atomic_and_searchable() {
 #[tokio::test]
 async fn youtube_proxy_starts_before_download_finishes_and_saves_only_completed_audio() {
     let (base, _mock, upstream) = fixture().await;
-    let (_dir, s, u) = app().await;
+    let (_dir, s, u) = app(None).await;
     s.streams.insert("audio:abcdefghijk".into(),json!({"video_id":"abcdefghijk","title":"Song","artist":"Artist","mime_type":"audio/flac","upstream_url":format!("{base}/source")})).await;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -234,7 +252,7 @@ async fn youtube_proxy_starts_before_download_finishes_and_saves_only_completed_
 #[tokio::test]
 async fn jellyfin_forwards_seeking_ranges() {
     let (base, _mock, upstream) = fixture().await;
-    let (_dir, s, u) = app().await;
+    let (_dir, s, u) = app(Some(&base)).await;
     jellyfin::link(
         &s,
         &u,
@@ -268,7 +286,7 @@ async fn jellyfin_forwards_seeking_ranges() {
 #[tokio::test]
 async fn simultaneous_playback_requests_extract_only_once() {
     use std::os::unix::fs::PermissionsExt;
-    let (dir, s, _u) = app().await;
+    let (dir, s, _u) = app(None).await;
     let script = dir.path().join("extractor");
     let counter = dir.path().join("count");
     std::fs::write(&script,format!("#!/usr/bin/python\nimport json,time\nwith open({:?},'a') as f:f.write('1\\n')\ntime.sleep(0.2)\nprint(json.dumps({{'id':'abcdefghijk','title':'Song','url':'https://example.com/audio','ext':'m4a'}}))\n",counter.to_string_lossy())).unwrap();
@@ -278,6 +296,7 @@ async fn simultaneous_playback_requests_extract_only_once() {
         jwt_secret: s.config.jwt_secret.clone(),
         youtube_bin: script.to_string_lossy().into(),
         jellyfin_url: None,
+        jellyfin_allowed_urls: vec![],
     })
     .await
     .unwrap();

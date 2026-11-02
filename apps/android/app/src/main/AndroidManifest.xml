@@ -6,7 +6,7 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <application android:label="Tuneflow" android:theme="@style/AppTheme"
-        android:icon="@drawable/ic_music" android:allowBackup="false" android:usesCleartextTraffic="true">
+        android:icon="@drawable/ic_music" android:allowBackup="false" android:usesCleartextTraffic="false">
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

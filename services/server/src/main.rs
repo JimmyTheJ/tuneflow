@@ -16,11 +16,20 @@ async fn main() -> anyhow::Result<()> {
         secret.len() >= 32 && !secret.starts_with("change-me"),
         "Set JWT_SECRET to a private value of at least 32 bytes"
     );
+    let jellyfin_url = std::env::var("JELLYFIN_URL").ok().filter(|v| !v.is_empty());
+    let jellyfin_allowed_urls = std::env::var("JELLYFIN_ALLOWED_URLS")
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(str::to_owned)
+        .collect();
     let app = App::open(Config {
         data_dir,
         jwt_secret: secret,
         youtube_bin: std::env::var("YTDLP_BIN").unwrap_or_else(|_| "yt-dlp".into()),
-        jellyfin_url: std::env::var("JELLYFIN_URL").ok().filter(|v| !v.is_empty()),
+        jellyfin_url,
+        jellyfin_allowed_urls,
     })
     .await?;
     tuneflow_server::extras::maintenance(app.clone());

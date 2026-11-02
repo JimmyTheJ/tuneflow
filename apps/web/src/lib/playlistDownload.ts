@@ -2,7 +2,7 @@ import JSZip from "jszip";
 
 import { api } from "@/lib/api";
 import { playablePlaylistTracks } from "@/lib/playlistUtils";
-import { getAccessToken, getApiUrl } from "@/lib/settings";
+import { getApiUrl } from "@/lib/settings";
 import {
   buildTrackBaseName,
   extensionFromMime,
@@ -109,14 +109,12 @@ async function fetchTrackAudio(
   },
 ): Promise<FetchedTrack> {
   const stream = await api.getStream(track.video_id, track);
-  const token = getAccessToken();
-  const base = getApiUrl();
-  const playableId = stream.playable_video_id ?? stream.video_id;
-  const params = new URLSearchParams({ token, download: "true" });
-  if (track.title) params.set("title", track.title);
-  if (track.artist) params.set("artist", track.artist);
+  const mediaUrl = new URL(stream.audio_url, getApiUrl() || window.location.origin);
+  mediaUrl.searchParams.set("download", "true");
+  if (track.title) mediaUrl.searchParams.set("title", track.title);
+  if (track.artist) mediaUrl.searchParams.set("artist", track.artist);
 
-  const response = await fetch(`${base}/api/music/audio/${playableId}?${params.toString()}`);
+  const response = await fetch(mediaUrl);
   if (!response.ok) {
     let detail = await response.text();
     try {

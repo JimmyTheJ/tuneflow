@@ -44,6 +44,7 @@ pub struct Config {
     pub jwt_secret: String,
     pub youtube_bin: String,
     pub jellyfin_url: Option<String>,
+    pub jellyfin_allowed_urls: Vec<String>,
 }
 #[derive(Default)]
 pub struct Metrics {
@@ -129,20 +130,28 @@ impl App {
     }
 }
 pub fn router(app: Shared) -> Router {
-    let origins = std::env::var("CORS_ORIGINS").unwrap_or_else(|_| "*".into());
-    let cors = if origins == "*" {
-        CorsLayer::new().allow_origin(Any)
-    } else {
-        CorsLayer::new().allow_origin(
-            origins
-                .split(',')
-                .filter_map(|s| s.trim().parse().ok())
-                .collect::<Vec<axum::http::HeaderValue>>(),
-        )
+    let mut router = Router::new().route("/health",get(||async{Json(json!({"status":"ok","service":"tuneflow-api","version":"0.4.0","implementation":"rust"}))})).route("/api/{*path}",get(endpoint).post(endpoint).put(endpoint).patch(endpoint).delete(endpoint).head(endpoint)).layer(DefaultBodyLimit::max(1024*1024));
+    if let Ok(origins) = std::env::var("CORS_ORIGINS") {
+        let allowed = origins
+            .split(',')
+            .filter_map(|s| s.trim().parse().ok())
+            .collect::<Vec<axum::http::HeaderValue>>();
+        if !allowed.is_empty() {
+            router = router.layer(
+                CorsLayer::new()
+                    .allow_origin(allowed)
+                    .allow_methods(Any)
+                    .allow_headers(Any),
+            );
+        }
     }
-    .allow_methods(Any)
-    .allow_headers(Any);
-    Router::new().route("/health",get(||async{Json(json!({"status":"ok","service":"tuneflow-api","version":"0.4.0","implementation":"rust"}))})).route("/api/{*path}",get(endpoint).post(endpoint).put(endpoint).patch(endpoint).delete(endpoint).head(endpoint)).layer(DefaultBodyLimit::max(1024*1024)).layer(cors).layer(TraceLayer::new_for_http()).with_state(app)
+    router
+        .layer(TraceLayer::new_for_http().make_span_with(
+            |request: &axum::http::Request<axum::body::Body>| {
+                tracing::info_span!("request", method = %request.method(), path = %request.uri().path())
+            },
+        ))
+        .with_state(app)
 }
 async fn endpoint(
     State(s): State<Shared>,
@@ -226,7 +235,7 @@ async fn dispatch(
     } else {
         extras::handle(&s, &user, path, &q, &method, b).await?
     };
-    if method == Method::DELETE || value.is_null() {
+    if value.is_null() {
         Ok(StatusCode::NO_CONTENT.into_response())
     } else {
         Ok(Json(value).into_response())

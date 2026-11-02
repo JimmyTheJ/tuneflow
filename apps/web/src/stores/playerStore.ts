@@ -21,7 +21,7 @@ import {
   setRuntimeMedia,
   type PlayerSessionSnapshot,
 } from "@/lib/playerRuntime";
-import { getAccessToken, getApiUrl } from "@/lib/settings";
+import { getApiUrl } from "@/lib/settings";
 import { isRetryablePlaybackFailure, withRetry } from "@/lib/retry";
 import type { EqCurve, QueueSource, StreamInfo, StreamSelection, Track } from "@/types";
 
@@ -116,20 +116,13 @@ function playableIdFromStream(stream: StreamInfo): string {
 }
 
 function buildMediaUrl(stream: StreamInfo, selection: StreamSelection, track?: Track | null): string {
-  const token = encodeURIComponent(getAccessToken() ?? "");
-  const base = getApiUrl();
-  const playableId = playableIdFromStream(stream);
-  const params = new URLSearchParams({ token });
-  if (track?.title) params.set("title", track.title);
-  if (track?.artist) params.set("artist", track.artist);
-
-  if (selection.video) {
-    const videoOnly = !selection.audio;
-    if (videoOnly) params.set("video_only", "true");
-    return `${base}/api/music/video/${playableId}?${params.toString()}`;
-  }
-
-  return `${base}/api/music/audio/${playableId}?${params.toString()}`;
+  const path = selection.video ? stream.video_url : stream.audio_url;
+  if (!path) throw new Error("No stream URL is available for this track");
+  const url = new URL(path, getApiUrl() || window.location.origin);
+  if (track?.title) url.searchParams.set("title", track.title);
+  if (track?.artist) url.searchParams.set("artist", track.artist);
+  if (selection.video && !selection.audio) url.searchParams.set("video_only", "true");
+  return url.toString();
 }
 
 function applyVolume(
@@ -1007,7 +1000,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
         media: pendingMedia,
         stream,
         streamSelection: resolvedSelection,
-        current: { ...track, video_id: playableIdFromStream(stream) },
+        current: { ...track, video_id: playableIdFromStream(stream), thumbnail_url: stream.thumbnail_url || track.thumbnail_url },
         isPlaying: true,
         isLoading: false,
         ...syncProgress(pendingMedia, track),
