@@ -14,7 +14,10 @@ deployment configuration, and their checked-in dependency lockfiles.
   Rust client's outbound requests. Unlinking a disallowed stored address still
   removes its local connection without sending a logout request.
 - CORS is off by default; a separate browser origin must be listed explicitly.
+  Wildcard CORS entries are ignored, including in stale local `.env` files.
   The web server also sets script, object, base URI, and framing restrictions.
+- Compose binds its plain-HTTP host ports to loopback by default; remote access
+  goes through a TLS proxy or an explicitly configured private network binding.
 - Android release builds require HTTPS for the API. Debug builds permit local
   HTTP development. Android session tokens are encrypted with Android Keystore.
 - SQLx's unused MySQL/PostgreSQL default features were removed. This eliminated
@@ -44,6 +47,10 @@ deployment configuration, and their checked-in dependency lockfiles.
   container/image vulnerability scan, validate Nginx with `nginx -t` inside the
   built image, and smoke test login, Jellyfin link/sync, and media playback in
   the deployed stack before treating this as a production sign-off.
+- This checkout's ignored `.env` still contains legacy Piped settings and old
+  browser/CORS defaults. It is not part of Git; migrate each server's `.env`
+  using the instructions in README before deploying. Preserve its real
+  `JWT_SECRET` when the database already contains users or Jellyfin links.
 - The web client keeps its account JWT in localStorage. The script policy lowers
   script-injection risk, but a same-origin script compromise could still read it.
   Moving to a server-managed, HttpOnly cookie session would require a separate

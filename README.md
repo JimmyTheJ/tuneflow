@@ -35,6 +35,11 @@ The API uses port **8010**, and the web app uses **3010** by default. The runtim
 image includes yt-dlp, its challenge components, Deno, and FFmpeg. It does not
 require Piped or rotate through public Piped instances.
 
+Both host ports bind to `127.0.0.1` by default so plain HTTP is reachable only
+from the server itself. If your TLS proxy runs on another host, set
+`WEB_HOST_BIND` to the server's private network address and restrict that port
+with a firewall. The API normally stays on loopback or the shared Docker network.
+
 Use a TLS reverse proxy for remote access. For one public hostname, leave
 `VITE_API_URL` and `CORS_ORIGINS` empty. Set `CORS_ORIGINS` to the web origin
 only when the browser reaches the API at a separate origin. The web container
@@ -63,6 +68,15 @@ Stop the old API before starting the Rust service against the same database.
 Keep the same data volume and `JWT_SECRET`. Current accounts, bcrypt passwords,
 households, roles, playlists, likes, listening history, and equalizer profiles are
 read directly from the existing schema.
+
+The ignored `.env` file is not updated by Git. Before starting Compose, merge
+the tracked `.env.example` into your server's `.env`: preserve the real
+`JWT_SECRET`, set `JELLYFIN_URL` (and any other allowed Jellyfin addresses),
+clear the old localhost `VITE_API_URL`, and remove obsolete `PIPED_*`,
+`POSTGRES_*`, bootstrap, and Python-only settings. Leave `CORS_ORIGINS` empty
+when the browser uses the web container's `/api` proxy. The Rust server ignores
+a wildcard CORS value; use explicit origins if the browser reaches the API
+separately. Rebuild the web image after changing `VITE_API_URL`.
 
 Some old column defaults existed only in Python. The Rust server migrates those
 tables transactionally and retains a complete `tuneflow-before-rust-*.db` backup

@@ -134,6 +134,7 @@ pub fn router(app: Shared) -> Router {
     if let Ok(origins) = std::env::var("CORS_ORIGINS") {
         let allowed = origins
             .split(',')
+            .filter(|s| !s.trim().is_empty() && s.trim() != "*")
             .filter_map(|s| s.trim().parse().ok())
             .collect::<Vec<axum::http::HeaderValue>>();
         if !allowed.is_empty() {
