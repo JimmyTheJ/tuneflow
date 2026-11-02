@@ -86,7 +86,7 @@ async function executeRequest<T>(path: string, options: RequestOptions = {}): Pr
 
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const { signal, ...requestOptions } = options;
-  return withRetry(() => executeRequest<T>(path, requestOptions), { signal });
+  return withRetry(() => executeRequest<T>(path, { ...requestOptions, signal }), { signal });
 }
 
 async function* streamArtistEvents(mbid: string): AsyncGenerator<ArtistStreamEvent> {
@@ -130,6 +130,11 @@ async function* streamArtistEvents(mbid: string): AsyncGenerator<ArtistStreamEve
 }
 
 export const api = {
+  jellyfinStatus: () => request<{ linked: boolean; track_count: number; default_server_url: string | null; connection: { server_url: string; display_name: string; synced_at: string | null; sync_error: string | null } | null }>("/api/jellyfin/status"),
+  linkJellyfin: (server_url: string, username: string, password: string) => request("/api/jellyfin/link", { method: "POST", body: { server_url, username, password } }),
+  syncJellyfin: () => request("/api/jellyfin/sync", { method: "POST" }),
+  unlinkJellyfin: () => request("/api/jellyfin", { method: "DELETE" }),
+  libraryTracks: () => request<Track[]>("/api/library/tracks?limit=100"),
   setupStatus: () => request<SetupStatus>("/api/auth/setup-status", { auth: false }),
   setup: (username: string, password: string, displayName: string) =>
     request<TokenResponse>("/api/auth/setup", {
@@ -146,8 +151,9 @@ export const api = {
   getHouseholdPublic: (slug: string) =>
     request<{ slug: string; name: string }>(`/api/households/public/${encodeURIComponent(slug)}`, { auth: false }),
   me: () => request<User>("/api/auth/me"),
-  search: (q: string, options?: { nextPage?: string; searchOptions?: SearchOptions; signal?: AbortSignal }) => {
+  search: (q: string, options?: { nextPage?: string; searchOptions?: SearchOptions; source?: "library" | "youtube"; signal?: AbortSignal }) => {
     const params = new URLSearchParams({ q });
+    params.set("source", options?.source ?? "library");
     if (options?.nextPage) params.set("next_page", options.nextPage);
     if (options?.searchOptions) {
       const { max_per_song, hide_covers, hide_loops, results_per_page, version_preference } =

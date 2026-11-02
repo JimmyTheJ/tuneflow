@@ -10,6 +10,7 @@ import {
   Users,
   Trash2,
 } from "lucide-react";
+import { JellyfinSettings } from "@/components/JellyfinSettings";
 import { PinModal } from "@/components/PinModal";
 import { SearchOptionsPanel } from "@/components/SearchOptionsPanel";
 import { Button } from "@/components/ui/Button";
@@ -228,6 +229,8 @@ export function SettingsPage() {
   return (
     <div className="mx-auto max-w-2xl space-y-8">
       <h1 className="m-0 text-3xl font-bold tracking-tight md:text-4xl">Settings</h1>
+
+      <JellyfinSettings />
 
       {user ? (
         <Card>

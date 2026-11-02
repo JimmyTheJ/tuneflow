@@ -35,6 +35,7 @@ import type {
 export function SearchPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const urlQuery = searchParams.get("q") ?? "";
+  const source = searchParams.get("source") === "youtube" ? "youtube" : "library";
   const [query, setQuery] = useState(urlQuery);
   const [groups, setGroups] = useState<SearchResultGroup[]>([]);
   const [artists, setArtists] = useState<ArtistSearchHit[]>([]);
@@ -96,12 +97,13 @@ export function SearchPage() {
   const runSearchRequest = useCallback(
     async (trimmed: string, options: SearchOptions, pageToken?: string | null, signal?: AbortSignal) => {
       return api.search(trimmed, {
+        source,
         nextPage: pageToken ?? undefined,
         searchOptions: options,
         signal,
       });
     },
-    [],
+    [source],
   );
 
   const cancelSearch = useCallback(() => {
@@ -293,7 +295,7 @@ export function SearchPage() {
               "focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/30",
               "disabled:opacity-50",
             )}
-            placeholder="What do you want to listen to?"
+            placeholder={source === "youtube" ? "Discover on YouTube" : "Search your Jellyfin library"}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onFocus={() => setInputFocused(true)}
@@ -353,6 +355,14 @@ export function SearchPage() {
             </div>
           ) : null}
         </div>
+        <select aria-label="Music source" value={source} className="rounded-xl border border-border bg-elevated px-3 text-text" onChange={(event) => {
+          const next = new URLSearchParams(searchParams);
+          next.set("source", event.target.value);
+          setSearchParams(next);
+        }}>
+          <option value="library">Library</option>
+          <option value="youtube">YouTube</option>
+        </select>
         {!searchAdvancedHidden ? (
           <Button
             type="button"

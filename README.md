@@ -1,323 +1,183 @@
 # Tuneflow
 
-Personal, self-hostable YouTube music player for your household — separate accounts, playlists, history, parental controls, and AI recommendations.
+A self-hosted household music player. Jellyfin manages your music collection;
+Tuneflow indexes it and plays the audio in its own web and native Android players.
+YouTube is a separate, supplemental discovery source.
 
-## Stack
+## Applications
 
-- **API**: FastAPI + SQLite + JWT auth
-- **Discovery/streams**: [Piped](https://github.com/TeamPiped/Piped) (public instance by default, self-host optional)
-- **AI**: OpenAI-compatible LLM API (Ollama, LM Studio, OpenAI, etc. on your LAN or cloud)
-- **Mobile**: Expo (React Native) with `expo-av` playback
-- **Web**: React + Vite browser app for Windows/Linux/macOS desktops
+| Component | Implementation | Location |
+| --- | --- | --- |
+| Server | Rust, Axum, Tokio, SQLx, SQLite/FTS5 | `services/server` |
+| Android | Native Kotlin, Android Views, Media3/ExoPlayer | `apps/android` |
+| Web | Existing TypeScript/React interface, retained for now | `apps/web` |
 
-## Quick start (API)
+The Python API and Expo app remain in `services/api` and `apps/mobile` as migration
+references. Docker Compose now builds the Rust server. Neither legacy application
+is part of the new server or native Android runtime. YouTube extraction uses the
+external `yt-dlp` executable; its Python implementation is not reimplemented in Rust.
 
-```powershell
-cd D:\workspace\tuneflow
-copy .env.example .env
-# Edit JWT_SECRET, BOOTSTRAP_* and LLM_BASE_URL
+## Run with Docker
 
-.\compose.ps1 up --build tuneflow-api
-```
-
-API runs at `http://localhost:8010` by default. Interactive docs at `http://localhost:8010/docs`.
-
-> **Port conflicts?** Defaults avoid common ports (8000, 5173). Override anytime:
-> `uvicorn app.main:app --port 8020` and `WEB_PORT=5195 npm run dev`
-
-**Schema upgrade:** if you used an older single-user build, delete `data/tuneflow.db` before starting.
-
-### Local Python dev
-
-```powershell
-cd services\api
-python -m venv .venv
-.\.venv\Scripts\activate
-pip install -r requirements.txt
-mkdir data -Force
-copy ..\..\.env.example ..\..\.env
-uvicorn app.main:app --reload --port 8010
-```
-
-On first startup, the setup wizard creates a **local parent account** (username + password stored in Tuneflow). This is required before LDAP or other external auth can be wired in later.
-
-Optional: set `BOOTSTRAP_ENABLED=true` in `.env` to auto-create the first account from `BOOTSTRAP_USERNAME` / `BOOTSTRAP_PASSWORD` for headless installs.
-
-### Exposing to the internet
-
-For a public subdomain, at minimum:
-
-1. Put TLS termination in front (Caddy, nginx, Traefik).
-2. Set `JWT_SECRET` to a long random value.
-3. Set `TRUST_PROXY_HEADERS=true` so rate limits use real client IPs.
-4. Restrict `CORS_ORIGINS` to your web UI origin.
-5. Set `DOCS_ENABLED=false` in production.
-6. Login/setup/PIN endpoints are rate-limited by default (10 failed logins per 15 min per IP and username).
-
-## Web app (desktop browser)
-
-Works on **Windows, Linux, and macOS** in any modern browser — same features as mobile.
-
-### Development
-
-```powershell
-# Terminal 1 — API
-cd D:\workspace\tuneflow\services\api
-.\.venv\Scripts\uvicorn.exe app.main:app --reload --port 8010
-
-# Terminal 2 — Web UI
-cd D:\workspace\tuneflow\apps\web
-npm install
-npm run dev
-```
-
-Open **http://localhost:5190**. The default API URL is `http://localhost:8010` (change in Settings if you used a different API port).
-
-### Docker (API + web together)
-
-```powershell
-cd D:\workspace\tuneflow
-.\compose.ps1 up --build tuneflow-api tuneflow-web
-```
-
-On Linux/macOS, use `./compose.sh` instead of `.\compose.ps1`.
-
-| Service | URL |
-|---------|-----|
-| Web UI | http://localhost:3010 |
-| API | http://localhost:8010 |
-| API docs | http://localhost:8010/docs |
-
-Override host ports in `.env`: `API_PORT=8020`, `WEB_PORT=3020`.
-
-Set `VITE_API_URL` in `.env` before building if the browser needs a different API address (e.g. LAN IP). For a single public subdomain behind a reverse proxy, leave it empty so the browser uses same-origin `/api` (the web container proxies those requests to `tuneflow-api`).
-
-To attach API and web to an existing reverse-proxy network (e.g. nginx), set `DOCKER_SHARED_NETWORK=nginx_network` in `.env` and use `compose.ps1` / `compose.sh` (not bare `docker compose` — the wrapper reads `.env` and includes the shared-network overlay). The network must already exist.
-
-Verify with `./compose.sh config | grep -A2 'networks:'` — you should see both the project default network and `name: nginx_network`.
-
-### Nginx Proxy Manager (or similar)
-
-A **502** here almost always means the proxy cannot reach the upstream container — not a DNS/DDNS issue. Your other subdomains working only proves NPM itself is fine; this proxy host still needs the Tuneflow-specific container name and internal port.
-
-**Proxy Host settings (one host for the UI):**
-
-| Field | Value |
-|-------|-------|
-| Domain | `music.example.com` (your subdomain) |
-| Scheme | `http` |
-| Forward Hostname / IP | `tuneflow-web` |
-| Forward Port | `80` |
-| Block Common Exploits | on (usually fine) |
-| Websockets Support | off (not required) |
-
-Common mistakes that cause 502:
-
-- Forwarding to `web`, `api`, or `localhost` instead of `tuneflow-web`
-- Using host port `3010` instead of container port `80` (`3010` is only for browser → host access)
-- Using `https` to the upstream (the Tuneflow web container only serves plain HTTP on port 80)
-- NPM container not attached to the same Docker network as Tuneflow
-
-**Run these on the server** (replace the NPM container name if yours differs — find it with `docker ps | grep -i proxy`):
+1. Copy `.env.example` to `.env` and set `JWT_SECRET` to a private value of at least
+   32 bytes. Retain your existing secret when migrating an existing installation.
+2. Optionally set `JELLYFIN_URL` to your server's base URL, including any subpath.
+   This is a convenience default, not a shared Jellyfin administrator credential.
+3. Run:
 
 ```bash
-# Tuneflow containers should appear here
-docker network inspect nginx_network --format '{{range .Containers}}{{.Name}} {{end}}'
-
-# Test from inside NPM — this is the same path NPM uses
-docker exec nginx-proxy-manager curl -sv http://tuneflow-web:80/ 2>&1 | head -20
-docker exec nginx-proxy-manager curl -sv http://tuneflow-web/health 2>&1 | head -20
-
-# Tuneflow container health
-docker ps --filter name=tuneflow-
-docker logs --tail 50 tuneflow-web
-docker logs --tail 50 tuneflow-api
+./compose.sh up -d --build tuneflow-api tuneflow-web
 ```
 
-If the `curl` from inside NPM fails, fix Docker networking or container names first. If `curl` works but the browser still shows 502, the NPM proxy host forward settings are wrong (or stale — edit, save, and try again).
+The API uses port **8010**, and the web app uses **3010** by default. The runtime
+image includes yt-dlp, its challenge components, Deno, and FFmpeg. It does not
+require Piped or rotate through public Piped instances.
 
-NPM error details are often in per-host log files inside the container (`/data/logs/`), not in `docker logs nginx_proxy_manager`.
+Use a TLS reverse proxy for remote access. For one public hostname, leave
+`VITE_API_URL` empty and set `CORS_ORIGINS` to the web origin. The web container
+proxies `/api` to `tuneflow-api:8000`. Existing `compose.sh`/`compose.ps1` shared
+network support and persistent-data volume settings remain available.
 
-**After the UI loads**, set production values in `.env` and rebuild:
+### First use
 
-```env
-VITE_API_URL=
-CORS_ORIGINS=https://music.example.com
-TRUST_PROXY_HEADERS=true
-JWT_SECRET=<long-random-secret>
-DOCS_ENABLED=false
-```
+1. Set up the initial administrator in the app or browser. Its household is `system`.
+2. Create a household and its administrator from Settings. Sign in to that household
+   to manage family members; the system account is for server administration.
+3. In Settings, link each Tuneflow user to their own Jellyfin account and sync.
+4. Browse or search the indexed library. Select **YouTube** explicitly when you
+   want to discover tracks outside your collection.
 
-Then `./compose.sh up -d --build tuneflow-web tuneflow-api`.
+Jellyfin passwords are used only for authentication. The resulting access token
+is encrypted at rest using a key derived from `JWT_SECRET` and never sent to clients.
+Library indexing is scoped to the linked Jellyfin user. Playback remains in Tuneflow,
+with Jellyfin serving the bytes upstream. The original library files stay in Jellyfin.
 
-Optional second proxy host for direct API access (debugging only): forward `tuneflow-api:8000` over `http`.
+## Existing installations
 
-### Persistent data (Docker)
+Stop the old API before starting the Rust service against the same database.
+Keep the same data volume and `JWT_SECRET`. Current accounts, bcrypt passwords,
+households, roles, playlists, likes, listening history, and equalizer profiles are
+read directly from the existing schema.
 
-The API runs as a non-root user (default uid/gid **10001**). Data lives at `TUNEFLOW_DATA_HOST_PATH` on the host, mounted to `/app/data` in the container.
+Some old column defaults existed only in Python. The Rust server migrates those
+tables transactionally and retains a complete `tuneflow-before-rust-*.db` backup
+in the data directory. Unknown columns cause startup to fail instead of silently
+removing data. Keep the backup until you have verified your installation.
+Do not run the Python and Rust APIs concurrently against the same database.
 
-**Named volume (default)** — no setup needed; Docker manages `tuneflow-data`.
+A linked Jellyfin library requires a new sync. Existing YouTube IDs and playlists
+remain usable. Spotify imports first match tracks in your library; unmatched
+recordings remain explicitly unmatched rather than being silently substituted.
 
-**Bind mount** (e.g. `/home/jamus/tuneflow-data`):
+## Local Rust development
 
-```env
-TUNEFLOW_DATA_HOST_PATH=/home/jamus/tuneflow-data
-```
+Install a Rust toolchain supporting edition 2024, yt-dlp with its default extras,
+and Deno. FFmpeg is useful for media tooling. Then, from the repository root:
 
 ```bash
-mkdir -p /home/jamus/tuneflow-data
-sudo chown -R 10001:10001 /home/jamus/tuneflow-data
-./compose.sh up --build -d
+# .env is loaded from the working directory.
+cargo run --manifest-path services/server/Cargo.toml
 ```
 
-To have files owned by your login user on the host instead, set `PUID` and `PGID` in `.env` to the output of `id -u` and `id -g`, rebuild, and `chown` the data directory to match.
+Important environment settings:
 
-Avoid NTFS/exFAT mounts (e.g. `/mnt/d/...` from Windows drives) if you hit permission errors — use a native Linux path under `/home` or `/var/lib`.
+| Variable | Default / purpose |
+| --- | --- |
+| `JWT_SECRET` | Required, at least 32 bytes; also protects linked Jellyfin tokens |
+| `TUNEFLOW_DATA_DIR` | `data`; database, media cache, migration backups |
+| `BIND_ADDRESS` | `0.0.0.0:8000` |
+| `JELLYFIN_URL` | Optional per-user linking default |
+| `YTDLP_BIN` | `yt-dlp` |
+| `CORS_ORIGINS` | `*`; restrict to your web origin for deployment |
+| `RUST_LOG` | Request and provider diagnostics without credential-bearing URLs |
 
-If you upgraded from an older root-owned data directory: `sudo chown -R 10001:10001 /path/to/data`.
+The native server uses port 8000 unless overridden; set `BIND_ADDRESS=0.0.0.0:8010`
+when using the web app's local development proxy.
 
-## Mobile app
-
-```powershell
-cd apps\mobile
-npm install
-npx expo start
+```bash
+npm --prefix apps/web install
+npm --prefix apps/web run dev
 ```
 
-1. Set **API URL** in Settings (`http://192.168.x.x:8010` on LAN, or Tailscale).
-2. First launch walks through **parent account setup** (or sign in).
-3. Each family member signs in with their own username — playlists, history, and likes are per user.
+## Native Android
 
-### Android dev APK
+Open `apps/android` in Android Studio, or use JDK 21 and an Android SDK containing
+platform 37 and build-tools 36.0.0:
 
-Local sideload builds use auto-incrementing versions stored under `%USERPROFILE%\.tuneflow-mobile-dev\` (same idea as [jellyfin-android](https://github.com/jellyfin/jellyfin-android)). They are **release** APKs signed with the Android debug keystore so the JS bundle is embedded and the app launches without Metro (useful when installing over Wi‑Fi / Drive without USB debugging).
-
-| File | Purpose |
-|------|---------|
-| `version.properties` | Version for the **next** dev build (e.g. `0.1.0-dev.3`) |
-| `last-build.properties` | Metadata for the most recent APK (path, git commit, etc.) |
-
-Requires **Android Studio** command-line tools (or an existing SDK install). On first run the script bootstraps a writable SDK at `%USERPROFILE%\.tuneflow-android-sdk\` (platform tools, build-tools, CMake, NDK) so it does not need to write into `Program Files`.
-
-```powershell
-cd apps\mobile
-npm install
-npm run dev:apk
+```bash
+cd apps/android
+./gradlew assembleDebug testDebugUnitTest lintDebug
 ```
 
-Output: `apps\mobile\android\app\build\outputs\apk\release\tuneflow-v<version>.apk`
+The application ID is `com.tuneflow.app`. Updating an existing installation requires
+an APK signed by the same key. The native client stores its own encrypted session;
+an Expo login is not imported. Debug APKs contain everything needed to launch and
+do not depend on Metro, Node, or an embedded browser.
 
-Each successful build bumps the dev suffix (`0.1.0-dev.2` → `0.1.0-dev.3`) in your user profile, not in git.
+`scripts/build-android.sh` builds, checks, and copies a descriptively named APK to
+`/mnt/d/Users/jamus/Nextcloud/APKs`, verifying its SHA-256 checksum. The original
+Gradle build output and a descriptive local copy are retained.
 
-For live reload / Metro during development, use `npx expo start` (or `npm run android`) instead of the sideload APK.
+The player uses a MediaSessionService, audio focus, headphone-disconnect handling,
+lock-screen/notification controls, a 512 MiB disk cache per Tuneflow account, and
+next-item preloading. Playback begins after buffering instead of downloading a
+whole song. The disk cache is opportunistic; it is not a user-managed offline
+library or a guarantee that every queued track is available without the server.
 
-### Phone ↔ server networking
+## Playback and discovery design
 
-| Scenario | API URL example |
-|----------|-----------------|
-| Android emulator | `http://10.0.2.2:8010` |
-| Same Wi‑Fi | `http://192.168.1.50:8010` |
-| Tailscale | `http://100.x.x.x:8000` |
+- Local FTS5 search does not contact YouTube or MusicBrainz.
+- Library scans run in the background and replace the index only after a complete
+  successful scan. Failed scans retain the previous library. Connections are
+  refreshed by the hourly maintenance worker, or by explicit sync.
+- Jellyfin streams retain byte ranges, response status, lengths, and media types.
+  Playback verifies current access to the linked Jellyfin item.
+- YouTube uses one audio extraction, shared by concurrent requests and reused for
+  three minutes. Search results are cached for two minutes. Repeated extraction
+  failures cool down for ten seconds. At most three extractors run concurrently.
+- Ordinary YouTube search has a ten-second deadline; audio resolution has a
+  twelve-second deadline, including waiting for an extractor slot. Cancellation
+  kills the extractor subprocess. Audio playback does not wait for video lookup.
+- The server forwards audio immediately and writes completed cache files atomically.
+  Interrupted or oversized downloads do not become playable server cache entries.
+- Catalog metadata and AI recommendations stay outside the playback path. Official
+  uploads are preferred using inexpensive result metadata, without per-result probes.
+- Recordings are not silently replaced with covers or alternate uploads after failure.
+  YouTube extraction remains dependent on upstream availability and restrictions.
 
-## Family accounts
+The existing web interface has only compatibility changes: Jellyfin linking,
+Library/YouTube source selection, artwork support, and working request cancellation.
+A broader web redesign is deferred.
 
-| Role | Capabilities |
-|------|----------------|
-| **parent** | Manage child accounts, parental controls, view all settings |
-| **adult** | Full personal library, search, AI discover |
-| **child** | Personal library, subject to parental rules |
+## Validation
 
-Parents create accounts in the app via **Settings → Family members**, or via API:
-
-```json
-POST /api/users
-{
-  "username": "kid1",
-  "password": "their-pin",
-  "display_name": "Alex",
-  "role": "child"
-}
+```bash
+cargo fmt --manifest-path services/server/Cargo.toml --check
+cargo clippy --manifest-path services/server/Cargo.toml --all-targets -- -D warnings
+cargo test --manifest-path services/server/Cargo.toml
+npm --prefix apps/web run build
 ```
 
-Each family member signs in with their own username — libraries stay separate.
+Rust integration tests cover database migration, account/household isolation,
+scoped media tokens, idempotent listening progress, Jellyfin indexing and permissions,
+range forwarding, progressive first-byte delivery, and shared YouTube extraction.
+Provider tests use local mock servers and do not need a real Jellyfin account.
 
-### Parent PIN (shared devices)
+For the Android playback integration test, start the synthetic fixture in one terminal:
 
-Parents set a PIN under **Settings → Parent PIN**. When set, child accounts must enter it to switch accounts or sign out. If no PIN is configured, children can switch freely.
-
-## Parental controls (child accounts)
-
-Configured by parents in **Settings → Parental controls** (Controls + History tabs):
-
-- Block explicit content (keyword filter)
-- Custom blocked keywords and video IDs
-- Disable search
-- Daily listening limit (minutes) with usage dashboard
-- Allowed listening hours (server local time)
-- Per-child play history view
-
-Search results for blocked content show as unavailable; streams are rejected server-side.
-
-## AI / LLM setup
-
-Tuneflow calls any **OpenAI-compatible** chat API. Works with:
-
-| Provider | Example `LLM_BASE_URL` |
-|----------|------------------------|
-| **Ollama** (LAN) | `http://192.168.1.100:11434/v1` |
-| **LM Studio** | `http://192.168.1.100:1234/v1` |
-| **OpenAI** | `https://api.openai.com/v1` |
-
-```env
-LLM_ENABLED=true
-LLM_BASE_URL=http://192.168.1.100:11434/v1
-LLM_API_KEY=          # leave blank for Ollama
-LLM_MODEL=llama3.2
+```bash
+cargo run --manifest-path services/server/Cargo.toml --example playback_fixture
 ```
 
-The LLM does **not** need to run on the same machine as the API — only on a reachable LAN IP.
+With a local emulator connected:
 
-Mobile **Discover** tab:
-- `GET /api/ai/insights` — listening patterns summary
-- `GET /api/ai/recommendations` — personalized song suggestions (LLM proposes searches, server resolves tracks via Piped)
-
-Check connectivity: `GET /api/ai/status`
-
-## Self-hosted Piped (optional)
-
-```powershell
-# In .env: PIPED_BASE_URL=http://tuneflow-piped:8080
-.\compose.ps1 --profile piped up --build
+```bash
+adb reverse tcp:18010 tcp:18010
+cd apps/android
+./gradlew connectedDebugAndroidTest
 ```
 
-`PIPED_BASE_URL` uses the container port (`8080`) on the Docker network. Override the **host** port with `PIPED_PORT` in `.env` if `8080` clashes on your machine.
-
-## API overview
-
-Authenticated routes use `Authorization: Bearer <jwt>`.
-
-| Endpoint | Description |
-|----------|-------------|
-| `GET /api/auth/setup-status` | Whether first-time setup is needed |
-| `POST /api/auth/setup` | Create first parent account |
-| `POST /api/auth/login` | Sign in |
-| `GET /api/auth/me` | Current user |
-| `GET/POST /api/users` | List/create family accounts (parent) |
-| `GET/PUT /api/parental/{child_id}/settings` | Parental controls |
-| `GET /api/parental/{child_id}/usage` | Child's listening time today |
-| `GET /api/parental/{child_id}/history` | Child's play history (parent) |
-| `PUT /api/auth/parent-pin` | Set parent PIN |
-| `GET /api/auth/parent-pin/enforced` | Whether PIN is required for child exit |
-| `POST /api/auth/verify-parent-pin` | Verify parent PIN |
-| `GET /api/ai/status` | LLM connectivity |
-| `GET /api/ai/insights` | AI listening analysis |
-| `GET /api/ai/recommendations` | AI music suggestions |
-| `GET /api/music/search?q=` | Search songs |
-| `GET /api/music/stream/{video_id}` | Resolve audio stream URL |
-| `GET/POST /api/playlists` | Per-user playlists |
-| `GET/POST /api/history` | Per-user play history |
-| `GET/POST/DELETE /api/likes` | Per-user likes |
-
-## Personal use note
-
-This project wraps YouTube for personal household listening. It is not a licensed music service and is not intended for public distribution.
+This plays generated audio and checks startup, seeking, queue advancement, and
+background playback. It uses temporary data under the system temp directory and
+never accesses a real Jellyfin library. See [the architecture notes](docs/architecture.md)
+for the API and operational details.

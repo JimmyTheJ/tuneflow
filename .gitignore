@@ -30,3 +30,11 @@ Thumbs.db
 
 # Docker
 data/
+
+# Rust server and native Android
+/target/
+/services/server/target/
+/apps/android/.gradle/
+/apps/android/.kotlin/
+/apps/android/**/build/
+/apps/android/local.properties
