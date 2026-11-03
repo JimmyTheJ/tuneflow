@@ -105,6 +105,20 @@ pub async fn init(db: &SqlitePool) -> Result<()> {
     sqlx::raw_sql(include_str!("../schema.sql"))
         .execute(db)
         .await?;
+    let columns = all(db, "PRAGMA table_info(library_tracks)", vec![]).await?;
+    for (name, definition) in [
+        ("album_artist", "TEXT"),
+        ("disc_number", "INTEGER"),
+        ("track_number", "INTEGER"),
+    ] {
+        if !columns.iter().any(|column| text(column, "name") == name) {
+            sqlx::query(&format!(
+                "ALTER TABLE library_tracks ADD COLUMN {name} {definition}"
+            ))
+            .execute(db)
+            .await?;
+        }
+    }
     exec(db,"INSERT OR IGNORE INTO households (id,name,slug,is_system,search_defaults_json) VALUES (1,'System','system',1,'{}')",vec![]).await?;
     let system = one(
         db,

@@ -1,8 +1,8 @@
 use axum::{
     Json, Router,
-    body::{Body, Bytes},
+    body::{Body, Bytes, to_bytes},
     extract::{Query, State},
-    http::{HeaderMap, StatusCode},
+    http::{HeaderMap, Method, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, post},
 };
@@ -16,7 +16,7 @@ use std::{
     },
     time::{Duration, Instant},
 };
-use tuneflow_server::{App, Config, Shared, auth, db, jellyfin, media};
+use tuneflow_server::{App, Config, Shared, auth, db, jellyfin, library, media};
 
 #[derive(Default)]
 struct Mock {
@@ -59,7 +59,7 @@ async fn fixture() -> (String, Arc<Mock>, tokio::task::JoinHandle<()>) {
         } else {
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         };
-        Json(json!({"TotalRecordCount":2,"Items":[{"Id":id,"Name":if page{"Second Song"}else{"First Song"},"Artists":["Artist"],"Album":"Album","AlbumId":"dddddddddddddddddddddddddddddddd","Container":"flac","RunTimeTicks":1800000000_i64,"Type":"Audio"}]})).into_response()
+        Json(json!({"TotalRecordCount":2,"Items":[{"Id":id,"Name":if page{"Second Song"}else{"First Song"},"Artists":["Artist"],"AlbumArtist":"Listener","Album":"Album","AlbumId":"dddddddddddddddddddddddddddddddd","ParentIndexNumber":1,"IndexNumber":if page{1}else{2},"Container":"flac","RunTimeTicks":1800000000_i64,"Type":"Audio"}]})).into_response()
     }
     async fn item(State(s): State<Arc<Mock>>) -> Response {
         if s.revoked.load(Ordering::Relaxed) {
@@ -131,6 +131,33 @@ async fn app(allowed_jellyfin_url: Option<&str>) -> (tempfile::TempDir, Shared, 
     (dir, s, u)
 }
 #[tokio::test]
+async fn existing_library_tracks_gain_sort_columns_without_losing_rows() {
+    let dir = tempfile::tempdir().unwrap();
+    let database = dir.path().join("tuneflow.db");
+    let options = sqlx::sqlite::SqliteConnectOptions::new()
+        .filename(&database)
+        .create_if_missing(true);
+    let pool = sqlx::SqlitePool::connect_with(options).await.unwrap();
+    sqlx::query("CREATE TABLE library_tracks(user_id INTEGER NOT NULL,item_id TEXT NOT NULL,title TEXT NOT NULL,artist TEXT,album TEXT,album_id TEXT,duration_sec INTEGER,container TEXT,image_id TEXT,explicit INTEGER NOT NULL DEFAULT 0,recording_mbid TEXT,generation TEXT NOT NULL,PRIMARY KEY(user_id,item_id))")
+        .execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO library_tracks(user_id,item_id,title,generation) VALUES(1,'existing','Saved song','old')")
+        .execute(&pool).await.unwrap();
+    pool.close().await;
+    let server = App::open(Config {
+        data_dir: dir.path().into(),
+        jwt_secret: "tests-with-at-least-thirty-two-secret-bytes".into(),
+        youtube_bin: "missing".into(),
+        jellyfin_url: None,
+        jellyfin_allowed_urls: vec![],
+    })
+    .await
+    .unwrap();
+    let row = db::one(&server.db, "SELECT title,album_artist,disc_number,track_number FROM library_tracks WHERE item_id='existing'", vec![]).await.unwrap();
+    assert_eq!(row["title"], "Saved song");
+    assert!(row["album_artist"].is_null());
+    assert!(row["track_number"].is_null());
+}
+#[tokio::test]
 async fn jellyfin_link_rejects_unapproved_server_before_network_request() {
     let (base, _mock, upstream) = fixture().await;
     let (_dir, s, u) = app(None).await;
@@ -166,6 +193,33 @@ async fn jellyfin_sync_is_private_atomic_and_searchable() {
     );
     let synced = jellyfin::sync(&s, &u).await.unwrap();
     assert_eq!(synced["track_count"], 2);
+    let query = HashMap::from([(
+        "album_id".to_string(),
+        "dddddddddddddddddddddddddddddddd".to_string(),
+    )]);
+    let response = library::handle(&s, &u, "library/tracks", &query, &Method::GET, json!({}))
+        .await
+        .unwrap();
+    let ordered: Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
+    assert_eq!(ordered[0]["title"], "Second Song");
+    assert_eq!(ordered[0]["track_number"], 1);
+    assert_eq!(ordered[0]["disc_number"], 1);
+    let query = HashMap::from([("artist".to_string(), "Listener".to_string())]);
+    let response = library::handle(&s, &u, "library/albums", &query, &Method::GET, json!({}))
+        .await
+        .unwrap();
+    let albums: Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
+    assert_eq!(albums[0]["title"], "Album");
+    let query = HashMap::from([("q".to_string(), "listen".to_string())]);
+    let response = library::handle(&s, &u, "library/artists", &query, &Method::GET, json!({}))
+        .await
+        .unwrap();
+    let artists: Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
+    assert_eq!(artists[0]["name"], "Listener");
+    assert_eq!(artists[0]["album_count"], 1);
     assert_eq!(
         db::all(
             &s.db,

@@ -37,6 +37,8 @@ import type {
   ArtistStreamEvent,
   AlbumDetail,
   AlbumResolveResult,
+  LibraryArtist,
+  LibraryAlbum,
   EqAssignment,
   EqBand,
   EqBulkTrackResult,
@@ -52,6 +54,23 @@ type RequestOptions = {
   auth?: boolean;
   signal?: AbortSignal;
 };
+
+export type LibraryQuery = {
+  q?: string;
+  artist?: string;
+  album_id?: string;
+  limit?: number;
+  offset?: number;
+};
+
+function libraryPath(path: string, query: LibraryQuery): string {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) {
+    if (value !== undefined && value !== "") params.set(key, String(value));
+  }
+  const suffix = params.toString();
+  return `/api/library/${path}${suffix ? `?${suffix}` : ""}`;
+}
 
 async function executeRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const baseUrl = getApiUrl();
@@ -134,7 +153,9 @@ export const api = {
   linkJellyfin: (server_url: string, username: string, password: string) => request("/api/jellyfin/link", { method: "POST", body: { server_url, username, password } }),
   syncJellyfin: () => request("/api/jellyfin/sync", { method: "POST" }),
   unlinkJellyfin: () => request("/api/jellyfin", { method: "DELETE" }),
-  libraryTracks: () => request<Track[]>("/api/library/tracks?limit=100"),
+  libraryTracks: (query: LibraryQuery = {}) => request<Track[]>(libraryPath("tracks", query)),
+  libraryArtists: (query: LibraryQuery = {}) => request<LibraryArtist[]>(libraryPath("artists", query)),
+  libraryAlbums: (query: LibraryQuery = {}) => request<LibraryAlbum[]>(libraryPath("albums", query)),
   setupStatus: () => request<SetupStatus>("/api/auth/setup-status", { auth: false }),
   setup: (username: string, password: string, displayName: string) =>
     request<TokenResponse>("/api/auth/setup", {

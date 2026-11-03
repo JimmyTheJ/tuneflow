@@ -226,13 +226,18 @@ pub async fn sync(s: &Shared, u: &Value) -> Result<Value> {
                     .join(", ")
             })
             .unwrap_or_default();
+        let album_artist = if text(t, "AlbumArtist").is_empty() {
+            t["Artists"][0].as_str().unwrap_or("Unknown artist")
+        } else {
+            text(t, "AlbumArtist")
+        };
         let image = if t["ImageTags"]["Primary"].is_string() {
             text(t, "Id")
         } else {
             text(t, "AlbumId")
         };
         let explicit = matches!(text(t, "OfficialRating"), "Explicit" | "R" | "NC-17");
-        sqlx::query("INSERT INTO library_tracks(user_id,item_id,title,artist,album,album_id,duration_sec,container,image_id,explicit,recording_mbid,generation) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(user_id,item_id) DO UPDATE SET title=excluded.title,artist=excluded.artist,album=excluded.album,album_id=excluded.album_id,duration_sec=excluded.duration_sec,container=excluded.container,image_id=excluded.image_id,explicit=excluded.explicit,recording_mbid=excluded.recording_mbid,generation=excluded.generation").bind(id(u)).bind(text(t,"Id")).bind(text(t,"Name")).bind(artists).bind(text(t,"Album")).bind(text(t,"AlbumId")).bind(t["RunTimeTicks"].as_i64().map(|v|v/10_000_000)).bind(text(t,"Container")).bind(image).bind(explicit).bind(text(&t["ProviderIds"],"MusicBrainzTrack")).bind(&generation).execute(&mut *tx).await?;
+        sqlx::query("INSERT INTO library_tracks(user_id,item_id,title,artist,album,album_id,album_artist,disc_number,track_number,duration_sec,container,image_id,explicit,recording_mbid,generation) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(user_id,item_id) DO UPDATE SET title=excluded.title,artist=excluded.artist,album=excluded.album,album_id=excluded.album_id,album_artist=excluded.album_artist,disc_number=excluded.disc_number,track_number=excluded.track_number,duration_sec=excluded.duration_sec,container=excluded.container,image_id=excluded.image_id,explicit=excluded.explicit,recording_mbid=excluded.recording_mbid,generation=excluded.generation").bind(id(u)).bind(text(t,"Id")).bind(text(t,"Name")).bind(artists).bind(text(t,"Album")).bind(text(t,"AlbumId")).bind(album_artist).bind(t["ParentIndexNumber"].as_i64()).bind(t["IndexNumber"].as_i64()).bind(t["RunTimeTicks"].as_i64().map(|v|v/10_000_000)).bind(text(t,"Container")).bind(image).bind(explicit).bind(text(&t["ProviderIds"],"MusicBrainzTrack")).bind(&generation).execute(&mut *tx).await?;
     }
     sqlx::query("DELETE FROM library_tracks WHERE user_id=? AND generation<>?")
         .bind(id(u))

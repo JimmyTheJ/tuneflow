@@ -285,8 +285,8 @@ export function SearchPage() {
     <div className="space-y-6">
       <h1 className="m-0 text-3xl font-bold tracking-tight md:text-4xl">Search</h1>
 
-      <form className="relative flex gap-2" onSubmit={runSearch}>
-        <div className="relative flex-1">
+      <form className="relative grid grid-cols-[minmax(0,1fr)_auto_auto] gap-2 sm:flex" onSubmit={runSearch}>
+        <div className="relative col-span-3 min-w-0 sm:col-span-1 sm:flex-1">
           <SearchIcon className="pointer-events-none absolute left-4 top-1/2 size-5 -translate-y-1/2 text-text-muted" />
           <input
             className={cn(
@@ -311,7 +311,7 @@ export function SearchPage() {
           {showSuggestions ? (
             <div
               id="search-suggestions"
-              className="absolute left-0 right-0 top-[calc(100%+6px)] z-20 overflow-hidden rounded-xl border border-border bg-elevated shadow-elevated"
+              className="absolute left-0 right-0 top-[calc(100%+3.5rem)] z-20 max-h-60 overflow-y-auto rounded-xl border border-border bg-elevated shadow-elevated sm:top-[calc(100%+6px)] sm:max-h-80"
               role="listbox"
             >
               {!query.trim() ? (
@@ -329,9 +329,9 @@ export function SearchPage() {
               ) : null}
               <ul className="m-0 list-none p-1">
                 {suggestions.map((suggestion) => (
-                  <li key={suggestion.text} className="flex items-center" role="option">
+                  <li key={suggestion.text} className="flex min-w-0 items-center" role="option">
                     <button
-                      className="min-w-0 flex-1 cursor-pointer border-0 bg-transparent px-3 py-2.5 text-left text-sm text-text hover:bg-highlight rounded-lg"
+                      className="min-w-0 flex-1 truncate cursor-pointer border-0 bg-transparent px-3 py-2.5 text-left text-sm text-text hover:bg-highlight rounded-lg"
                       type="button"
                       onMouseDown={(e) => e.preventDefault()}
                       onClick={() => selectSuggestion(suggestion.text)}
@@ -355,7 +355,7 @@ export function SearchPage() {
             </div>
           ) : null}
         </div>
-        <select aria-label="Music source" value={source} className="rounded-xl border border-border bg-elevated px-3 text-text" onChange={(event) => {
+        <select aria-label="Music source" value={source} className="min-w-0 rounded-xl border border-border bg-elevated px-3 text-text sm:w-auto" onChange={(event) => {
           const next = new URLSearchParams(searchParams);
           next.set("source", event.target.value);
           setSearchParams(next);
@@ -384,7 +384,7 @@ export function SearchPage() {
           type={loading ? "button" : "submit"}
           variant={loading ? "secondary" : "primary"}
           disabled={!loading && !query.trim()}
-          className="shrink-0 px-6"
+          className="shrink-0 px-4 sm:px-6"
           onClick={loading ? cancelSearch : undefined}
         >
           {loading ? "Cancel" : "Search"}

@@ -250,6 +250,7 @@ CREATE TABLE IF NOT EXISTS jellyfin_connections (
 CREATE TABLE IF NOT EXISTS library_tracks (
  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
  item_id TEXT NOT NULL, title TEXT NOT NULL, artist TEXT, album TEXT, album_id TEXT,
+ album_artist TEXT, disc_number INTEGER, track_number INTEGER,
  duration_sec INTEGER, container TEXT, image_id TEXT, explicit INTEGER NOT NULL DEFAULT 0,
  recording_mbid TEXT, generation TEXT NOT NULL, PRIMARY KEY(user_id,item_id)
 );

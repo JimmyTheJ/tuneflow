@@ -44,25 +44,9 @@ export function MediaCard({
             )}
           />
         )}
-        {onPlay ? (
-          <button
-            type="button"
-            aria-label={`Play ${title}`}
-            className={cn(
-              "absolute bottom-2 right-2 inline-flex size-11 items-center justify-center rounded-full",
-              "bg-accent text-accent-fg shadow-card transition-all duration-200 border-0 cursor-pointer",
-              "translate-y-2 opacity-0 group-hover:translate-y-0 group-hover:opacity-100",
-              "hover:scale-105 hover:bg-accent-hover",
-            )}
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              onPlay();
-            }}
-          >
-            <Play className="size-5 translate-x-0.5" fill="currentColor" />
-          </button>
-        ) : null}
+        {onPlay && !href ? <span className="absolute bottom-2 right-2 inline-flex size-11 items-center justify-center rounded-full bg-accent text-accent-fg shadow-card" aria-hidden="true">
+          <Play className="size-5 translate-x-0.5" fill="currentColor" />
+        </span> : null}
       </div>
       <div className="min-w-0 px-0.5">
         <div className="truncate font-semibold text-text">{title}</div>
@@ -81,9 +65,13 @@ export function MediaCard({
 
   if (href) {
     return (
-      <Link to={href} className={shellClass} onClick={onClick}>
-        {body}
-      </Link>
+      <div className="group relative">
+        <Link to={href} className={shellClass} onClick={onClick}>{body}</Link>
+        {onPlay ? <button type="button" aria-label={`Play ${title}`} onClick={onPlay}
+          className="absolute right-5 top-5 inline-flex size-11 items-center justify-center rounded-full bg-accent text-accent-fg shadow-card transition hover:scale-105 hover:bg-accent-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white">
+          <Play className="size-5 translate-x-0.5" fill="currentColor" />
+        </button> : null}
+      </div>
     );
   }
 

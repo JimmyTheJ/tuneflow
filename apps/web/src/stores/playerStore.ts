@@ -54,6 +54,7 @@ type PlayerState = {
       fromNavigation?: boolean;
       queueSource?: QueueSource | null;
       resumeSec?: number;
+      ordered?: boolean;
     },
   ) => Promise<void>;
   togglePlayback: () => void;
@@ -890,7 +891,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   },
 
   playTrack: async (track, queue = [], options) => {
-    if (!options?.fromNavigation) {
+    if (!options?.fromNavigation && queue.length === 0) {
       const state = get();
       if (state.current && state.queue.length > 0) {
         const existingIndex = state.queue.findIndex((item) => item.video_id === track.video_id);
@@ -928,7 +929,8 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
           ? get().queueSource
           : null;
 
-    if (get().shuffle && nextQueue.length > 1) {
+    const shuffle = options?.ordered ? false : get().shuffle;
+    if (shuffle && nextQueue.length > 1) {
       if (options?.fromNavigation && shuffleOrder.length === nextQueue.length) {
         shuffleStep = shuffleOrder.indexOf(activeIndex);
         if (shuffleStep < 0) shuffleStep = 0;
@@ -948,6 +950,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       isPlaying: false,
       current: track,
       queue: nextQueue,
+      shuffle,
       queueInsertIndex: activeIndex + 1,
       shuffleOrder,
       shuffleStep,

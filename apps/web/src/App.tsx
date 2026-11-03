@@ -13,6 +13,7 @@ import { FamilyPage } from "@/pages/FamilyPage";
 import { HouseholdsPage } from "@/pages/HouseholdsPage";
 import { HomePage } from "@/pages/HomePage";
 import { LibraryPage } from "@/pages/LibraryPage";
+import { LibraryArtistPage, LibraryAlbumPage, LibraryLikedPage } from "@/pages/LibraryDetailPages";
 import { ParentalPage } from "@/pages/ParentalPage";
 import { PlayerPage } from "@/pages/PlayerPage";
 import { PlaylistPage } from "@/pages/PlaylistPage";
@@ -111,6 +112,9 @@ export function App() {
           <Route path="discover" element={<DiscoverPage />} />
           <Route path="search" element={<SearchPage />} />
           <Route path="library" element={<LibraryPage />} />
+          <Route path="library/artist/:artist" element={<LibraryArtistPage />} />
+          <Route path="library/album/:albumId" element={<LibraryAlbumPage />} />
+          <Route path="library/liked" element={<LibraryLikedPage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="admin/households" element={<HouseholdsPage />} />
           <Route path="admin/cache" element={<AdminCachePage />} />

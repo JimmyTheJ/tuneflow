@@ -56,6 +56,11 @@ export type Track = {
   video_id: string;
   title: string;
   artist?: string | null;
+  album?: string | null;
+  album_id?: string | null;
+  album_artist?: string | null;
+  disc_number?: number | null;
+  track_number?: number | null;
   thumbnail_url?: string | null;
   duration_sec?: number | null;
   blocked_reason?: string | null;
@@ -63,6 +68,22 @@ export type Track = {
   short_description?: string | null;
   channel_id?: string | null;
   version_label?: string | null;
+};
+
+export type LibraryArtist = {
+  id: string;
+  name: string;
+  track_count: number;
+  album_count: number;
+  item_id: string;
+};
+
+export type LibraryAlbum = {
+  id: string;
+  title: string;
+  artist: string;
+  track_count: number;
+  item_id: string;
 };
 
 export type SearchPlayOnSelect = "all_results" | "single_track";

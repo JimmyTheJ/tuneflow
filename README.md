@@ -57,6 +57,14 @@ HTTP for local development.
 4. Browse or search the indexed library. Select **YouTube** explicitly when you
    want to discover tracks outside your collection.
 
+**Your Library** has Artists, Albums, Songs, and Playlists tabs. Each has Large
+tiles, List, and Details views; the choice is saved separately for each tab.
+Open an artist to browse their albums and songs, or open an album for its tracklist.
+Play all on an artist or album replaces the queue with that selection; selecting
+a song plays only that song. Album playback uses disc and track order. If you
+synced before this browsing update, run **Sync library** again in Settings to
+fill in album artist and track numbers from Jellyfin.
+
 Jellyfin passwords are used only for authentication. The resulting access token
 is encrypted at rest using a key derived from `JWT_SECRET` and never sent to clients.
 Library indexing is scoped to the linked Jellyfin user. Playback remains in Tuneflow,
