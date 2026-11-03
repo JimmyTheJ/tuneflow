@@ -47,6 +47,10 @@ pub fn unseal(s: &Shared, v: &str) -> Result<String> {
         .map_err(|_| ApiError::upstream("Jellyfin connection needs relinking"))?;
     String::from_utf8(bytes).map_err(|_| ApiError::upstream("Invalid Jellyfin connection"))
 }
+pub fn authorization(s: &Shared, c: &Value) -> Result<String> {
+    let token = unseal(s, text(c, "token_ciphertext"))?;
+    Ok(format!("MediaBrowser Token=\"{token}\""))
+}
 pub async fn connection(s: &Shared, u: &Value) -> Result<Value> {
     let c = db::optional(
         &s.db,
@@ -99,11 +103,17 @@ pub async fn link(s: &Shared, u: &Value, b: &Value) -> Result<Value> {
             "Jellyfin server is not allowed by this Tuneflow server",
         ));
     }
-    let res=s.http.post(format!("{base}/Users/AuthenticateByName")).header("X-Emby-Authorization",format!("MediaBrowser Client=\"Tuneflow\", Device=\"Tuneflow server\", DeviceId=\"tuneflow-{}\", Version=\"0.4.0\"",id(u))).json(&json!({"Username":required(b,"username",200)?,"Pw":text(b,"password")})).timeout(Duration::from_secs(12)).send().await?;
+    let res=s.http.post(format!("{base}/Users/AuthenticateByName"))
+        .header("Authorization",format!("MediaBrowser Client=\"Tuneflow\", Device=\"Tuneflow server\", DeviceId=\"tuneflow-{}\", Version=\"0.4.0\"",id(u)))
+        .json(&json!({"Username":required(b,"username",200)?,"Pw":text(b,"password")}))
+        .timeout(Duration::from_secs(12))
+        .send().await?;
     if !res.status().is_success() {
-        return Err(ApiError::bad(
-            "Jellyfin sign-in failed; check the server and credentials",
-        ));
+        let status = res.status();
+        tracing::warn!(upstream_status = %status, "Jellyfin sign-in failed");
+        return Err(ApiError::bad(format!(
+            "Jellyfin sign-in failed (HTTP {status}); check the server URL and credentials"
+        )));
     }
     let payload: Value = res.json().await?;
     let token = required(&payload, "AccessToken", 4096)?;
@@ -123,7 +133,7 @@ pub async fn link(s: &Shared, u: &Value, b: &Value) -> Result<Value> {
 pub fn request(s: &Shared, c: &Value, path: &str) -> Result<reqwest::RequestBuilder> {
     Ok(s.http
         .get(format!("{}{path}", text(c, "server_url")))
-        .header("X-Emby-Token", unseal(s, text(c, "token_ciphertext"))?))
+        .header("Authorization", authorization(s, c)?))
 }
 pub async fn item(s: &Shared, u: &Value, item: &str) -> Result<Value> {
     if item.len() != 32 || !item.bytes().all(|b| b.is_ascii_hexdigit()) {
@@ -242,12 +252,12 @@ pub async fn unlink(s: &Shared, u: &Value) -> Result<()> {
     .await?
     .ok_or_else(|| ApiError::bad("Link your Jellyfin account in Settings"))?;
     if allowed(s, text(&c, "server_url"))
-        && let Ok(token) = unseal(s, text(&c, "token_ciphertext"))
+        && let Ok(auth) = authorization(s, &c)
     {
         let _ = s
             .http
             .post(format!("{}/Sessions/Logout", text(&c, "server_url")))
-            .header("X-Emby-Token", token)
+            .header("Authorization", auth)
             .timeout(Duration::from_secs(3))
             .send()
             .await;

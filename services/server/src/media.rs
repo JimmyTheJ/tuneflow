@@ -249,10 +249,7 @@ pub async fn serve(
             request = s
                 .http
                 .head(format!("{}{}", text(&c, "server_url"), endpoint))
-                .header(
-                    "X-Emby-Token",
-                    jellyfin::unseal(s, text(&c, "token_ciphertext"))?,
-                )
+                .header("Authorization", jellyfin::authorization(s, &c)?)
                 .query(&[("Static", "true"), ("UserId", text(&c, "remote_user_id"))]);
         }
         return proxy(s, request.send().await?, None, false).await;

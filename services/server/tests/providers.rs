@@ -25,17 +25,29 @@ struct Mock {
 }
 async fn fixture() -> (String, Arc<Mock>, tokio::task::JoinHandle<()>) {
     let state = Arc::new(Mock::default());
-    async fn signin() -> Json<Value> {
+    async fn signin(h: HeaderMap) -> Response {
+        if !h
+            .get("Authorization")
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|v| {
+                v.starts_with("MediaBrowser Client=\"Tuneflow\"")
+                    && v.contains("DeviceId=\"tuneflow-1\"")
+            })
+        {
+            return StatusCode::UNAUTHORIZED.into_response();
+        }
         Json(
             json!({"AccessToken":"private-jellyfin-token","User":{"Id":"cccccccccccccccccccccccccccccccc","Name":"Listener"}}),
-        )
+        ).into_response()
     }
     async fn items(
         State(s): State<Arc<Mock>>,
         Query(q): Query<HashMap<String, String>>,
         h: HeaderMap,
     ) -> Response {
-        if h.get("X-Emby-Token").and_then(|v| v.to_str().ok()) != Some("private-jellyfin-token") {
+        if h.get("Authorization").and_then(|v| v.to_str().ok())
+            != Some("MediaBrowser Token=\"private-jellyfin-token\"")
+        {
             return StatusCode::UNAUTHORIZED.into_response();
         }
         let page = q.get("StartIndex").is_some_and(|v| v != "0");
