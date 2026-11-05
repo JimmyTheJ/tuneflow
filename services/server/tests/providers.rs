@@ -104,6 +104,7 @@ async fn fixture() -> (String, Arc<Mock>, tokio::task::JoinHandle<()>) {
         .route("/Users/{uid}/Items/{id}", get(item))
         .route("/Audio/{id}/stream", get(audio))
         .route("/source", get(audio))
+        .route("/rejected", get(|| async { StatusCode::TOO_MANY_REQUESTS }))
         .with_state(state.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
@@ -173,6 +174,20 @@ async fn artists_search_and_album_groups_work_without_jellyfin_album_ids() {
         .await
         .unwrap();
     }
+    db::exec(
+        &s.db,
+        "INSERT INTO library_tracks(user_id,item_id,title,artist,album,album_id,album_artist,generation) VALUES(1,'collab','Collab','Alpha, Beta','Together',NULL,'Alpha/Beta','test')",
+        vec![],
+    )
+    .await
+    .unwrap();
+    db::exec(
+        &s.db,
+        "INSERT INTO library_tracks(user_id,item_id,title,artist,album,album_id,album_artist,generation) VALUES(1,'slash-band','Band','AC/DC','Live',NULL,'AC/DC','test')",
+        vec![],
+    )
+    .await
+    .unwrap();
     let artists = library::handle(
         &s,
         &u,
@@ -187,7 +202,20 @@ async fn artists_search_and_album_groups_work_without_jellyfin_album_ids() {
         serde_json::from_slice(&to_bytes(artists.into_body(), usize::MAX).await.unwrap()).unwrap();
     assert_eq!(artists.as_array().unwrap().len(), 1);
     assert_eq!(artists[0]["name"], "Alpha");
-    assert_eq!(artists[0]["album_count"], 2);
+    assert_eq!(artists[0]["album_count"], 3);
+    let band = library::handle(
+        &s,
+        &u,
+        "library/artists",
+        &HashMap::from([("q".into(), "AC/DC".into())]),
+        &Method::GET,
+        json!({}),
+    )
+    .await
+    .unwrap();
+    let band: Value =
+        serde_json::from_slice(&to_bytes(band.into_body(), usize::MAX).await.unwrap()).unwrap();
+    assert_eq!(band[0]["name"], "AC/DC");
     let albums = library::handle(
         &s,
         &u,
@@ -200,7 +228,21 @@ async fn artists_search_and_album_groups_work_without_jellyfin_album_ids() {
     .unwrap();
     let albums: Value =
         serde_json::from_slice(&to_bytes(albums.into_body(), usize::MAX).await.unwrap()).unwrap();
-    assert_eq!(albums.as_array().unwrap().len(), 2);
+    assert_eq!(albums.as_array().unwrap().len(), 3);
+    let beta_albums = library::handle(
+        &s,
+        &u,
+        "library/albums",
+        &HashMap::from([("artist".into(), "Beta".into())]),
+        &Method::GET,
+        json!({}),
+    )
+    .await
+    .unwrap();
+    let beta_albums: Value =
+        serde_json::from_slice(&to_bytes(beta_albums.into_body(), usize::MAX).await.unwrap())
+            .unwrap();
+    assert_eq!(beta_albums.as_array().unwrap().len(), 2);
     let album_id = albums[0]["id"].as_str().unwrap();
     assert!(album_id.starts_with("name:"));
     let tracks = library::handle(
@@ -375,6 +417,25 @@ async fn youtube_proxy_starts_before_download_finishes_and_saves_only_completed_
     task.abort();
     upstream.abort();
     let _ = u;
+}
+#[tokio::test]
+async fn youtube_proxy_reports_provider_status() {
+    let (base, _mock, upstream) = fixture().await;
+    let (_dir, s, u) = app(None).await;
+    s.streams.insert("audio:abcdefghijk".into(), json!({"video_id":"abcdefghijk","title":"Song","artist":"Artist","upstream_url":format!("{base}/rejected")})).await;
+    let error = media::serve(
+        &s,
+        &u,
+        "music/audio/abcdefghijk",
+        &HashMap::new(),
+        &HeaderMap::new(),
+        Method::GET,
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error.0, StatusCode::BAD_GATEWAY);
+    assert!(error.1.contains("429"));
+    upstream.abort();
 }
 #[tokio::test]
 async fn jellyfin_forwards_seeking_ranges() {

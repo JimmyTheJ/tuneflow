@@ -61,7 +61,9 @@ async fn tracks(s: &Shared, u: &Value, q: &Params) -> Result<Vec<Value>> {
         }
     }
     if let Some(artist) = q.get("artist").filter(|value| !value.is_empty()) {
-        sql.push_str(&format!(" AND {artist_name}=?"));
+        // Jellyfin often uses slash-separated album artists for collaborations.
+        // Match a complete participant, so 2Pac also sees 2Pac/50 Cent albums.
+        sql.push_str(&format!(" AND instr(lower('/' || replace(replace({artist_name}, ' / ', '/'), '/ ', '/') || '/'), lower('/' || ? || '/'))>0"));
         args.push(json!(artist));
     }
     sql.push_str(&format!(" ORDER BY {artist_name} COLLATE NOCASE,album COLLATE NOCASE,COALESCE(disc_number,1),COALESCE(track_number,1000000),title COLLATE NOCASE LIMIT ? OFFSET ?"));
@@ -84,7 +86,10 @@ async fn tracks(s: &Shared, u: &Value, q: &Params) -> Result<Vec<Value>> {
 async fn groups(s: &Shared, u: &Value, q: &Params, albums: bool) -> Result<Value> {
     let query = q.get("q").map(|v| v.trim()).unwrap_or("");
     let artist = q.get("artist").map(|v| v.as_str()).unwrap_or("");
-    let artist_name = "COALESCE(NULLIF(album_artist,''),NULLIF(artist,''),'Unknown artist')";
+    let artist_name = "COALESCE(NULLIF(library_tracks.album_artist,''),NULLIF(library_tracks.artist,''),'Unknown artist')";
+    let lead_artist = format!(
+        "CASE WHEN instr({artist_name},'/')>0 AND EXISTS(SELECT 1 FROM library_tracks AS standalone WHERE standalone.user_id=library_tracks.user_id AND lower(COALESCE(NULLIF(standalone.album_artist,''),NULLIF(standalone.artist,''),'Unknown artist'))=lower(trim(substr({artist_name},1,instr({artist_name},'/')-1)))) THEN trim(substr({artist_name},1,instr({artist_name},'/')-1)) ELSE {artist_name} END"
+    );
     let mut args = vec![json!(id(u))];
     let mut sql = if albums {
         format!(
@@ -92,18 +97,18 @@ async fn groups(s: &Shared, u: &Value, q: &Params, albums: bool) -> Result<Value
         )
     } else {
         format!(
-            "SELECT {artist_name} AS id,{artist_name} AS name,count(*) AS track_count,count(DISTINCT CASE WHEN album IS NOT NULL AND album<>'' THEN COALESCE(NULLIF(album_id,''),'name:' || json_array({artist_name},album)) END) AS album_count,min(item_id) AS item_id FROM library_tracks WHERE user_id=?"
+            "SELECT {lead_artist} AS id,{lead_artist} AS name,count(*) AS track_count,count(DISTINCT CASE WHEN album IS NOT NULL AND album<>'' THEN COALESCE(NULLIF(album_id,''),'name:' || json_array({artist_name},album)) END) AS album_count,min(item_id) AS item_id FROM library_tracks WHERE user_id=?"
         )
     };
     if albums && !artist.is_empty() {
-        sql.push_str(&format!(" AND {artist_name}=?"));
+        sql.push_str(&format!(" AND instr(lower('/' || replace(replace({artist_name}, ' / ', '/'), '/ ', '/') || '/'), lower('/' || ? || '/'))>0"));
         args.push(json!(artist));
     }
     if !query.is_empty() {
         let filter = if albums {
             format!(" AND instr(lower(album || ' ' || {artist_name}),lower(?))>0")
         } else {
-            format!(" AND instr(lower({artist_name}),lower(?))>0")
+            format!(" AND instr(lower({lead_artist}),lower(?))>0")
         };
         sql.push_str(&filter);
         args.push(json!(query));

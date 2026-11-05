@@ -13,7 +13,7 @@ ARG PGID=10001
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates python3 python3-venv ffmpeg tini \
     && rm -rf /var/lib/apt/lists/* \
     && python3 -m venv /opt/extractor \
-    && /opt/extractor/bin/pip install --no-cache-dir 'yt-dlp[default]>=2026.7.4' \
+    && /opt/extractor/bin/pip install --no-cache-dir 'yt-dlp[default]>=2026.7.4' 'bgutil-ytdlp-pot-provider==2.0.2' \
     && groupadd -g "${PGID}" tuneflow \
     && useradd -m -u "${PUID}" -g tuneflow -s /usr/sbin/nologin tuneflow \
     && mkdir -p /app/data && chown tuneflow:tuneflow /app/data

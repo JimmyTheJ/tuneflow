@@ -16,8 +16,15 @@ services:
     environment:
       TUNEFLOW_DATA_DIR: /app/data
       JELLYFIN_URL: ${JELLYFIN_URL:-}
+      YTDLP_POT_URL: http://tuneflow-pot:4416
     volumes:
       - ${TUNEFLOW_DATA_HOST_PATH:-tuneflow-data}:/app/data
+    depends_on:
+      - tuneflow-pot
+    restart: unless-stopped
+
+  tuneflow-pot:
+    image: brainicism/bgutil-ytdlp-pot-provider:2.0.2-deno
     restart: unless-stopped
 
   tuneflow-web:

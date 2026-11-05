@@ -170,8 +170,12 @@ library or a guarantee that every queued track is available without the server.
   three minutes. Search results are cached for two minutes. Repeated extraction
   failures cool down for ten seconds. At most three extractors run concurrently.
 - Ordinary YouTube search has a ten-second deadline; audio resolution has a
-  twelve-second deadline, including waiting for an extractor slot. Cancellation
+  twenty-five-second deadline, including waiting for an extractor slot. Cancellation
   kills the extractor subprocess. Audio playback does not wait for video lookup.
+- Compose runs a private PO token provider alongside the API. The Rust server
+  gives its URL to yt-dlp, which uses the matching plugin in the API image.
+  Expired CDN links are resolved once more before playback fails. Provider
+  HTTP failures include the upstream status in the app and server log.
 - The server forwards audio immediately and writes completed cache files atomically.
   Interrupted or oversized downloads do not become playable server cache entries.
 - Catalog metadata and AI recommendations stay outside the playback path. Official

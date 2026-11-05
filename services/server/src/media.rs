@@ -39,23 +39,32 @@ pub async fn extract(s: &Shared, args: Vec<String>, seconds: u64) -> Result<Valu
             .acquire_owned()
             .await
             .map_err(|_| ApiError::upstream("Server shutting down"))?;
-        let out = Command::new(&s.config.youtube_bin)
-            .args([
-                "--ignore-config",
-                "--no-warnings",
-                "--no-progress",
-                "--no-check-formats",
-                "--socket-timeout",
-                "5",
-                "--retries",
-                "0",
-                "--extractor-retries",
-                "0",
-                "--js-runtimes",
-                "deno",
-                "--js-runtimes",
-                "node",
-            ])
+        let mut command = Command::new(&s.config.youtube_bin);
+        command.args([
+            "--ignore-config",
+            "--no-warnings",
+            "--no-progress",
+            "--no-check-formats",
+            "--socket-timeout",
+            "5",
+            "--retries",
+            "0",
+            "--extractor-retries",
+            "0",
+            "--js-runtimes",
+            "deno",
+            "--js-runtimes",
+            "node",
+        ]);
+        if let Ok(url) = std::env::var("YTDLP_POT_URL")
+            && url.starts_with("http://")
+        {
+            command.args([
+                "--extractor-args",
+                &format!("youtubepot-bgutilhttp:base_url={url}"),
+            ]);
+        }
+        let out = command
             .args(args)
             .kill_on_drop(true)
             .output()
@@ -137,7 +146,7 @@ pub async fn resolve(s: &Shared, vid: &str, video: bool) -> Result<Value> {
                     "--".into(),
                     format!("https://www.youtube.com/watch?v={vid}"),
                 ],
-                12,
+                25,
             )
             .await?;
             let mut t = track(&p)
@@ -288,15 +297,54 @@ pub async fn serve(
         }
         return Ok(r);
     }
-    let t = resolve(s, vid, video).await?;
+    let mut t = resolve(s, vid, video).await?;
     auth::enforce(s, u, Some(&t), false).await?;
+    let mut response = youtube_request(s, &t, h, &method).send().await?;
+    if matches!(response.status().as_u16(), 400 | 401 | 403 | 404 | 410) {
+        s.streams
+            .invalidate(&format!("{}:{vid}", if video { "video" } else { "audio" }))
+            .await;
+        // A signed CDN URL can expire while the player is waiting. Resolve once more.
+        t = resolve(s, vid, video).await?;
+        response = youtube_request(s, &t, h, &method).send().await?;
+    }
+    if !response.status().is_success() && response.status().as_u16() != 416 {
+        let status = response.status().as_u16();
+        tracing::warn!(
+            video_id = vid,
+            upstream_status = status,
+            "YouTube media request failed"
+        );
+        return Err(ApiError::upstream(match status {
+            403 => {
+                "YouTube rejected this stream (403). Check the PO token provider and yt-dlp version"
+                    .into()
+            }
+            429 => "YouTube rate limited this server (429); try again later".into(),
+            _ => format!("YouTube media server returned HTTP {status}"),
+        }));
+    }
+    let settings = db::one(&s.db, "SELECT * FROM system_settings WHERE id=1", vec![]).await?;
+    let cache = !video
+        && method != Method::HEAD
+        && settings["cache_enabled"] == true
+        && settings["cache_retention_days"] != 0;
+    let _ = q;
+    proxy(s, response, Some(t), cache).await
+}
+fn youtube_request(
+    s: &Shared,
+    t: &Value,
+    h: &HeaderMap,
+    method: &Method,
+) -> reqwest::RequestBuilder {
     let mut req = s.http.request(
-        if method == Method::HEAD {
+        if *method == Method::HEAD {
             reqwest::Method::HEAD
         } else {
             reqwest::Method::GET
         },
-        text(&t, "upstream_url"),
+        text(t, "upstream_url"),
     );
     if let Some(headers) = t["upstream_headers"].as_object() {
         for (k, v) in headers {
@@ -313,25 +361,7 @@ pub async fn serve(
     if let Some(range) = h.get("range") {
         req = req.header("Range", range);
     }
-    let response = req.send().await?;
-    if matches!(response.status().as_u16(), 401 | 403 | 410) {
-        let forbidden = response.status().as_u16() == 403;
-        s.streams
-            .invalidate(&format!("{}:{vid}", if video { "video" } else { "audio" }))
-            .await;
-        return Err(ApiError::upstream(if forbidden {
-            "YouTube rejected this stream (403). The server may need an updated yt-dlp or a PO token provider"
-        } else {
-            "YouTube stream expired; retry playback"
-        }));
-    }
-    let settings = db::one(&s.db, "SELECT * FROM system_settings WHERE id=1", vec![]).await?;
-    let cache = !video
-        && method != Method::HEAD
-        && settings["cache_enabled"] == true
-        && settings["cache_retention_days"] != 0;
-    let _ = q;
-    proxy(s, response, Some(t), cache).await
+    req
 }
 async fn proxy(
     s: &Shared,

@@ -7,4 +7,8 @@
         <item name="android:navigationBarColor">#101718</item>
         <item name="android:statusBarColor">#101718</item>
     </style>
+    <style name="PlayerSheetAnimation">
+        <item name="android:windowEnterAnimation">@anim/player_sheet_in</item>
+        <item name="android:windowExitAnimation">@anim/player_sheet_out</item>
+    </style>
 </resources>

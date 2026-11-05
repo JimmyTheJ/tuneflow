@@ -123,6 +123,9 @@ pub async fn init(db: &SqlitePool) -> Result<()> {
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_library_browse_artist ON library_tracks(user_id,COALESCE(NULLIF(album_artist,''),NULLIF(artist,''),'Unknown artist'),album COLLATE NOCASE,disc_number,track_number)")
         .execute(db)
         .await?;
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_library_artist_name_lower ON library_tracks(user_id,lower(COALESCE(NULLIF(album_artist,''),NULLIF(artist,''),'Unknown artist')))")
+        .execute(db)
+        .await?;
     exec(db,"INSERT OR IGNORE INTO households (id,name,slug,is_system,search_defaults_json) VALUES (1,'System','system',1,'{}')",vec![]).await?;
     let system = one(
         db,
