@@ -158,6 +158,67 @@ async fn existing_library_tracks_gain_sort_columns_without_losing_rows() {
     assert!(row["track_number"].is_null());
 }
 #[tokio::test]
+async fn artists_search_and_album_groups_work_without_jellyfin_album_ids() {
+    let (_dir, s, u) = app(None).await;
+    for (item, artist, album) in [
+        ("alpha-1", "Alpha", "First"),
+        ("alpha-2", "Alpha", "Second"),
+        ("beta-1", "Beta", "Other"),
+    ] {
+        db::exec(
+            &s.db,
+            "INSERT INTO library_tracks(user_id,item_id,title,artist,album,album_id,generation) VALUES(1,?,?,?,?,NULL,'test')",
+            vec![json!(item), json!(item), json!(artist), json!(album)],
+        )
+        .await
+        .unwrap();
+    }
+    let artists = library::handle(
+        &s,
+        &u,
+        "library/artists",
+        &HashMap::from([("q".into(), "alpha".into())]),
+        &Method::GET,
+        json!({}),
+    )
+    .await
+    .unwrap();
+    let artists: Value =
+        serde_json::from_slice(&to_bytes(artists.into_body(), usize::MAX).await.unwrap()).unwrap();
+    assert_eq!(artists.as_array().unwrap().len(), 1);
+    assert_eq!(artists[0]["name"], "Alpha");
+    assert_eq!(artists[0]["album_count"], 2);
+    let albums = library::handle(
+        &s,
+        &u,
+        "library/albums",
+        &HashMap::from([("artist".into(), "Alpha".into())]),
+        &Method::GET,
+        json!({}),
+    )
+    .await
+    .unwrap();
+    let albums: Value =
+        serde_json::from_slice(&to_bytes(albums.into_body(), usize::MAX).await.unwrap()).unwrap();
+    assert_eq!(albums.as_array().unwrap().len(), 2);
+    let album_id = albums[0]["id"].as_str().unwrap();
+    assert!(album_id.starts_with("name:"));
+    let tracks = library::handle(
+        &s,
+        &u,
+        "library/tracks",
+        &HashMap::from([("album_id".into(), album_id.into())]),
+        &Method::GET,
+        json!({}),
+    )
+    .await
+    .unwrap();
+    let tracks: Value =
+        serde_json::from_slice(&to_bytes(tracks.into_body(), usize::MAX).await.unwrap()).unwrap();
+    assert_eq!(tracks.as_array().unwrap().len(), 1);
+    assert_eq!(tracks[0]["album_id"], album_id);
+}
+#[tokio::test]
 async fn jellyfin_link_rejects_unapproved_server_before_network_request() {
     let (base, _mock, upstream) = fixture().await;
     let (_dir, s, u) = app(None).await;

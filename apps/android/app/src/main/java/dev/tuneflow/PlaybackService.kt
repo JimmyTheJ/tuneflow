@@ -14,6 +14,7 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import kotlinx.coroutines.*
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import android.os.Handler
@@ -49,7 +50,7 @@ class PlaybackService : MediaSessionService() {
         credentials = Session(this); api = Api(credentials, credentials.token, credentials.server)
         val identity = java.security.MessageDigest.getInstance("SHA-256").digest("${credentials.server}|${credentials.userId}".toByteArray()).joinToString("") { "%02x".format(it) }
         cache = SimpleCache(File(filesDir, "audio-cache/$identity"), LeastRecentlyUsedCacheEvictor(512L * 1024 * 1024), StandaloneDatabaseProvider(this))
-        val http = DefaultHttpDataSource.Factory().setConnectTimeoutMs(8000).setReadTimeoutMs(15000)
+        val http = DefaultHttpDataSource.Factory().setConnectTimeoutMs(8000).setReadTimeoutMs(30000)
             .setDefaultRequestProperties(mapOf("Authorization" to "Bearer ${credentials.token}"))
         val source = CacheDataSource.Factory().setCache(cache)
             .setUpstreamDataSourceFactory(DefaultDataSource.Factory(this, http))
@@ -73,6 +74,11 @@ class PlaybackService : MediaSessionService() {
                 recordProgress(activeItem)
                 listenedMs = 0; recordedMs = 0; lastTick = 0; activeDuration = 0
                 activeItem = item; playSession = java.util.UUID.randomUUID().toString()
+                val next = ((player.currentMediaItemIndex + 1) until minOf(player.mediaItemCount, player.currentMediaItemIndex + 3))
+                    .map { player.getMediaItemAt(it).mediaId }.filter { !it.startsWith("jf_") }
+                if (next.isNotEmpty()) scope.launch {
+                    runCatching { api.call("music/prepare", "POST", JSONObject().put("video_ids", JSONArray(next))) }
+                }
             }
             override fun onIsPlayingChanged(isPlaying: Boolean) { if (!isPlaying) recordProgress(activeItem) }
         })

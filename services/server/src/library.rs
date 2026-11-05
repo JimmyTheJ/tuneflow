@@ -14,8 +14,20 @@ use serde_json::{Value, json};
 pub fn track_from_row(s: &Shared, u: &Value, r: &Value) -> Result<Value> {
     let vid = format!("jf_{}", text(r, "item_id"));
     let ticket = auth::token(s, id(u), Some(vid.clone()))?;
+    let album_id = if text(r, "album_id").is_empty() && !text(r, "album").is_empty() {
+        let artist = if !text(r, "album_artist").is_empty() {
+            text(r, "album_artist")
+        } else if !text(r, "artist").is_empty() {
+            text(r, "artist")
+        } else {
+            "Unknown artist"
+        };
+        format!("name:{}", json!([artist, text(r, "album")]))
+    } else {
+        text(r, "album_id").to_string()
+    };
     Ok(
-        json!({"id":format!("jellyfin:{}",text(r,"item_id")),"video_id":vid,"source":"jellyfin","title":r["title"],"artist":r["artist"],"album":r["album"],"album_id":r["album_id"],"album_artist":r["album_artist"],"disc_number":r["disc_number"],"track_number":r["track_number"],"duration_sec":r["duration_sec"],"explicit":r["explicit"],"recording_mbid":r["recording_mbid"],"thumbnail_url":format!("/api/library/images/{vid}?token={ticket}"),"mime_type":match text(r,"container"){"flac"=>"audio/flac","mp3"=>"audio/mpeg","m4a"|"mp4"=>"audio/mp4","ogg"|"opus"=>"audio/ogg","wav"=>"audio/wav",_=>"application/octet-stream"}}),
+        json!({"id":format!("jellyfin:{}",text(r,"item_id")),"video_id":vid,"source":"jellyfin","title":r["title"],"artist":r["artist"],"album":r["album"],"album_id":album_id,"album_artist":r["album_artist"],"disc_number":r["disc_number"],"track_number":r["track_number"],"duration_sec":r["duration_sec"],"explicit":r["explicit"],"recording_mbid":r["recording_mbid"],"thumbnail_url":format!("/api/library/images/{vid}?token={ticket}"),"mime_type":match text(r,"container"){"flac"=>"audio/flac","mp3"=>"audio/mpeg","m4a"|"mp4"=>"audio/mp4","ogg"|"opus"=>"audio/ogg","wav"=>"audio/wav",_=>"application/octet-stream"}}),
     )
 }
 async fn tracks(s: &Shared, u: &Value, q: &Params) -> Result<Vec<Value>> {
@@ -33,15 +45,31 @@ async fn tracks(s: &Shared, u: &Value, q: &Params) -> Result<Vec<Value>> {
         args.push(json!(terms));
         " AND rowid IN (SELECT rowid FROM library_fts WHERE library_fts MATCH ?)".into()
     };
+    let artist_name = "COALESCE(NULLIF(album_artist,''),NULLIF(artist,''),'Unknown artist')";
+    let mut sql = format!("SELECT * FROM library_tracks WHERE user_id=?{search}");
+    if let Some(album_id) = q.get("album_id").filter(|value| !value.is_empty()) {
+        if let Some(encoded) = album_id.strip_prefix("name:") {
+            let (artist, album): (String, String) = serde_json::from_str(encoded)
+                .map_err(|_| ApiError::bad("Invalid album identifier"))?;
+            sql.push_str(&format!(
+                " AND COALESCE(album_id,'')='' AND {artist_name}=? AND album=?"
+            ));
+            args.extend([json!(artist), json!(album)]);
+        } else {
+            sql.push_str(" AND album_id=?");
+            args.push(json!(album_id));
+        }
+    }
+    if let Some(artist) = q.get("artist").filter(|value| !value.is_empty()) {
+        sql.push_str(&format!(" AND {artist_name}=?"));
+        args.push(json!(artist));
+    }
+    sql.push_str(&format!(" ORDER BY {artist_name} COLLATE NOCASE,album COLLATE NOCASE,COALESCE(disc_number,1),COALESCE(track_number,1000000),title COLLATE NOCASE LIMIT ? OFFSET ?"));
     args.extend([
-        json!(q.get("album_id").cloned().unwrap_or_default()),
-        json!(q.get("album_id").cloned().unwrap_or_default()),
-        json!(q.get("artist").cloned().unwrap_or_default()),
-        json!(q.get("artist").cloned().unwrap_or_default()),
         json!(number(q, "limit", 100, 1, 500)),
         json!(number(q, "offset", 0, 0, 1_000_000)),
     ]);
-    let rows=db::all(&s.db,&format!("SELECT * FROM library_tracks WHERE user_id=?{search} AND (?='' OR album_id=?) AND (?='' OR COALESCE(NULLIF(album_artist,''),NULLIF(artist,''),'Unknown artist')=?) ORDER BY COALESCE(NULLIF(album_artist,''),artist) COLLATE NOCASE,album COLLATE NOCASE,COALESCE(disc_number,1),COALESCE(track_number,1000000),title COLLATE NOCASE LIMIT ? OFFSET ?"),args).await?;
+    let rows = db::all(&s.db, &sql, args).await?;
     let c = auth::child_settings(s, u).await?;
     rows.iter()
         .map(|r| {
@@ -57,35 +85,38 @@ async fn groups(s: &Shared, u: &Value, q: &Params, albums: bool) -> Result<Value
     let query = q.get("q").map(|v| v.trim()).unwrap_or("");
     let artist = q.get("artist").map(|v| v.as_str()).unwrap_or("");
     let artist_name = "COALESCE(NULLIF(album_artist,''),NULLIF(artist,''),'Unknown artist')";
-    let (sql, args) = if albums {
-        (
-            format!(
-                "SELECT album_id AS id,MAX(album) AS title,MAX({artist_name}) AS artist,count(*) AS track_count,min(item_id) AS item_id FROM library_tracks WHERE user_id=? AND album_id IS NOT NULL AND album_id<>'' AND album IS NOT NULL AND album<>'' AND (?='' OR {artist_name}=?) AND (?='' OR instr(lower(album || ' ' || {artist_name}),lower(?))>0) GROUP BY album_id ORDER BY artist COLLATE NOCASE,title COLLATE NOCASE LIMIT ? OFFSET ?"
-            ),
-            vec![
-                json!(id(u)),
-                json!(artist),
-                json!(artist),
-                json!(query),
-                json!(query),
-                json!(number(q, "limit", 100, 1, 500)),
-                json!(number(q, "offset", 0, 0, 1_000_000)),
-            ],
+    let mut args = vec![json!(id(u))];
+    let mut sql = if albums {
+        format!(
+            "SELECT COALESCE(NULLIF(album_id,''),'name:' || json_array({artist_name},album)) AS id,MAX(album) AS title,MAX({artist_name}) AS artist,count(*) AS track_count,min(item_id) AS item_id FROM library_tracks WHERE user_id=? AND album IS NOT NULL AND album<>''"
         )
     } else {
-        (
-            format!(
-                "SELECT {artist_name} AS id,{artist_name} AS name,count(*) AS track_count,count(DISTINCT NULLIF(album_id,'')) AS album_count,min(item_id) AS item_id FROM library_tracks WHERE user_id=? AND (?='' OR instr(lower({artist_name}),lower(?))>0) GROUP BY {artist_name} ORDER BY name COLLATE NOCASE LIMIT ? OFFSET ?"
-            ),
-            vec![
-                json!(id(u)),
-                json!(query),
-                json!(query),
-                json!(number(q, "limit", 100, 1, 500)),
-                json!(number(q, "offset", 0, 0, 1_000_000)),
-            ],
+        format!(
+            "SELECT {artist_name} AS id,{artist_name} AS name,count(*) AS track_count,count(DISTINCT CASE WHEN album IS NOT NULL AND album<>'' THEN COALESCE(NULLIF(album_id,''),'name:' || json_array({artist_name},album)) END) AS album_count,min(item_id) AS item_id FROM library_tracks WHERE user_id=?"
         )
     };
+    if albums && !artist.is_empty() {
+        sql.push_str(&format!(" AND {artist_name}=?"));
+        args.push(json!(artist));
+    }
+    if !query.is_empty() {
+        let filter = if albums {
+            format!(" AND instr(lower(album || ' ' || {artist_name}),lower(?))>0")
+        } else {
+            format!(" AND instr(lower({artist_name}),lower(?))>0")
+        };
+        sql.push_str(&filter);
+        args.push(json!(query));
+    }
+    sql.push_str(if albums {
+        " GROUP BY id ORDER BY artist COLLATE NOCASE,title COLLATE NOCASE LIMIT ? OFFSET ?"
+    } else {
+        " GROUP BY name ORDER BY name COLLATE NOCASE LIMIT ? OFFSET ?"
+    });
+    args.extend([
+        json!(number(q, "limit", 100, 1, 500)),
+        json!(number(q, "offset", 0, 0, 1_000_000)),
+    ]);
     let mut rows = db::all(&s.db, &sql, args).await?;
     for r in &mut rows {
         let t = track_from_row(s, u, r)?;

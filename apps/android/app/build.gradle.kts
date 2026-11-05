@@ -6,8 +6,8 @@ android {
         applicationId = "com.tuneflow.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = providers.gradleProperty("buildNumber").getOrElse("401000").toInt()
-        versionName = "0.4.1"
+        versionCode = providers.gradleProperty("buildNumber").getOrElse("402000").toInt()
+        versionName = "0.4.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildFeatures { buildConfig = true }

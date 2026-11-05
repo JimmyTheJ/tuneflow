@@ -18,6 +18,7 @@ import android.window.OnBackInvokedDispatcher
 import android.widget.*
 import androidx.media3.common.*
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.HttpDataSource
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import kotlinx.coroutines.*
@@ -43,12 +44,16 @@ class MainActivity : Activity() {
     private var progress: SeekBar? = null
     private var transport: Button? = null
     private var playingTitle: TextView? = null
+    private var playGeneration = 0L
     private var tab = "Library"
     private var pageOffset = 0
     private var backAction: (() -> Unit)? = null
     private val browseQueries = mutableMapOf<String, String>()
     private val browseOffsets = mutableMapOf<String, Int>()
     private val artistAlbumFilters = mutableMapOf<String, String>()
+    private val artistAlbumOffsets = mutableMapOf<String, Int>()
+    private val artistSongOffsets = mutableMapOf<String, Int>()
+    private val artistSummaries = mutableMapOf<String, Pair<Int, Int>>()
     private val tick = Handler(Looper.getMainLooper())
     private val background = Color.rgb(16, 23, 24)
     private val surface = Color.rgb(28, 39, 40)
@@ -204,13 +209,22 @@ class MainActivity : Activity() {
         val p = controller ?: return
         val item = p.currentMediaItem
         playingTitle?.text = when {
-            p.playerError != null -> "Playback failed · tap Play to retry"
+            p.playerError != null -> playbackErrorMessage(p.playerError!!)
             item == null -> "Choose something to play"
             p.playbackState == Player.STATE_BUFFERING -> "Loading · ${item.mediaMetadata.title}"
             else -> "${item.mediaMetadata.title} · ${item.mediaMetadata.artist ?: ""}"
         }
         transport?.text = if (p.isPlaying) "Pause" else "Play"
         if (p.duration > 0 && progress?.isPressed != true) progress?.progress = (p.currentPosition * 1000 / p.duration).toInt()
+    }
+    private fun playbackErrorMessage(error: PlaybackException): String {
+        val response = generateSequence<Throwable>(error) { it.cause }
+            .filterIsInstance<HttpDataSource.InvalidResponseCodeException>().firstOrNull()
+        if (response != null) {
+            val detail = runCatching { JSONObject(String(response.responseBody)).optString("detail") }.getOrDefault("")
+            return "Playback failed (HTTP ${response.responseCode})${if (detail.isNotBlank()) " · $detail" else ""}"
+        }
+        return "Playback failed (${error.errorCodeName}) · tap Play to retry"
     }
     private fun libraryOrDiscovery() {
         val discovery = tab == "YouTube"
@@ -265,22 +279,46 @@ class MainActivity : Activity() {
         row.addView(Button(this).apply { text = "⋮"; setTextColor(mint); setOnClickListener { trackMenu(track) } }, LinearLayout.LayoutParams(dp(50), dp(48)))
         target.addView(row, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) })
     }
-    private fun item(track: Track): MediaItem {
+    private fun item(track: Track, stream: JSONObject? = null): MediaItem {
         val artworkPath = track.artwork
         val artwork = artworkPath.takeIf { it.isNotEmpty() }?.let { Uri.parse(if (it.startsWith('/')) session.server + it else it) }
-        return MediaItem.Builder().setMediaId(track.id).setUri("${session.server}/api/music/audio/${Api.encode(track.id)}")
+        val path = stream?.optString("audio_url").orEmpty()
+        val url = when {
+            path.startsWith('/') -> session.server + path
+            path.startsWith("https://") || path.startsWith("http://") -> path
+            else -> "${session.server}/api/music/audio/${Api.encode(track.id)}"
+        }
+        val builder = MediaItem.Builder().setMediaId(track.id).setUri(url)
             .setCustomCacheKey("${session.server}|${session.userId}|${track.id}")
-            .setMediaMetadata(MediaMetadata.Builder().setTitle(track.title).setArtist(track.artist).setArtworkUri(artwork).build()).build()
+            .setMediaMetadata(MediaMetadata.Builder().setTitle(track.title).setArtist(track.artist).setArtworkUri(artwork).build())
+        stream?.optString("mime_type")?.takeIf { it.isNotBlank() && it != "null" }?.let(builder::setMimeType)
+        return builder.build()
     }
     private fun play(tracks: List<Track>, start: Int, ordered: Boolean = false) {
         val player = controller ?: run { showError(Exception("Player is connecting; try again")); return }
         val selected = tracks[start]
         if (selected.blocked.isNotEmpty()) { showError(Exception(selected.blocked)); return }
         val playable = tracks.filter { it.blocked.isEmpty() }
-        if (ordered) player.shuffleModeEnabled = false
-        player.setMediaItems(playable.map(::item), playable.indexOf(selected).coerceAtLeast(0), 0)
-        player.prepare(); player.play()
-        launchWork { api.call("music/prepare", "POST", JSONObject().put("video_ids", JSONArray(playable.drop(playable.indexOf(selected) + 1).take(2).map { it.id }))) }
+        val generation = ++playGeneration
+        fun startPlayback(stream: JSONObject?) {
+            if (generation != playGeneration) return
+            if (ordered) player.shuffleModeEnabled = false
+            player.setMediaItems(playable.map { item(it, if (it.id == selected.id) stream else null) }, playable.indexOf(selected).coerceAtLeast(0), 0)
+            player.prepare(); player.play()
+        }
+        if (selected.id.startsWith("jf_")) startPlayback(null)
+        else {
+            playingTitle?.text = "Preparing YouTube audio · ${selected.title}"
+            scope.launch { try {
+                val stream = api.obj("music/stream/${Api.encode(selected.id)}")
+                startPlayback(stream)
+            } catch (e: CancellationException) { throw e } catch (e: Exception) {
+                if (generation == playGeneration) {
+                    playingTitle?.text = "YouTube audio unavailable · ${selected.title}"
+                    showError(Exception("YouTube playback could not start: ${e.message ?: "Server error"}", e))
+                }
+            } }
+        }
     }
     private fun trackMenu(track: Track) {
         AlertDialog.Builder(this).setTitle(track.title).setItems(arrayOf("Play next", "Add to queue", "Like", "Add to playlist")) { _, choice ->
@@ -324,20 +362,25 @@ class MainActivity : Activity() {
         }
         target.addView(row)
     }
-    private suspend fun allPages(path: String): List<JSONObject> {
-        val found = mutableListOf<JSONObject>()
+    private suspend fun allTracks(path: String): List<Track> {
+        val found = mutableListOf<Track>()
         for (offset in 0..1_000_000 step 500) {
             val separator = if ('?' in path) '&' else '?'
-            val page = api.array("$path${separator}limit=500&offset=$offset").objects()
+            val page = api.array("$path${separator}limit=500&offset=$offset").objects().map(Track::from)
             found.addAll(page)
             if (page.size < 500) return found
         }
         throw IllegalStateException("Library is too large to load")
     }
-    private fun playGroup(path: String) = launchWork {
-        val tracks = allPages(path).map(Track::from)
-        if (tracks.isEmpty()) Toast.makeText(this@MainActivity, "No songs to play", Toast.LENGTH_SHORT).show()
-        else play(tracks, tracks.indexOfFirst { it.blocked.isEmpty() }.coerceAtLeast(0), ordered = true)
+    private fun playGroup(path: String) {
+        val request = ++playGeneration
+        playingTitle?.text = "Loading queue…"
+        launchWork {
+            val tracks = allTracks(path)
+            if (request != playGeneration) return@launchWork
+            if (tracks.isEmpty()) Toast.makeText(this@MainActivity, "No songs to play", Toast.LENGTH_SHORT).show()
+            else play(tracks, tracks.indexOfFirst { it.blocked.isEmpty() }.coerceAtLeast(0), ordered = true)
+        }
     }
     private fun groupRows(target: LinearLayout, groups: List<BrowseGroup>, section: String, open: (BrowseGroup) -> Unit, playGroup: (BrowseGroup) -> Unit) {
         target.removeAllViews()
@@ -382,18 +425,26 @@ class MainActivity : Activity() {
             browseOffsets[section] = offset
             screenJob?.cancel(); rows.removeAllViews(); label("Loading…", rows)
             screenJob = scope.launch { try {
-                val path = "library/$section?q=${Api.encode(query.text.toString().trim())}&limit=100&offset=$offset"
+                val path = "library/$section?q=${Api.encode(query.text.toString().trim())}&limit=40&offset=$offset"
                 val values = api.array(path).objects()
+                if (artists && values.isNotEmpty() && !values[0].has("album_count")) {
+                    rows.removeAllViews()
+                    label("This server is older than the Android library browser. Update and rebuild the Rust API, then sync Jellyfin again to enable artist search and albums.", rows)
+                    return@launch
+                }
                 currentGroups = values.map { value ->
-                    if (artists) BrowseGroup(value.optString("id"), value.optString("name"), "${value.optInt("album_count")} albums · ${value.optInt("track_count")} songs", "${value.optInt("album_count")} albums · ${value.optInt("track_count")} songs")
+                    if (artists) {
+                        artistSummaries[value.optString("id")] = value.optInt("album_count") to value.optInt("track_count")
+                        BrowseGroup(value.optString("id"), value.optString("name"), "${value.optInt("album_count")} albums · ${value.optInt("track_count")} songs", "${value.optInt("album_count")} albums · ${value.optInt("track_count")} songs")
+                    }
                     else BrowseGroup(value.optString("id"), value.optString("title"), value.optString("artist"), "${value.optString("artist")} · ${value.optInt("track_count")} songs")
                 }
                 rows.removeAllViews()
                 if (currentGroups.isEmpty()) label(if (offset == 0) "No ${section} found. Sync Jellyfin in Settings." else "No more ${section}.", rows)
                 groupRows(display, currentGroups, section, open, playSelected)
                 rows.addView(display)
-                if (offset > 0) action("Previous page", rows) { offset = (offset - 100).coerceAtLeast(0); load() }
-                if (values.size == 100) action("Next page", rows) { offset += 100; load() }
+                if (offset > 0) action("Previous page", rows) { offset = (offset - 40).coerceAtLeast(0); load() }
+                if (values.size == 40) action("Next page", rows) { offset += 40; load() }
             } catch (e: CancellationException) { throw e } catch (e: Exception) { rows.removeAllViews(); label(e.message ?: "Could not load library", rows) } }
         }
         val search = action("Search") { offset = 0; load() }
@@ -437,66 +488,116 @@ class MainActivity : Activity() {
         }
     }
     private fun showArtist(name: String) {
-        screenJob?.cancel(); backAction = { home() }; frame(name)
+        screenJob?.cancel()
+        val pageJob = SupervisorJob(scope.coroutineContext[Job])
+        screenJob = pageJob
+        val pageScope = CoroutineScope(Dispatchers.Main.immediate + pageJob)
+        backAction = { home() }; frame(name)
         action("← All artists") { home() }
-        label("Loading artist…")
+        val summary = artistSummaries[name]
+        label(if (summary == null) "Library artist" else "${summary.first} albums · ${summary.second} songs")
+        action("▶ Play all songs") { playGroup("library/tracks?artist=${Api.encode(name)}") }
         playerFooter()
-        screenJob = scope.launch { try {
-            val albums = allPages("library/albums?artist=${Api.encode(name)}")
-            val tracks = allPages("library/tracks?artist=${Api.encode(name)}").map(Track::from)
-            content.removeAllViews(); action("← All artists") { home() }
-            label("${albums.size} albums · ${tracks.size} songs")
-            if (tracks.any { it.blocked.isEmpty() }) action("▶ Play all songs") { play(tracks, tracks.indexOfFirst { it.blocked.isEmpty() }, ordered = true) }
-            label("Albums")
-            val filter = input("Filter this artist's albums", artistAlbumFilters[name].orEmpty())
-            val albumList = box(0)
-            val groups = albums.map { BrowseGroup(it.optString("id"), it.optString("title"), "${it.optInt("track_count")} songs", "${it.optString("artist")} · ${it.optInt("track_count")} songs") }
-            fun drawAlbums() {
-                val term = filter.text.toString().trim()
-                artistAlbumFilters[name] = term
-                val visible = groups.filter { it.title.contains(term, ignoreCase = true) }
-                groupRows(albumList, visible, "albums", { showAlbum(it.id, it.title, name, name) }, { group ->
-                    val albumTracks = tracks.filter { it.albumId == group.id }
-                    if (albumTracks.isNotEmpty()) play(albumTracks, albumTracks.indexOfFirst { it.blocked.isEmpty() }.coerceAtLeast(0), ordered = true)
-                })
-                if (visible.isEmpty()) label("No albums found", albumList)
-            }
-            val filterButton = action("Filter albums") { drawAlbums() }
-            filter.setOnEditorActionListener { _, _, _ -> filterButton.performClick(); true }
-            viewPicker("albums", content) { drawAlbums() }
-            content.addView(albumList); drawAlbums()
-            label("All songs")
-            val songList = box(0)
-            viewPicker("songs", content) { renderTracks(songList, tracks, "songs") }
-            content.addView(songList); renderTracks(songList, tracks, "songs")
-        } catch (e: CancellationException) { throw e } catch (e: Exception) { showError(e) } }
+
+        label("Albums")
+        val filter = input("Find an album by this artist", artistAlbumFilters[name].orEmpty())
+        val albumRows = box(0)
+        val albumPaging = box(0)
+        var albumOffset = artistAlbumOffsets[name] ?: 0
+        var currentAlbums = listOf<BrowseGroup>()
+        var albumJob: Job? = null
+        fun drawAlbums() {
+            groupRows(albumRows, currentAlbums, "albums", { showAlbum(it.id, it.title, name, name) },
+                { playGroup("library/tracks?album_id=${Api.encode(it.id)}") })
+            if (currentAlbums.isEmpty()) label("No albums found on this page", albumRows)
+        }
+        fun loadAlbums() {
+            albumJob?.cancel()
+            val term = filter.text.toString().trim()
+            artistAlbumFilters[name] = term
+            artistAlbumOffsets[name] = albumOffset
+            albumRows.removeAllViews(); label("Loading albums…", albumRows)
+            albumPaging.removeAllViews()
+            albumJob = pageScope.launch { try {
+                val values = api.array("library/albums?artist=${Api.encode(name)}&q=${Api.encode(term)}&limit=40&offset=$albumOffset").objects()
+                currentAlbums = values.map { BrowseGroup(it.optString("id"), it.optString("title"), "${it.optInt("track_count")} songs", "${it.optString("artist")} · ${it.optInt("track_count")} songs") }
+                drawAlbums()
+                if (albumOffset > 0) action("Previous albums", albumPaging) { albumOffset = (albumOffset - 40).coerceAtLeast(0); loadAlbums() }
+                if (values.size == 40) action("Next albums", albumPaging) { albumOffset += 40; loadAlbums() }
+            } catch (e: CancellationException) { throw e } catch (e: Exception) { albumRows.removeAllViews(); label(e.message ?: "Could not load albums", albumRows) } }
+        }
+        val albumSearch = action("Search albums") { albumOffset = 0; loadAlbums() }
+        filter.setOnEditorActionListener { _, _, _ -> albumSearch.performClick(); true }
+        viewPicker("albums", content) { drawAlbums() }
+        content.addView(albumRows); content.addView(albumPaging)
+
+        label("Songs")
+        val songRows = box(0)
+        val songPaging = box(0)
+        var songOffset = artistSongOffsets[name] ?: 0
+        var currentSongs = listOf<Track>()
+        var songJob: Job? = null
+        fun loadSongs() {
+            songJob?.cancel()
+            artistSongOffsets[name] = songOffset
+            songRows.removeAllViews(); label("Loading songs…", songRows)
+            songPaging.removeAllViews()
+            songJob = pageScope.launch { try {
+                val songs = api.array("library/tracks?artist=${Api.encode(name)}&limit=50&offset=$songOffset").objects().map(Track::from)
+                currentSongs = songs
+                renderTracks(songRows, songs, "songs")
+                if (songOffset > 0) action("Previous songs", songPaging) { songOffset = (songOffset - 50).coerceAtLeast(0); loadSongs() }
+                if (songs.size == 50) action("Next songs", songPaging) { songOffset += 50; loadSongs() }
+            } catch (e: CancellationException) { throw e } catch (e: Exception) { songRows.removeAllViews(); label(e.message ?: "Could not load songs", songRows) } }
+        }
+        viewPicker("songs", content) { renderTracks(songRows, currentSongs, "songs") }
+        content.addView(songRows); content.addView(songPaging)
+        loadAlbums(); loadSongs()
     }
     private fun showAlbum(id: String, title: String, artist: String, fromArtist: String? = null) {
-        screenJob?.cancel(); backAction = { if (fromArtist != null) showArtist(fromArtist) else home() }; frame(title)
+        screenJob?.cancel()
+        val pageJob = SupervisorJob(scope.coroutineContext[Job])
+        screenJob = pageJob
+        val pageScope = CoroutineScope(Dispatchers.Main.immediate + pageJob)
+        backAction = { if (fromArtist != null) showArtist(fromArtist) else home() }; frame(title)
         action(if (fromArtist != null) "← $fromArtist" else "← All albums") { backAction?.invoke() }
-        label("Loading album…")
+        label(artist)
+        action("▶ Play album") { playGroup("library/tracks?album_id=${Api.encode(id)}") }
         playerFooter()
-        screenJob = scope.launch { try {
-            val tracks = allPages("library/tracks?album_id=${Api.encode(id)}").map(Track::from)
-            content.removeAllViews()
-            action(if (fromArtist != null) "← $fromArtist" else "← All albums") { backAction?.invoke() }
-            label("$artist · ${tracks.size} songs")
-            if (tracks.any { it.blocked.isEmpty() }) action("▶ Play album") { play(tracks, tracks.indexOfFirst { it.blocked.isEmpty() }, ordered = true) }
-            if (tracks.any { it.trackNumber == null }) label("Sync your Jellyfin library again in Settings to load album track order.")
-            label("Tracklist")
-            val list = box(0)
-            fun draw() {
-                list.removeAllViews()
-                val discs = tracks.map { it.discNumber ?: 1 }.distinct().sorted()
-                for (disc in discs) {
-                    if (discs.size > 1) label("Disc $disc", list)
-                    val songs = box(0); renderTracks(songs, tracks.filter { (it.discNumber ?: 1) == disc }, "songs", numbered = true); list.addView(songs)
-                }
-                if (tracks.isEmpty()) label("No songs found in this album", list)
+        val warning = box(0); content.addView(warning)
+        label("Tracklist")
+        val list = box(0)
+        val paging = box(0)
+        var offset = 0
+        var tracks = listOf<Track>()
+        var trackJob: Job? = null
+        fun draw() {
+            list.removeAllViews()
+            val discs = tracks.map { it.discNumber ?: 1 }.distinct().sorted()
+            for (disc in discs) {
+                if (discs.size > 1) label("Disc $disc", list)
+                val songs = box(0)
+                renderTracks(songs, tracks.filter { (it.discNumber ?: 1) == disc }, "songs", numbered = true)
+                list.addView(songs)
             }
-            viewPicker("songs", content) { draw() }
-            content.addView(list); draw()
-        } catch (e: CancellationException) { throw e } catch (e: Exception) { showError(e) } }
+            if (tracks.isEmpty()) label("No songs found on this page", list)
+        }
+        fun load() {
+            trackJob?.cancel()
+            list.removeAllViews(); label("Loading tracklist…", list)
+            paging.removeAllViews()
+            trackJob = pageScope.launch { try {
+                tracks = api.array("library/tracks?album_id=${Api.encode(id)}&limit=50&offset=$offset").objects().map(Track::from)
+                warning.removeAllViews()
+                if (tracks.any { it.trackNumber == null }) label("Sync Jellyfin again in Settings to load album track order.", warning)
+                draw()
+                if (offset > 0) action("Previous tracks", paging) { offset = (offset - 50).coerceAtLeast(0); load() }
+                if (tracks.size == 50) action("Next tracks", paging) { offset += 50; load() }
+            } catch (e: CancellationException) { throw e } catch (e: Exception) { list.removeAllViews(); label(e.message ?: "Could not load tracklist", list) } }
+        }
+        viewPicker("songs", content) { draw() }
+        content.addView(list); content.addView(paging)
+        load()
     }
     private fun showTracks(title: String, path: String, playlistId: Long? = null) {
         screenJob?.cancel(); backAction = { home() }; content.removeAllViews(); titleView.text = title

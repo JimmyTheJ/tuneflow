@@ -315,10 +315,15 @@ pub async fn serve(
     }
     let response = req.send().await?;
     if matches!(response.status().as_u16(), 401 | 403 | 410) {
+        let forbidden = response.status().as_u16() == 403;
         s.streams
             .invalidate(&format!("{}:{vid}", if video { "video" } else { "audio" }))
             .await;
-        return Err(ApiError::upstream("YouTube stream expired; retry playback"));
+        return Err(ApiError::upstream(if forbidden {
+            "YouTube rejected this stream (403). The server may need an updated yt-dlp or a PO token provider"
+        } else {
+            "YouTube stream expired; retry playback"
+        }));
     }
     let settings = db::one(&s.db, "SELECT * FROM system_settings WHERE id=1", vec![]).await?;
     let cache = !video

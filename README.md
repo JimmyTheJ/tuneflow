@@ -64,6 +64,12 @@ Play all on an artist or album replaces the queue with that selection; selecting
 a song plays only that song. Album playback uses disc and track order. If you
 synced before this browsing update, run **Sync library** again in Settings to
 fill in album artist and track numbers from Jellyfin.
+The Android artist and album screens page their results; playback loads the
+complete queue only when requested. If Android says the server is too old for
+artist search, rebuild and restart `tuneflow-api` from the current checkout.
+Tracks with an album name but no Jellyfin album ID are grouped by name and
+album artist. Android resolves YouTube audio before starting Media3 playback;
+an upstream extraction failure is shown directly in the app.
 
 Jellyfin passwords are used only for authentication. The resulting access token
 is encrypted at rest using a key derived from `JWT_SECRET` and never sent to clients.
