@@ -64,6 +64,15 @@ Play all on an artist or album replaces the queue with that selection; selecting
 a song plays only that song. Album playback uses disc and track order. If you
 synced before this browsing update, run **Sync library** again in Settings to
 fill in album artist and track numbers from Jellyfin.
+The Android artist and album browsers start with collapsed letter groups: A–Z,
+each digit 0–9, and # for other starting characters. Artists group by artist name;
+albums group by album title. **Jump to letter** opens a letter directly. Search
+narrows the groups, with counts shown before any entries or artwork are loaded.
+Opening a group fetches 40 entries; more load as you scroll, and only visible rows
+are rendered. Tiles, List and Details remain available. Returning from an artist
+or album retains your open groups and scroll position. Rebuild the Rust API to
+provide the new letter counts and filtered pages; older clients retain their
+existing API responses.
 The Android artist and album screens page their results; playback loads the
 complete queue only when requested. If Android says the server is too old for
 artist search, rebuild and restart `tuneflow-api` from the current checkout.

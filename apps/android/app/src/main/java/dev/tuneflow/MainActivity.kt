@@ -32,7 +32,6 @@ import java.util.concurrent.Executor
 /** Native Android Views; the service owns playback independently of this screen. */
 @UnstableApi
 class MainActivity : Activity() {
-    private data class BrowseGroup(val id: String, val title: String, val subtitle: String, val detail: String, val artwork: String = "")
     private lateinit var session: Session
     private lateinit var api: Api
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -66,7 +65,7 @@ class MainActivity : Activity() {
     private var pageOffset = 0
     private var backAction: (() -> Unit)? = null
     private val browseQueries = mutableMapOf<String, String>()
-    private val browseOffsets = mutableMapOf<String, Int>()
+    private val letterLibraryStates = mutableMapOf<String, LetterLibraryState>()
     private val artistAlbumFilters = mutableMapOf<String, String>()
     private val artistAlbumOffsets = mutableMapOf<String, Int>()
     private val artistSongOffsets = mutableMapOf<String, Int>()
@@ -194,7 +193,7 @@ class MainActivity : Activity() {
         }
     }
     private fun acceptSession(response: JSONObject) {
-        playGeneration++; playerSheet?.dismiss()
+        playGeneration++; playerSheet?.dismiss(); letterLibraryStates.clear()
         controller?.stop(); controller?.clearMediaItems()
         controllerFuture?.let { MediaController.releaseFuture(it) }; controllerFuture = null; controller = null
         stopService(android.content.Intent(this, PlaybackService::class.java))
@@ -762,47 +761,32 @@ class MainActivity : Activity() {
     }
     private fun browseGroups(section: String) {
         val artists = section == "artists"
-        label(if (artists) "Artists in your Jellyfin library" else "Albums in your Jellyfin library")
-        val query = input(if (artists) "Find an artist" else "Find an album", browseQueries[section].orEmpty())
-        val rows = box(0)
-        val display = box(0)
-        var currentGroups = listOf<BrowseGroup>()
+        val pageJob = SupervisorJob(scope.coroutineContext[Job])
+        screenJob = pageJob
+        val pageScope = CoroutineScope(Dispatchers.Main.immediate + pageJob)
+        val state = letterLibraryStates.getOrPut(section) { LetterLibraryState() }
+        label(if (artists) "Browse artists by name." else "Browse albums by title.")
+        val query = input(if (artists) "Find an artist" else "Find an album", state.query)
         val open: (BrowseGroup) -> Unit = { if (artists) showArtist(it.id) else showAlbum(it.id, it.title, it.subtitle) }
         val playSelected: (BrowseGroup) -> Unit = {
             if (artists) playGroup("library/tracks?artist=${Api.encode(it.id)}") else playGroup("library/tracks?album_id=${Api.encode(it.id)}")
         }
-        var offset = browseOffsets[section] ?: 0
-        fun load() {
-            browseQueries[section] = query.text.toString().trim()
-            browseOffsets[section] = offset
-            screenJob?.cancel(); rows.removeAllViews(); label("Loading…", rows)
-            screenJob = scope.launch { try {
-                val path = "library/$section?q=${Api.encode(query.text.toString().trim())}&limit=40&offset=$offset"
-                val values = api.array(path).objects()
-                if (artists && values.isNotEmpty() && !values[0].has("album_count")) {
-                    rows.removeAllViews()
-                    label("This server is older than the Android library browser. Update and rebuild the Rust API, then sync Jellyfin again to enable artist search and albums.", rows)
-                    return@launch
-                }
-                currentGroups = values.map { value ->
-                    if (artists) {
-                        artistSummaries[value.optString("id")] = value.optInt("album_count") to value.optInt("track_count")
-                        BrowseGroup(value.optString("id"), value.optString("name"), "${value.optInt("album_count")} albums · ${value.optInt("track_count")} songs", "${value.optInt("album_count")} albums · ${value.optInt("track_count")} songs", value.optString("thumbnail_url"))
-                    }
-                    else BrowseGroup(value.optString("id"), value.optString("title"), value.optString("artist"), "${value.optString("artist")} · ${value.optInt("track_count")} songs", value.optString("thumbnail_url"))
-                }
-                rows.removeAllViews()
-                if (currentGroups.isEmpty()) label(if (offset == 0) "No ${section} found. Sync Jellyfin in Settings." else "No more ${section}.", rows)
-                groupRows(display, currentGroups, section, open, playSelected)
-                rows.addView(display)
-                if (offset > 0) action("Previous page", rows) { offset = (offset - 40).coerceAtLeast(0); load() }
-                if (values.size == 40) action("Next page", rows) { offset += 40; load() }
-            } catch (e: CancellationException) { throw e } catch (e: Exception) { rows.removeAllViews(); label(e.message ?: "Could not load library", rows) } }
-        }
-        debounce(query) { offset = 0; load() }
-        viewPicker(section, content) { groupRows(display, currentGroups, section, open, playSelected) }
-        content.addView(rows)
-        load()
+        lateinit var browser: LetterLibraryView
+        action("A–Z · Jump to letter", content) { browser.search(query.text.toString().trim()); browser.chooseLetter() }
+        viewPicker(section, content) { browser.changeView() }
+        val header = content
+        header.setPadding(0, dp(8), 0, dp(12))
+        (header.parent as? ViewGroup)?.removeView(header)
+        browser = LetterLibraryView(this, header, state, pageScope, api, section, { viewMode(section) }, { value ->
+            if (artists) {
+                check(value.has("album_count")) { "Update the Rust API to enable artist albums" }
+                artistSummaries[value.optString("id")] = value.optInt("album_count") to value.optInt("track_count")
+                BrowseGroup(value.optString("id"), value.optString("name"), "${value.optInt("album_count")} albums · ${value.optInt("track_count")} songs", "${value.optInt("album_count")} albums · ${value.optInt("track_count")} songs", value.optString("thumbnail_url"))
+            } else BrowseGroup(value.optString("id"), value.optString("title"), value.optString("artist"), "${value.optString("artist")} · ${value.optInt("track_count")} songs", value.optString("thumbnail_url"))
+        }, { target, entries -> groupRows(target, entries, section, open, playSelected) })
+        root.removeViewAt(1)
+        root.addView(browser, 1, LinearLayout.LayoutParams(-1, 0, 1f))
+        debounce(query) { browser.search(query.text.toString().trim()) }
     }
     private fun albums() = browseGroups("albums")
     private fun artists() = browseGroups("artists")
@@ -1053,7 +1037,7 @@ class MainActivity : Activity() {
         } }.setNegativeButton("Cancel", null).show()
     }
     private fun logout() {
-        playGeneration++; playerSheet?.dismiss()
+        playGeneration++; playerSheet?.dismiss(); letterLibraryStates.clear()
         controller?.stop(); controller?.clearMediaItems(); controller?.release(); controller = null
         controllerFuture?.let { MediaController.releaseFuture(it) }; controllerFuture = null
         stopService(android.content.Intent(this, PlaybackService::class.java))

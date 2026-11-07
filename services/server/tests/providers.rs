@@ -657,3 +657,112 @@ fn youtube_track_exposes_upload_metadata_without_private_stream_urls() {
     assert_eq!(track["channel_id"], "UCfixture");
     assert!(track.get("url").is_none());
 }
+
+#[tokio::test]
+async fn library_initial_groups_count_names_and_lazy_pages_independently() {
+    let (_dir, s, u) = app(None).await;
+    for (index, artist, album) in [
+        (1, "Alpha", "Zebra"),
+        (2, "Alpha", "Zebra"),
+        (3, "Another", "Apple"),
+        (4, "alpha two", "Apricot"),
+        (5, "2Pac", "2 Albums"),
+        (6, "3 Doors Down", "3 Albums"),
+        (7, "!Special", "!Album"),
+        (8, "Édith", "Éclair"),
+        (9, "Beta", "A %_ album"),
+        (10, "  Spaced", "  Spaced album"),
+    ] {
+        db::exec(&s.db, "INSERT INTO library_tracks(user_id,item_id,title,artist,album,generation) VALUES(1,?,'Unrelated track title',?,?,'initials')",
+            vec![json!(format!("initial-{index}")), json!(artist), json!(album)]).await.unwrap();
+    }
+    // A second user's entries must not change the counts or lazy pages.
+    db::exec(
+        &s.db,
+        "INSERT INTO users(id,username,display_name,password_hash,household_id) VALUES(2,'other','Other','unused',1)",
+        vec![],
+    )
+    .await
+    .unwrap();
+    db::exec(&s.db, "INSERT INTO library_tracks(user_id,item_id,title,artist,album,generation) VALUES(2,'private','Song','Another private artist','Another private album','initials')", vec![]).await.unwrap();
+    async fn query(s: &Shared, u: &Value, section: &str, params: &[(&str, &str)]) -> Value {
+        let params = params
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        let response = library::handle(
+            s,
+            u,
+            &format!("library/{section}"),
+            &params,
+            &Method::GET,
+            json!({}),
+        )
+        .await
+        .unwrap();
+        serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap()
+    }
+    for (section, expected_a, expected_total) in [("artists", 3, 9), ("albums", 3, 9)] {
+        let index = query(&s, &u, section, &[("group_by", "initial")]).await;
+        assert_eq!(index["grouping"], "initial");
+        let counts = index["groups"].as_array().unwrap();
+        let count = |letter: &str| {
+            counts.iter().find(|g| g["initial"] == letter).unwrap()["count"]
+                .as_i64()
+                .unwrap()
+        };
+        assert_eq!(count("A"), expected_a);
+        assert_eq!(count("#"), 2);
+        assert_eq!(count("2"), 1);
+        assert_eq!(count("3"), 1);
+        assert_eq!(
+            counts
+                .iter()
+                .map(|g| g["count"].as_i64().unwrap())
+                .sum::<i64>(),
+            expected_total
+        );
+        assert!(counts.iter().all(|g| g.get("thumbnail_url").is_none()));
+        let first = query(&s, &u, section, &[("initial", "a"), ("limit", "2")]).await;
+        let next = query(
+            &s,
+            &u,
+            section,
+            &[("initial", "A"), ("limit", "2"), ("offset", "2")],
+        )
+        .await;
+        assert_eq!(first.as_array().unwrap().len(), 2);
+        assert_eq!(next.as_array().unwrap().len(), 1);
+        assert_ne!(first[0]["id"], next[0]["id"]);
+        assert_ne!(first[1]["id"], next[0]["id"]);
+        let special = query(&s, &u, section, &[("initial", "#")]).await;
+        assert_eq!(special.as_array().unwrap().len(), 2);
+        let spaced = query(&s, &u, section, &[("initial", "S")]).await;
+        assert_eq!(spaced.as_array().unwrap().len(), 1);
+        let absent = query(&s, &u, section, &[("initial", "Q")]).await;
+        assert!(absent.as_array().unwrap().is_empty());
+    }
+    let albums = query(&s, &u, "albums", &[("initial", "A")]).await;
+    assert_eq!(albums[0]["title"], "A %_ album");
+    assert_eq!(albums[1]["title"], "Apple");
+    assert_eq!(albums[2]["title"], "Apricot");
+    // Album grouping uses its title, even when its artist starts with a different letter.
+    let zebra = query(&s, &u, "albums", &[("initial", "Z")]).await;
+    assert_eq!(zebra[0]["title"], "Zebra");
+    assert_eq!(zebra[0]["track_count"], 2);
+    let filtered = query(&s, &u, "albums", &[("group_by", "initial"), ("q", "%_")]).await;
+    assert_eq!(filtered["groups"], json!([{"initial":"A","count":1}]));
+    let artist_filter = query(
+        &s,
+        &u,
+        "albums",
+        &[("group_by", "initial"), ("artist", "Alpha")],
+    )
+    .await;
+    assert_eq!(artist_filter["groups"], json!([{"initial":"Z","count":1}]));
+    let invalid = HashMap::from([("initial".into(), "AB".into())]);
+    let error = library::handle(&s, &u, "library/artists", &invalid, &Method::GET, json!({}))
+        .await
+        .unwrap_err();
+    assert_eq!(error.0, StatusCode::BAD_REQUEST);
+}

@@ -100,10 +100,45 @@ async fn main() -> anyhow::Result<()> {
     jellyfin::sync(&s, &u)
         .await
         .map_err(|e| anyhow::anyhow!(e.1))?;
+    // Extra groups exercise letter paging without changing the two playback-test songs.
+    for index in 0..88 {
+        let (artist, album) = match index {
+            85 => ("2Pac".into(), "2 Originals".into()),
+            86 => ("3 Doors Down".into(), "3 Originals".into()),
+            87 => ("!Special".into(), "!Special album".into()),
+            _ => (format!("Alpha {index:03}"), format!("A record {index:03}")),
+        };
+        db::exec(&s.db, "INSERT INTO library_tracks(user_id,item_id,title,artist,album,album_artist,disc_number,track_number,container,generation) VALUES(1,?,'Letter fixture song',?,?,?,1,1,'wav','letter-fixture') ON CONFLICT(user_id,item_id) DO UPDATE SET artist=excluded.artist,album=excluded.album",
+            vec![json!(format!("{:032x}", index + 1000)),json!(artist),json!(album),json!(artist)]).await.map_err(|e|anyhow::anyhow!(e.1))?;
+    }
+    let requests = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let read_requests = requests.clone();
+    let router = tuneflow_server::router(s)
+        .route(
+            "/api/fixture/library-requests",
+            get(move || {
+                let requests = read_requests.clone();
+                async move { Json(json!({"requests": requests.lock().unwrap().clone()})) }
+            }),
+        )
+        .layer(axum::middleware::from_fn(
+            move |request: Request<Body>, next: axum::middleware::Next| {
+                let requests = requests.clone();
+                async move {
+                    if matches!(
+                        request.uri().path(),
+                        "/api/library/artists" | "/api/library/albums"
+                    ) {
+                        requests.lock().unwrap().push(request.uri().to_string());
+                    }
+                    next.run(request).await
+                }
+            },
+        ));
     println!("Synthetic playback fixture listening on 127.0.0.1:18010");
     axum::serve(
         tokio::net::TcpListener::bind("127.0.0.1:18010").await?,
-        tuneflow_server::router(s),
+        router,
     )
     .await?;
     Ok(())

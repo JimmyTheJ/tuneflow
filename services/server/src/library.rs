@@ -114,10 +114,42 @@ async fn groups(s: &Shared, u: &Value, q: &Params, albums: bool) -> Result<Value
         args.push(json!(query));
     }
     sql.push_str(if albums {
-        " GROUP BY id ORDER BY artist COLLATE NOCASE,title COLLATE NOCASE LIMIT ? OFFSET ?"
+        " GROUP BY id"
     } else {
-        " GROUP BY name ORDER BY name COLLATE NOCASE LIMIT ? OFFSET ?"
+        " GROUP BY name"
     });
+    // Filter the grouped display name, not a track title or an album's artist.
+    let display_name = if albums { "title" } else { "name" };
+    let first = format!("substr(upper(trim({display_name})),1,1)");
+    let bucket = format!(
+        "CASE WHEN {first} BETWEEN 'A' AND 'Z' OR {first} BETWEEN '0' AND '9' THEN {first} ELSE '#' END"
+    );
+    let grouped = format!("SELECT * FROM ({sql}) AS library_groups");
+    if q.get("group_by").is_some_and(|value| value == "initial") {
+        let counts = db::all(&s.db, &format!("SELECT {bucket} AS initial,count(*) AS count FROM ({grouped}) GROUP BY initial ORDER BY initial"), args).await?;
+        return Ok(json!({"grouping":"initial","groups":counts}));
+    }
+    sql = grouped;
+    if let Some(initial) = q.get("initial") {
+        let initial = initial.to_ascii_uppercase();
+        if initial.len() != 1
+            || !initial
+                .bytes()
+                .all(|c| c.is_ascii_alphanumeric() || c == b'#')
+        {
+            return Err(ApiError::bad("Initial must be A–Z, 0–9 or #"));
+        }
+        sql.push_str(&format!(" WHERE {bucket}=?"));
+        args.push(json!(initial));
+    }
+    sql.push_str(if albums && q.contains_key("initial") {
+        " ORDER BY title COLLATE NOCASE,artist COLLATE NOCASE,id"
+    } else if albums {
+        " ORDER BY artist COLLATE NOCASE,title COLLATE NOCASE,id"
+    } else {
+        " ORDER BY name COLLATE NOCASE,id"
+    });
+    sql.push_str(" LIMIT ? OFFSET ?");
     args.extend([
         json!(number(q, "limit", 100, 1, 500)),
         json!(number(q, "offset", 0, 0, 1_000_000)),

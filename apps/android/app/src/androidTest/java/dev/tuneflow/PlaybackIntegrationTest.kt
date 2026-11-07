@@ -27,7 +27,7 @@ class PlaybackIntegrationTest {
         val api = Api(session)
         val signed = api.obj("auth/login", "POST", JSONObject().put("household_slug", "system").put("username", "fixture").put("password", "fixture-password"), false)
         session.token = signed.getString("access_token"); session.userId = "1"
-        val library = api.array("library/tracks")
+        val library = api.array("library/tracks?artist=Tuneflow%20tests")
         assertEquals(2, library.length())
         assertTrue(library.getJSONObject(0).getString("video_id").startsWith("jf_"))
         context.startActivity(Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
