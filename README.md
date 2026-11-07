@@ -174,6 +174,7 @@ library or a guarantee that every queued track is available without the server.
   kills the extractor subprocess. Audio playback does not wait for video lookup.
 - Compose runs a private PO token provider alongside the API. The Rust server
   gives its URL to yt-dlp, which uses the matching plugin in the API image.
+  Media requests follow up to five CDN redirects, preserving seeking ranges.
   Expired CDN links are resolved once more before playback fails. Provider
   HTTP failures include the upstream status in the app and server log.
 - The server forwards audio immediately and writes completed cache files atomically.

@@ -338,7 +338,7 @@ fn youtube_request(
     h: &HeaderMap,
     method: &Method,
 ) -> reqwest::RequestBuilder {
-    let mut req = s.http.request(
+    let mut req = s.youtube_http.request(
         if *method == Method::HEAD {
             reqwest::Method::HEAD
         } else {

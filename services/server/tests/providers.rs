@@ -1,7 +1,7 @@
 use axum::{
     Json, Router,
     body::{Body, Bytes, to_bytes},
-    extract::{Query, State},
+    extract::{Path, Query, State},
     http::{HeaderMap, Method, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, post},
@@ -98,12 +98,56 @@ async fn fixture() -> (String, Arc<Mock>, tokio::task::JoinHandle<()>) {
             .body(Body::from_stream(stream))
             .unwrap()
     }
+    async fn redirected_audio(
+        Path(expected_method): Path<String>,
+        Query(q): Query<HashMap<String, String>>,
+        method: Method,
+        h: HeaderMap,
+    ) -> Response {
+        assert_eq!(method.as_str(), expected_method);
+        assert_eq!(q.get("signature").map(String::as_str), Some("fixture"));
+        assert_eq!(h["user-agent"], "Extractor fixture");
+        assert_eq!(h["referer"], "https://www.youtube.com/");
+        assert_eq!(h["range"], "bytes=2-5");
+        audio(h).await
+    }
     let app = Router::new()
         .route("/Users/AuthenticateByName", post(signin))
         .route("/Items", get(items))
         .route("/Users/{uid}/Items/{id}", get(item))
         .route("/Audio/{id}/stream", get(audio))
         .route("/source", get(audio))
+        .route(
+            "/redirect/{method}",
+            get(|Path(method): Path<String>| async move {
+                (
+                    StatusCode::FOUND,
+                    [("location", format!("/redirect-next/{method}"))],
+                )
+            }),
+        )
+        .route(
+            "/redirect-next/{method}",
+            get(|Path(method): Path<String>| async move {
+                (
+                    StatusCode::TEMPORARY_REDIRECT,
+                    [(
+                        "location",
+                        format!("/redirected-source/{method}?signature=fixture"),
+                    )],
+                )
+            }),
+        )
+        .route("/redirected-source/{method}", get(redirected_audio))
+        .route(
+            "/redirect-loop",
+            get(|| async {
+                (
+                    StatusCode::FOUND,
+                    [("location", "/redirect-loop?signature=private")],
+                )
+            }),
+        )
         .route("/rejected", get(|| async { StatusCode::TOO_MANY_REQUESTS }))
         .with_state(state.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -435,6 +479,105 @@ async fn youtube_proxy_reports_provider_status() {
     .unwrap_err();
     assert_eq!(error.0, StatusCode::BAD_GATEWAY);
     assert!(error.1.contains("429"));
+    upstream.abort();
+}
+#[tokio::test]
+async fn youtube_proxy_follows_cdn_redirects_with_seeking_and_extractor_headers() {
+    let (base, _mock, upstream) = fixture().await;
+    let (_dir, s, u) = app(None).await;
+    // First redirect crosses to another origin, as YouTube CDN redirects can.
+    let destination = base.clone();
+    let redirector = Router::new().route(
+        "/{method}",
+        get(move |Path(method): Path<String>| {
+            let destination = destination.clone();
+            async move {
+                (
+                    StatusCode::FOUND,
+                    [("location", format!("{destination}/redirect/{method}"))],
+                )
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let redirect_base = format!("http://{}", listener.local_addr().unwrap());
+    let redirect_task =
+        tokio::spawn(async move { axum::serve(listener, redirector).await.unwrap() });
+    for kind in ["audio", "video"] {
+        for method in [Method::GET, Method::HEAD] {
+            s.streams.insert(format!("{kind}:abcdefghijk"), json!({
+                "video_id":"abcdefghijk", "title":"Song", "artist":"Artist",
+                "upstream_url":format!("{redirect_base}/{method}"),
+                "upstream_headers":{"User-Agent":"Extractor fixture", "Referer":"https://www.youtube.com/"}
+            })).await;
+            let mut headers = HeaderMap::new();
+            headers.insert("range", "bytes=2-5".parse().unwrap());
+            let response = media::serve(
+                &s,
+                &u,
+                &format!("music/{kind}/abcdefghijk"),
+                &HashMap::new(),
+                &headers,
+                method.clone(),
+            )
+            .await
+            .unwrap();
+            assert_eq!(response.status(), StatusCode::PARTIAL_CONTENT);
+            assert_eq!(response.headers()["content-range"], "bytes 2-5/10");
+            assert_eq!(response.headers()["content-type"], "audio/flac");
+            let body = to_bytes(response.into_body(), 100).await.unwrap();
+            assert_eq!(
+                body.as_ref(),
+                if method == Method::HEAD {
+                    &b""[..]
+                } else {
+                    &b"2345"[..]
+                }
+            );
+        }
+    }
+    // Jellyfin and other requests still enforce the separate no-redirect policy.
+    assert_eq!(
+        s.http
+            .get(format!("{base}/redirect/GET"))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::FOUND
+    );
+    redirect_task.abort();
+    upstream.abort();
+}
+#[tokio::test]
+async fn youtube_proxy_bounds_redirect_loops_without_exposing_signed_urls() {
+    let (base, _mock, upstream) = fixture().await;
+    let (_dir, s, u) = app(None).await;
+    s.streams
+        .insert(
+            "audio:abcdefghijk".into(),
+            json!({
+                "video_id":"abcdefghijk", "title":"Song", "artist":"Artist",
+                "upstream_url":format!("{base}/redirect-loop?signature=private")
+            }),
+        )
+        .await;
+    let error = tokio::time::timeout(
+        Duration::from_secs(3),
+        media::serve(
+            &s,
+            &u,
+            "music/audio/abcdefghijk",
+            &HashMap::new(),
+            &HeaderMap::new(),
+            Method::GET,
+        ),
+    )
+    .await
+    .expect("redirect loop must terminate")
+    .unwrap_err();
+    assert_eq!(error.0, StatusCode::BAD_GATEWAY);
+    assert_eq!(error.1, "Media provider request failed");
     upstream.abort();
 }
 #[tokio::test]

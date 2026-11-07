@@ -56,6 +56,7 @@ pub struct Metrics {
 pub struct App {
     pub db: SqlitePool,
     pub http: reqwest::Client,
+    pub youtube_http: reqwest::Client,
     pub config: Config,
     pub failures: moka::future::Cache<String, ApiError>,
     pub streams: moka::future::Cache<String, Value>,
@@ -106,6 +107,16 @@ impl App {
                 .connect_timeout(Duration::from_secs(5))
                 .read_timeout(Duration::from_secs(30))
                 .redirect(reqwest::redirect::Policy::none())
+                .user_agent("Tuneflow/0.4.0")
+                .build()?,
+            // YouTube CDNs redirect media between hosts. Keep this separate from
+            // the client used for Jellyfin's explicitly authorized server URLs.
+            youtube_http: reqwest::Client::builder()
+                .connect_timeout(Duration::from_secs(5))
+                .read_timeout(Duration::from_secs(30))
+                .redirect(reqwest::redirect::Policy::limited(5))
+                // Retain yt-dlp's Referer rather than replacing it with a signed CDN URL.
+                .referer(false)
                 .user_agent("Tuneflow/0.4.0")
                 .build()?,
             config,
