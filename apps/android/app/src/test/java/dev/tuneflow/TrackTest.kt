@@ -22,4 +22,9 @@ class TrackTest {
         assertEquals(4, track.trackNumber)
         assertEquals(track, Track.from(track.json()))
     }
+    @Test fun youtubeInformationAndRestrictionsSurviveSavedResults() {
+        val track = Track("abcdefghijk", "A long title", "Artist", 180, blocked = "Blocked",
+            sourceTitle = "Full original upload title", uploader = "Uploader", channelId = "UCfixture")
+        assertEquals(track, Track.from(track.json()))
+    }
 }

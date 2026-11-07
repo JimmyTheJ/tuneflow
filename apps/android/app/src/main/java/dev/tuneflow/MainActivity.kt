@@ -51,7 +51,10 @@ class MainActivity : Activity() {
     private var shownArtwork = ""
     private var playerSheet: android.app.Dialog? = null
     private var sheetProgress: SeekBar? = null
-    private var sheetTransport: Button? = null
+    private var sheetTransport: ImageView? = null
+    private var sheetRepeat: TextView? = null
+    private var lastRenderedTab = ""
+    private fun searchHistory() = SearchHistory(this, "${session.server}|${session.userId}")
     private var sheetTitle: TextView? = null
     private var sheetArtist: TextView? = null
     private var sheetArtwork: ImageView? = null
@@ -191,6 +194,7 @@ class MainActivity : Activity() {
         }
     }
     private fun acceptSession(response: JSONObject) {
+        playGeneration++; playerSheet?.dismiss()
         controller?.stop(); controller?.clearMediaItems()
         controllerFuture?.let { MediaController.releaseFuture(it) }; controllerFuture = null; controller = null
         stopService(android.content.Intent(this, PlaybackService::class.java))
@@ -206,6 +210,8 @@ class MainActivity : Activity() {
         }, Executor { runOnUiThread(it) })
     }
     private fun home() {
+        if (lastRenderedTab == "YouTube" && tab != "YouTube" && !searchHistory().rememberResults) searchHistory().clearResults()
+        lastRenderedTab = tab
         screenJob?.cancel(); pageOffset = 0; backAction = null; navigationEnabled = true; frame(tab)
         when (tab) {
             "Home" -> dashboard()
@@ -231,12 +237,22 @@ class MainActivity : Activity() {
         footer.addView(row)
     }
     private fun dashboard() {
-        label("Your music, ready when you are")
-        action("⌕   Search your library") { tab = "Search"; home() }
-        action("▥   Browse artists") { tab = "Artists"; home() }
-        action("▦   Browse albums") { tab = "Albums"; home() }
-        action("☷   Playlists and likes") { tab = "Playlists"; home() }
-        action("▶   Discover on YouTube") { tab = "YouTube"; home() }
+        label("Welcome back, ${user.optString("display_name", "music lover")}")
+        val recent = box(0); content.addView(recent)
+        val lists = box(0); content.addView(lists)
+        screenJob = scope.launch {
+            try {
+                recent.addView(text("Recently played", 21f).apply { setTypeface(null, Typeface.BOLD) })
+                val tracks = api.array("history?limit=12").objects().map(Track::from).distinctBy { it.id }
+                if (tracks.isEmpty()) label("Your listening history will appear here. Pick something from Library or YouTube to begin.", recent)
+                else tracks.forEach { track -> trackRow(recent, track) { play(listOf(track), 0) } }
+            } catch (e: CancellationException) { throw e } catch (_: Exception) { label("Recently played is unavailable right now.", recent) }
+            try {
+                val playlists = api.array("playlists").objects().take(6)
+                if (playlists.isNotEmpty()) lists.addView(text("Your playlists", 21f).apply { setTypeface(null, Typeface.BOLD) })
+                playlists.forEach { p -> action("${p.optString("name")} · ${p.optInt("track_count")} tracks", lists) { showTracks(p.getString("name"), "playlists/${p.getLong("id")}", p.getLong("id")) } }
+            } catch (e: CancellationException) { throw e } catch (_: Exception) { label("Playlists are unavailable right now.", lists) }
+        }
     }
     private fun libraryHub() {
         label("Browse your Jellyfin collection")
@@ -310,7 +326,12 @@ class MainActivity : Activity() {
             else -> "${item.mediaMetadata.title} · ${item.mediaMetadata.artist ?: ""}"
         }
         transport?.text = if (p.isPlaying) "Ⅱ" else "▶"
-        sheetTransport?.text = if (p.isPlaying) "Ⅱ" else "▶"
+        sheetTransport?.setImageResource(if (p.isPlaying) R.drawable.ic_pause else R.drawable.ic_play)
+        sheetTransport?.contentDescription = if (p.isPlaying) "Pause" else "Play"
+        sheetRepeat?.apply {
+            text = when (p.repeatMode) { Player.REPEAT_MODE_ONE -> "Repeat track"; Player.REPEAT_MODE_ALL -> "Repeat playlist"; else -> "Repeat off" }
+            setTextColor(if (p.repeatMode == Player.REPEAT_MODE_OFF) secondary else mint)
+        }
         sheetTitle?.text = item?.mediaMetadata?.title ?: "Nothing playing"
         sheetArtist?.text = item?.mediaMetadata?.artist ?: ""
         sheetElapsed?.text = formatTime(p.currentPosition)
@@ -320,52 +341,89 @@ class MainActivity : Activity() {
         if (p.duration > 0 && progress?.isPressed != true) progress?.progress = (p.currentPosition * 1000 / p.duration).toInt()
         if (p.duration > 0 && sheetProgress?.isPressed != true) sheetProgress?.progress = (p.currentPosition * 1000 / p.duration).toInt()
     }
+    private fun imageButton(icon: Int, description: String, color: Int = Color.WHITE, run: () -> Unit) = ImageView(this).apply {
+        setImageResource(icon); imageTintList = android.content.res.ColorStateList.valueOf(color)
+        setPadding(dp(12), dp(12), dp(12), dp(12)); contentDescription = description
+        isFocusable = true; setOnClickListener { run() }
+    }
+    private fun pill(value: String, icon: Int, run: () -> Unit) = text(value, 12f, secondary).apply {
+        gravity = Gravity.CENTER; background = rounded(surface, 24); setPadding(dp(14), dp(10), dp(14), dp(10))
+        setCompoundDrawablesRelativeWithIntrinsicBounds(icon, 0, 0, 0)
+        compoundDrawableTintList = android.content.res.ColorStateList.valueOf(mint); compoundDrawablePadding = dp(8)
+        setOnClickListener { run() }; isFocusable = true
+    }
+    private fun nextTrack() { controller?.let { p ->
+        if (p.hasNextMediaItem()) p.seekToNextMediaItem() else { p.stop(); p.clearMediaItems() }
+    } }
     private fun nowPlaying() {
-        if (controller?.currentMediaItem == null) { Toast.makeText(this, "Choose a track first", Toast.LENGTH_SHORT).show(); return }
+        val p = controller ?: return
+        if (playerSheet?.isShowing == true) return
         val dialog = android.app.Dialog(this)
-        val panel = box(20).apply { background = rounded(Color.rgb(25, 29, 34), 24) }
-        val handle = text("━━", 19f, secondary).apply { gravity = Gravity.CENTER; setPadding(0, 0, 0, dp(8)) }
+        val panel = box(0).apply { background = rounded(Color.rgb(21, 25, 29), 24) }
+        val handle = text("━━", 19f, secondary).apply { gravity = Gravity.CENTER; setPadding(0, dp(6), 0, 0); contentDescription = "Drag down to collapse player" }
         panel.addView(handle)
-        val top = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        top.addView(text("Now playing", 17f).apply { setTypeface(null, Typeface.BOLD) }, LinearLayout.LayoutParams(0, -2, 1f))
-        top.addView(iconButton("⌄", "Collapse player") { dialog.dismiss() }, LinearLayout.LayoutParams(dp(46), dp(46)))
+        val top = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(20), 0, dp(8), 0) }
+        top.addView(text("NOW PLAYING", 12f, secondary).apply { letterSpacing = 0.12f }, LinearLayout.LayoutParams(0, -2, 1f))
+        top.addView(imageButton(R.drawable.ic_more, "Track information") { p.currentMediaItem?.let { trackInfo(trackFromItem(it)) } }, LinearLayout.LayoutParams(dp(48), dp(48)))
+        top.addView(imageButton(R.drawable.ic_collapse, "Collapse player") { dialog.dismiss() }, LinearLayout.LayoutParams(dp(48), dp(48)))
         panel.addView(top)
-        sheetArtwork = ImageView(this).apply { scaleType = ImageView.ScaleType.CENTER_CROP; background = rounded(Color.rgb(55, 59, 63), 16) }
-        panel.addView(sheetArtwork, LinearLayout.LayoutParams(-1, 0, 1f).apply { topMargin = dp(22); bottomMargin = dp(22) })
-        sheetTitle = text("", 24f).apply { setTypeface(null, Typeface.BOLD); maxLines = 2 }
-        sheetArtist = text("", 16f, secondary)
-        panel.addView(sheetTitle); panel.addView(sheetArtist)
+        val player = box(0)
+        sheetArtwork = ImageView(this).apply { scaleType = ImageView.ScaleType.CENTER_CROP; background = rounded(Color.rgb(44, 49, 53), 16); clipToOutline = true }
+        val artSize = (resources.displayMetrics.widthPixels - dp(72)).coerceAtMost(dp(310))
+        player.addView(sheetArtwork, LinearLayout.LayoutParams(artSize, artSize).apply { gravity = Gravity.CENTER_HORIZONTAL; topMargin = dp(16); bottomMargin = dp(22) })
+        sheetTitle = text("", 24f).apply { setTypeface(null, Typeface.BOLD); setOnClickListener { p.currentMediaItem?.let { trackInfo(trackFromItem(it)) } } }
+        sheetArtist = text("", 15f, secondary)
+        player.addView(sheetTitle); player.addView(sheetArtist)
         sheetProgress = SeekBar(this).apply { max = 1000; setOnSeekBarChangeListener(seekListener()) }
-        panel.addView(sheetProgress)
+        player.addView(sheetProgress)
         val times = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         sheetElapsed = text("0:00", 12f, secondary); sheetDuration = text("0:00", 12f, secondary)
         times.addView(sheetElapsed, LinearLayout.LayoutParams(0, -2, 1f)); times.addView(sheetDuration)
-        panel.addView(times)
-        val controls = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
-        controls.addView(iconButton("|◀", "Previous track") { controller?.seekToPreviousMediaItem() }, LinearLayout.LayoutParams(0, dp(64), 1f))
-        sheetTransport = Button(this).apply { isAllCaps = false; setTextColor(Color.BLACK); background = rounded(mint, 40); setOnClickListener { togglePlayback() } }
-        controls.addView(sheetTransport, LinearLayout.LayoutParams(dp(72), dp(64)))
-        controls.addView(iconButton("▶|", "Next track") { controller?.seekToNextMediaItem() }, LinearLayout.LayoutParams(0, dp(64), 1f))
-        panel.addView(controls)
-        action("☷   Manage queue", panel) { queue() }
-        var downY = 0f
-        handle.setOnTouchListener { _, event ->
-            when (event.actionMasked) {
-                MotionEvent.ACTION_DOWN -> { downY = event.rawY; true }
-                MotionEvent.ACTION_UP -> { if (event.rawY - downY > dp(70)) dialog.dismiss(); true }
-                else -> true
+        player.addView(times)
+        val controls = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER; setPadding(0, dp(8), 0, dp(20)) }
+        controls.addView(imageButton(R.drawable.ic_previous, "Restart track") { p.seekTo(0) }, LinearLayout.LayoutParams(dp(64), dp(64)))
+        sheetTransport = imageButton(R.drawable.ic_play, "Play", Color.BLACK) { togglePlayback() }.apply {
+            background = rounded(mint, 40); setPadding(dp(20), dp(20), dp(20), dp(20))
+        }
+        controls.addView(sheetTransport, LinearLayout.LayoutParams(dp(76), dp(76)).apply { leftMargin = dp(26); rightMargin = dp(26) })
+        controls.addView(imageButton(R.drawable.ic_next, "Next track") { nextTrack() }, LinearLayout.LayoutParams(dp(64), dp(64)))
+        player.addView(controls)
+        val options = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
+        sheetRepeat = pill("Repeat off", R.drawable.ic_repeat) {
+            p.repeatMode = when (p.repeatMode) { Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL; Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE; else -> Player.REPEAT_MODE_OFF }
+            updatePlayer()
+        }
+        options.addView(sheetRepeat, LinearLayout.LayoutParams(0, dp(46), 1f).apply { marginEnd = dp(8) })
+        options.addView(pill("Shuffle playlist", R.drawable.ic_shuffle) {
+            p.shuffleModeEnabled = false
+            val start = PlaybackQueue.manualEnd(p)
+            val original = (start until p.mediaItemCount).map { PlaybackQueue.entry(p.getMediaItemAt(it)) }
+            original.shuffled().forEachIndexed { offset, key ->
+                val from = (start until p.mediaItemCount).firstOrNull { PlaybackQueue.entry(p.getMediaItemAt(it)) == key }
+                if (from != null) p.moveMediaItem(from, start + offset)
             }
+        }, LinearLayout.LayoutParams(0, dp(46), 1f))
+        player.addView(options)
+        player.addView(text("Clear upcoming songs", 13f, secondary).apply {
+            gravity = Gravity.CENTER; setPadding(0, dp(14), 0, dp(6))
+            setOnClickListener { if (p.mediaItemCount > 0) p.removeMediaItems(p.currentMediaItemIndex + 1, p.mediaItemCount) }
+        })
+        panel.addView(PlayerQueuePanel(this, p, player, { view, url -> loadArtwork(view, url) }, { media -> trackMenu(trackFromItem(media)) }), LinearLayout.LayoutParams(-1, 0, 1f))
+        var downY = 0f
+        handle.setOnTouchListener { view, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> downY = event.rawY
+                MotionEvent.ACTION_UP -> { if (event.rawY - downY > dp(70)) dialog.dismiss() else view.performClick() }
+            }; true
         }
         dialog.setContentView(panel)
         dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
-        dialog.window?.setLayout(-1, -1)
         dialog.window?.setGravity(Gravity.BOTTOM)
         dialog.window?.attributes?.windowAnimations = R.style.PlayerSheetAnimation
-        dialog.setOnDismissListener { playerSheet = null; sheetProgress = null; sheetTransport = null; sheetTitle = null; sheetArtist = null; sheetArtwork = null; sheetElapsed = null; sheetDuration = null }
-        playerSheet = dialog
-        dialog.show()
-        dialog.window?.setLayout(-1, (resources.displayMetrics.heightPixels * 0.88f).toInt())
-        loadArtwork(sheetArtwork, controller?.currentMediaItem?.mediaMetadata?.artworkUri?.toString())
+        dialog.setOnDismissListener { playerSheet = null; sheetProgress = null; sheetTransport = null; sheetRepeat = null; sheetTitle = null; sheetArtist = null; sheetArtwork = null; sheetElapsed = null; sheetDuration = null }
+        playerSheet = dialog; dialog.show()
+        dialog.window?.setLayout(-1, (resources.displayMetrics.heightPixels * 0.94f).toInt())
+        loadArtwork(sheetArtwork, p.currentMediaItem?.mediaMetadata?.artworkUri?.toString())
         updatePlayer()
     }
     private fun playbackErrorMessage(error: PlaybackException): String {
@@ -378,45 +436,114 @@ class MainActivity : Activity() {
         return "Playback failed (${error.errorCodeName}) · tap Play to retry"
     }
     private fun libraryOrDiscovery() {
-        val discovery = tab == "YouTube"
-        label(if (discovery) "Supplement your library with YouTube discovery." else "Fast playback from your Jellyfin collection.")
-        val query = input(if (discovery) "Search YouTube" else "Search your library")
+        if (tab == "YouTube") { youtubeDiscovery(); return }
+        label("Fast playback from your Jellyfin collection.")
+        val query = input("Search your library", browseQueries["songs"].orEmpty())
         val results = box(0); content.addView(results)
         val songList = box(0)
         var displayedTracks = listOf<Track>()
         lateinit var load: (String, Int) -> Unit
         load = { value, offset ->
-            screenJob?.cancel(); results.removeAllViews(); results.addView(text("Loading…", color = secondary))
+            browseQueries["songs"] = value
+            screenJob?.cancel(); results.removeAllViews(); label("Loading…", results)
             screenJob = scope.launch {
                 try {
-                    val tracks = if (discovery) {
-                        val r = api.obj("music/search?source=youtube&q=${Api.encode(value)}&limit=25")
-                        r.getJSONArray("groups").objects().map { Track.from(it.getJSONObject("primary")) }
-                    } else api.array("library/tracks?q=${Api.encode(value)}&limit=100&offset=$offset").objects().map(Track::from)
+                    val tracks = api.array("library/tracks?q=${Api.encode(value)}&limit=100&offset=$offset").objects().map(Track::from)
                     results.removeAllViews(); displayedTracks = tracks
-                    if (tracks.isEmpty()) {
-                        results.addView(text(if (discovery) "No matches found" else "No tracks found. Link Jellyfin and sync your library in Settings.", color = secondary))
-                    }
-                    if (tracks.isNotEmpty()) {
-                        action("Play all", results) { play(tracks, 0) }
+                    if (tracks.isEmpty()) label("No tracks found. Link Jellyfin and sync your library in Settings.", results)
+                    else {
+                        action("Play all", results) { play(tracks, 0, ordered = true, contextName = "Library search") }
                         results.addView(songList); renderTracks(songList, tracks, "songs")
                     }
-                    if (!discovery) {
-                        if (offset > 0) action("Previous page", results) { pageOffset = (offset - 100).coerceAtLeast(0); load(value, pageOffset) }
-                        if (tracks.size == 100) action("Next page", results) { pageOffset = offset + 100; load(value, pageOffset) }
-                    }
+                    if (offset > 0) action("Previous page", results) { pageOffset = (offset - 100).coerceAtLeast(0); load(value, pageOffset) }
+                    if (tracks.size == 100) action("Next page", results) { pageOffset = offset + 100; load(value, pageOffset) }
                 } catch (e: CancellationException) { throw e } catch (e: Exception) {
-                    results.removeAllViews(); results.addView(text(e.message ?: "Could not load music", color = secondary))
+                    results.removeAllViews(); label(e.message ?: "Could not load music", results)
                 }
             }
         }
         val picker = box(0); content.addView(picker, content.indexOfChild(results))
         viewPicker("songs", picker) { renderTracks(songList, displayedTracks, "songs") }
-        debounce(query) {
-            val value = query.text.toString().trim(); pageOffset = 0
-            if (!discovery || value.isNotEmpty()) load(value, 0) else { screenJob?.cancel(); results.removeAllViews(); label("Type to search YouTube", results) }
+        debounce(query) { pageOffset = 0; load(query.text.toString().trim(), 0) }
+        load(query.text.toString().trim(), 0)
+    }
+    private fun youtubeDiscovery() {
+        val history = searchHistory()
+        val searchRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        val inputBox = box(0)
+        val query = input("Search YouTube", history.draft, target = inputBox).apply { imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH }
+        searchRow.addView(inputBox, LinearLayout.LayoutParams(0, -2, 1f))
+        content.addView(searchRow)
+        val suggestions = box(0); content.addView(suggestions)
+        val results = box(0); content.addView(results)
+        var displayed = history.results
+        var resultQuery = history.resultQuery
+        lateinit var submit: (String) -> Unit
+        fun drawResults() {
+            results.removeAllViews()
+            if (resultQuery.isEmpty()) return
+            results.addView(text("Results for “$resultQuery”", 18f).apply { setTypeface(null, Typeface.BOLD) })
+            if (displayed.isEmpty()) label("No matches found", results)
+            else {
+                action("Play all · ${displayed.size} tracks", results) { play(displayed, 0, ordered = true, contextName = "YouTube · $resultQuery") }
+                val list = box(0)
+                viewPicker("youtube", results) { renderTracks(list, displayed, "youtube") }
+                results.addView(list); renderTracks(list, displayed, "youtube")
+            }
         }
-        if (!discovery) load("", 0)
+        fun drawSuggestions() {
+            suggestions.removeAllViews()
+            val value = query.text.toString()
+            val matches = SearchSuggestions.matches(value, history.recent())
+            if (matches.isEmpty()) {
+                if (resultQuery.isEmpty()) label(if (value.isBlank()) "Search for a song, artist or video. Recent searches will appear here." else "Press Search to discover music on YouTube.", suggestions)
+                return
+            }
+            val heading = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+            heading.addView(text(if (value.isBlank()) "Recent searches" else "From your searches", 13f, secondary), LinearLayout.LayoutParams(0, -2, 1f))
+            heading.addView(text("Clear history", 12f, mint).apply { setPadding(dp(12), dp(14), 0, dp(14)); setOnClickListener { history.clearHistory(); drawSuggestions() } })
+            suggestions.addView(heading)
+            matches.take(if (resultQuery.isNotEmpty() && !query.hasFocus()) 3 else 12).forEach { term ->
+                val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+                row.addView(text("↖   $term", 15f).apply {
+                    maxLines = 2; setPadding(dp(10), dp(12), dp(6), dp(12))
+                    setOnClickListener { query.setText(term); query.setSelection(term.length); submit(term) }
+                }, LinearLayout.LayoutParams(0, -2, 1f))
+                row.addView(iconButton("×", "Remove search $term") { history.remove(term); drawSuggestions() }.apply { setTextColor(secondary); textSize = 22f }, LinearLayout.LayoutParams(dp(44), dp(48)))
+                suggestions.addView(row)
+            }
+        }
+        submit = { raw ->
+            val value = raw.trim().take(300)
+            if (value.isNotEmpty()) {
+                history.draft = value; history.record(value); query.clearFocus()
+                (getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager).hideSoftInputFromWindow(query.windowToken, 0)
+                screenJob?.cancel(); results.removeAllViews(); label("Searching YouTube…", results); drawSuggestions()
+                screenJob = scope.launch {
+                    try {
+                        val response = api.obj("music/search?source=youtube&q=${Api.encode(value)}&limit=25")
+                        displayed = response.getJSONArray("groups").objects().map { Track.from(it.getJSONObject("primary")) }
+                        resultQuery = value; history.resultQuery = value; history.results = displayed
+                        drawResults(); drawSuggestions()
+                    } catch (e: CancellationException) { throw e } catch (e: Exception) {
+                        results.removeAllViews(); label(e.message ?: "Could not search YouTube", results)
+                        action("Retry", results) { submit(value) }
+                    }
+                }
+            }
+        }
+        searchRow.addView(imageButton(R.drawable.ic_search, "Search YouTube", mint) { submit(query.text.toString()) }, LinearLayout.LayoutParams(dp(48), dp(52)))
+        searchRow.addView(iconButton("×", "Clear YouTube search and results") {
+            screenJob?.cancel(); displayed = emptyList(); resultQuery = ""; history.clearResults(); query.setText(""); drawResults(); drawSuggestions()
+        }.apply { setTextColor(secondary) }, LinearLayout.LayoutParams(dp(44), dp(52)))
+        query.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) { history.draft = s.toString(); drawSuggestions() }
+            override fun afterTextChanged(s: Editable?) {}
+        })
+        query.setOnFocusChangeListener { _, _ -> drawSuggestions() }
+        query.setOnEditorActionListener { _, _, _ -> submit(query.text.toString()); true }
+        drawResults(); drawSuggestions()
     }
     private fun trackRow(target: LinearLayout, track: Track, title: String = track.title,
                          subtitle: String = track.artist, details: Boolean = false, onPlay: () -> Unit) {
@@ -446,21 +573,40 @@ class MainActivity : Activity() {
         }
         val builder = MediaItem.Builder().setMediaId(track.id).setUri(url)
             .setCustomCacheKey("${session.server}|${session.userId}|${track.id}")
-            .setMediaMetadata(MediaMetadata.Builder().setTitle(track.title).setArtist(track.artist).setArtworkUri(artwork).build())
+            .setMediaMetadata(MediaMetadata.Builder().setTitle(track.title).setArtist(track.artist).setArtworkUri(artwork)
+                .setExtras(Bundle().apply { putString("track_json", track.json().toString()) }).build())
         stream?.optString("mime_type")?.takeIf { it.isNotBlank() && it != "null" }?.let(builder::setMimeType)
         return builder.build()
     }
-    private fun play(tracks: List<Track>, start: Int, ordered: Boolean = false) {
+    private fun play(tracks: List<Track>, start: Int, ordered: Boolean = false, contextName: String = titleView.text.toString()) {
         val player = controller ?: run { showError(Exception("Player is connecting; try again")); return }
-        val selected = tracks[start]
+        val selected = tracks.getOrNull(start) ?: return
         if (selected.blocked.isNotEmpty()) { showError(Exception(selected.blocked)); return }
-        val playable = tracks.filter { it.blocked.isEmpty() }
+        val playable = tracks.drop(start).filter { it.blocked.isEmpty() }
         val generation = ++playGeneration
+        val singles = tracks.size == 1 && !ordered
         fun startPlayback(stream: JSONObject?) {
             if (generation != playGeneration) return
-            if (ordered) player.shuffleModeEnabled = false
-            player.setMediaItems(playable.map { item(it, if (it.id == selected.id) stream else null) }, playable.indexOf(selected).coerceAtLeast(0), 0)
-            player.prepare(); player.play()
+            player.shuffleModeEnabled = false
+            if (singles) {
+                PlaybackQueue.add(player, item(selected, stream), next = true)
+                // An explicit tap starts this track, retaining the rest of both queues.
+                if (player.currentMediaItem?.mediaId != selected.id || player.mediaItemCount > 1) {
+                    if (player.hasNextMediaItem()) player.seekToNextMediaItem()
+                }
+                player.prepare(); player.play()
+            } else {
+                val manual = if (player.mediaItemCount == 0) emptyList() else
+                    (player.currentMediaItemIndex.coerceAtLeast(0) until player.mediaItemCount).map(player::getMediaItemAt)
+                        .filter { PlaybackQueue.lane(it) == PlaybackQueue.MANUAL }
+                val background = playable.map { PlaybackQueue.tagged(item(it, if (it == selected) stream else null), PlaybackQueue.CONTEXT, contextName) }
+                val preserveCurrent = manual.firstOrNull()?.let { PlaybackQueue.entry(it) == player.currentMediaItem?.let(PlaybackQueue::entry) } == true
+                if (preserveCurrent) {
+                    player.removeMediaItems(player.currentMediaItemIndex + 1, player.mediaItemCount)
+                    player.addMediaItems(manual.drop(1) + background)
+                } else player.setMediaItems(manual + background, 0, 0)
+                player.prepare(); player.play()
+            }
         }
         if (selected.id.startsWith("jf_")) startPlayback(null)
         else {
@@ -476,57 +622,68 @@ class MainActivity : Activity() {
             } }
         }
     }
-    private fun trackMenu(track: Track) {
-        AlertDialog.Builder(this).setTitle(track.title).setItems(arrayOf("Play next", "Add to queue", "Like", "Add to playlist")) { _, choice ->
-            when (choice) {
-                0 -> controller?.let { it.addMediaItem(it.currentMediaItemIndex + 1, item(track)) }
-                1 -> controller?.addMediaItem(item(track))
-                2 -> launchWork { api.call("likes", "POST", track.json()); Toast.makeText(this@MainActivity, "Liked", Toast.LENGTH_SHORT).show() }
-                3 -> launchWork {
-                    val playlists = api.array("playlists").objects()
-                    AlertDialog.Builder(this@MainActivity).setTitle("Add to playlist").setItems(playlists.map { it.optString("name") }.toTypedArray()) { _, index ->
-                        launchWork { api.call("playlists/${playlists[index].getLong("id")}/tracks", "POST", track.json()); Toast.makeText(this@MainActivity, "Added", Toast.LENGTH_SHORT).show() }
-                    }.show()
-                }
-            }
-        }.show()
-    }
-    private fun queue() {
-        val p = controller ?: return
-        val view = box(12)
-        val options = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        val shuffle = CheckBox(this).apply { text = "Shuffle"; isChecked = p.shuffleModeEnabled; setOnCheckedChangeListener { _, checked -> p.shuffleModeEnabled = checked } }
-        options.addView(shuffle, LinearLayout.LayoutParams(0, -2, 1f))
-        val repeat = Button(this).apply { isAllCaps = false; setTextColor(mint) }
-        fun repeatLabel() { repeat.text = "Repeat: ${when(p.repeatMode) { Player.REPEAT_MODE_ALL -> "All"; Player.REPEAT_MODE_ONE -> "One"; else -> "Off" }}" }
-        repeatLabel()
-        repeat.setOnClickListener { p.repeatMode = when(p.repeatMode) { Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL; Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE; else -> Player.REPEAT_MODE_OFF }; repeatLabel() }
-        options.addView(repeat, LinearLayout.LayoutParams(0, -2, 1f)); view.addView(options)
-        val scroll = ScrollView(this); val rows = box(0); scroll.addView(rows)
-        view.addView(scroll, LinearLayout.LayoutParams(-1, dp(440)))
-        fun refresh() {
-            rows.removeAllViews()
-            if (p.mediaItemCount == 0) label("Your queue is empty", rows)
-            for (i in 0 until p.mediaItemCount) {
-                val media = p.getMediaItemAt(i)
-                val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; background = rounded(if (i == p.currentMediaItemIndex) Color.rgb(38, 64, 48) else surface, 10) }
-                val title = text("${if (i == p.currentMediaItemIndex) "▶  " else ""}${media.mediaMetadata.title}\n${media.mediaMetadata.artist ?: ""}", 14f).apply { maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.END; setPadding(dp(10), dp(7), dp(3), dp(7)); setOnClickListener { p.seekToDefaultPosition(i); p.play(); refresh() } }
-                row.addView(title, LinearLayout.LayoutParams(0, -2, 1f))
-                fun queueButton(symbol: String, description: String, enabled: Boolean, run: () -> Unit) {
-                    row.addView(iconButton(symbol, description) { if (enabled) run() }.apply { alpha = if (enabled) 1f else 0.35f; textSize = 22f }, LinearLayout.LayoutParams(dp(38), dp(48)))
-                }
-                queueButton("↑", "Move ${media.mediaMetadata.title} earlier", i > 0) { p.moveMediaItem(i, i - 1); refresh() }
-                queueButton("↓", "Move ${media.mediaMetadata.title} later", i < p.mediaItemCount - 1) { p.moveMediaItem(i, i + 1); refresh() }
-                queueButton("×", "Remove ${media.mediaMetadata.title} from queue", true) { p.removeMediaItem(i); refresh() }
-                rows.addView(row, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(6) })
-            }
-            scroll.layoutParams = (scroll.layoutParams as LinearLayout.LayoutParams).apply {
-                height = dp((p.mediaItemCount * 64).coerceIn(100, 440))
-            }
+    private fun trackFromItem(media: MediaItem): Track = runCatching {
+        Track.from(JSONObject(media.mediaMetadata.extras?.getString("track_json").orEmpty()))
+    }.getOrElse { Track(media.mediaId, media.mediaMetadata.title?.toString().orEmpty(), media.mediaMetadata.artist?.toString().orEmpty(), artwork = media.mediaMetadata.artworkUri?.toString().orEmpty()) }
+    private fun trackInfo(track: Track) {
+        val dialog = android.app.Dialog(this)
+        val panel = box(20).apply { background = rounded(surface, 24) }
+        val heading = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        heading.addView(text("Track information", 20f).apply { setTypeface(null, Typeface.BOLD) }, LinearLayout.LayoutParams(0, -2, 1f))
+        heading.addView(iconButton("×", "Close track information") { dialog.dismiss() }, LinearLayout.LayoutParams(dp(48), dp(48)))
+        panel.addView(heading)
+        val details = box(0)
+        fun field(name: String, value: String) {
+            if (value.isBlank()) return
+            details.addView(text(name.uppercase(), 11f, secondary).apply { letterSpacing = 0.08f; setPadding(0, dp(16), 0, dp(4)) })
+            details.addView(text(value, 16f).apply { setTextIsSelectable(true) })
         }
-        refresh()
-        action("Clear queue", view) { p.stop(); p.clearMediaItems(); refresh() }
-        AlertDialog.Builder(this).setTitle("Queue · tap a track to play").setView(view).setPositiveButton("Done", null).show()
+        field("Title", track.title)
+        if (track.sourceTitle != track.title) field("Video title", track.sourceTitle)
+        field("Artist", track.artist); field("Uploaded by", track.uploader)
+        field("Album", track.album)
+        if (track.duration > 0) field("Duration", formatTime(track.duration * 1000))
+        if (!track.id.startsWith("jf_")) {
+            val url = "https://www.youtube.com/watch?v=${track.id}"
+            field("YouTube link", url); field("Channel", track.channelId); field("Video ID", track.id)
+            action("Open in YouTube", details) { startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse(url))) }
+            action("Copy link", details) {
+                (getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager).setPrimaryClip(android.content.ClipData.newPlainText(track.title, url))
+                Toast.makeText(this, "Link copied", Toast.LENGTH_SHORT).show()
+            }
+        } else field("Source", "Jellyfin")
+        panel.addView(ScrollView(this).apply { addView(details) }, LinearLayout.LayoutParams(-1, 0, 1f))
+        dialog.setContentView(panel); dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
+        dialog.window?.setGravity(Gravity.BOTTOM); dialog.window?.attributes?.windowAnimations = R.style.PlayerSheetAnimation
+        dialog.show(); dialog.window?.setLayout(-1, (resources.displayMetrics.heightPixels * 0.8f).toInt())
+    }
+    private fun trackMenu(track: Track) {
+        val dialog = android.app.Dialog(this)
+        val panel = box(20).apply { background = rounded(surface, 24) }
+        panel.addView(text(track.title, 19f).apply { maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.END; setTypeface(null, Typeface.BOLD) })
+        panel.addView(text(track.artist, 13f, secondary))
+        fun option(label: String, run: () -> Unit) {
+            panel.addView(text(label, 16f).apply {
+                setPadding(dp(8), dp(16), dp(8), dp(16)); isFocusable = true
+                setOnClickListener { dialog.dismiss(); run() }
+            })
+        }
+        if (track.blocked.isEmpty()) {
+            option("Play next") { controller?.let { PlaybackQueue.add(it, item(track), next = true) } }
+            option("Add to your queue") { controller?.let { PlaybackQueue.add(it, item(track)) } }
+        }
+        option("Info") { trackInfo(track) }
+        option("Like") { launchWork { api.call("likes", "POST", track.json()); Toast.makeText(this@MainActivity, "Liked", Toast.LENGTH_SHORT).show() } }
+        option("Add to playlist") { launchWork {
+            val playlists = api.array("playlists").objects()
+            AlertDialog.Builder(this@MainActivity).setTitle("Add to playlist").setItems(playlists.map { it.optString("name") }.toTypedArray()) { _, index ->
+                launchWork { api.call("playlists/${playlists[index].getLong("id")}/tracks", "POST", track.json()); Toast.makeText(this@MainActivity, "Added", Toast.LENGTH_SHORT).show() }
+            }.show()
+        } }
+        option("Cancel") { }
+        dialog.setContentView(panel); dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
+        dialog.window?.setGravity(Gravity.BOTTOM); dialog.window?.attributes?.windowAnimations = R.style.PlayerSheetAnimation
+        dialog.show(); dialog.window?.setLayout(-1, -2)
     }
     private fun viewMode(section: String) = getSharedPreferences("library_views", MODE_PRIVATE).getString(section, "List") ?: "List"
     private fun viewPicker(section: String, target: LinearLayout, onChange: () -> Unit) {
@@ -796,7 +953,7 @@ class MainActivity : Activity() {
         screenJob = scope.launch { try {
             val tracks = if (playlistId == null) api.array(path).objects().map(Track::from)
                 else api.obj(path).getJSONArray("tracks").objects().filter { !it.isNull("video_id") }.map(Track::from)
-            if (tracks.isNotEmpty()) action("Play all") { play(tracks, 0) }
+            if (tracks.isNotEmpty()) action("Play all") { play(tracks, 0, ordered = true, contextName = title) }
             val list = box(0)
             viewPicker("songs", content) { renderTracks(list, tracks, "songs") }
             content.addView(list); renderTracks(list, tracks, "songs")
@@ -819,6 +976,14 @@ class MainActivity : Activity() {
     }
     private fun settings() {
         label("Signed in as ${user.optString("display_name")} · ${session.household}")
+        val remember = Switch(this).apply {
+            text = "Keep YouTube search and results"; setTextColor(Color.WHITE)
+            isChecked = searchHistory().rememberResults
+            setPadding(0, dp(12), 0, dp(12))
+            setOnCheckedChangeListener { _, checked -> searchHistory().rememberResults = checked }
+        }
+        content.addView(remember)
+        label("Keep your last YouTube results when switching pages. Turn off to clear them when leaving YouTube.")
         label("Library")
         val server = input("Jellyfin server URL")
         val username = input("Jellyfin username")
@@ -888,12 +1053,14 @@ class MainActivity : Activity() {
         } }.setNegativeButton("Cancel", null).show()
     }
     private fun logout() {
+        playGeneration++; playerSheet?.dismiss()
         controller?.stop(); controller?.clearMediaItems(); controller?.release(); controller = null
         controllerFuture?.let { MediaController.releaseFuture(it) }; controllerFuture = null
         stopService(android.content.Intent(this, PlaybackService::class.java))
         session.clear(); loginScreen()
     }
     override fun onDestroy() {
+        playerSheet?.dismiss()
         screenJob?.cancel(); tick.removeCallbacksAndMessages(null); scope.cancel()
         controllerFuture?.let { MediaController.releaseFuture(it) }; controller = null
         super.onDestroy()

@@ -6,8 +6,8 @@ android {
         applicationId = "com.tuneflow.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = providers.gradleProperty("buildNumber").getOrElse("403000").toInt()
-        versionName = "0.4.3"
+        versionCode = providers.gradleProperty("buildNumber").getOrElse("404000").toInt()
+        versionName = "0.4.4"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildFeatures { buildConfig = true }
@@ -21,6 +21,7 @@ android {
     }
 }
 dependencies {
+    implementation("androidx.recyclerview:recyclerview:1.4.0")
     implementation("androidx.media3:media3-exoplayer:1.11.1")
     implementation("androidx.media3:media3-session:1.11.1")
     implementation("androidx.media3:media3-datasource:1.11.1")

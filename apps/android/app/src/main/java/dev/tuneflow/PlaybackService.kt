@@ -35,6 +35,16 @@ class PlaybackService : MediaSessionService() {
     private var playSession = java.util.UUID.randomUUID().toString()
     private var activeDuration = 0L
     private val handler = Handler(Looper.getMainLooper())
+    private var preparedNext = emptyList<String>()
+    private fun prepareUpcoming() {
+        val next = ((player.currentMediaItemIndex + 1).coerceAtLeast(0) until minOf(player.mediaItemCount, player.currentMediaItemIndex + 3))
+            .map { player.getMediaItemAt(it).mediaId }.filter { !it.startsWith("jf_") }
+        if (next == preparedNext) return
+        preparedNext = next
+        if (next.isNotEmpty()) scope.launch {
+            runCatching { api.call("music/prepare", "POST", JSONObject().put("video_ids", JSONArray(next))) }
+        }
+    }
     private val ticker = object : Runnable {
         override fun run() {
             val now = android.os.SystemClock.elapsedRealtime()
@@ -74,10 +84,19 @@ class PlaybackService : MediaSessionService() {
                 recordProgress(activeItem)
                 listenedMs = 0; recordedMs = 0; lastTick = 0; activeDuration = 0
                 activeItem = item; playSession = java.util.UUID.randomUUID().toString()
-                val next = ((player.currentMediaItemIndex + 1) until minOf(player.mediaItemCount, player.currentMediaItemIndex + 3))
-                    .map { player.getMediaItemAt(it).mediaId }.filter { !it.startsWith("jf_") }
-                if (next.isNotEmpty()) scope.launch {
-                    runCatching { api.call("music/prepare", "POST", JSONObject().put("video_ids", JSONArray(next))) }
+                handler.post {
+                    // Consume in the service so background playback has the same queue semantics.
+                    if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT && item != null &&
+                        PlaybackQueue.lane(item) == PlaybackQueue.MANUAL && player.mediaItemCount == 1) {
+                        if (player.repeatMode != Player.REPEAT_MODE_ONE) { player.stop(); player.clearMediaItems() }
+                    } else PlaybackQueue.consumePlayed(player)
+                    prepareUpcoming()
+                }
+            }
+            override fun onTimelineChanged(timeline: Timeline, reason: Int) { handler.post { prepareUpcoming() } }
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == Player.STATE_ENDED) handler.post {
+                    if (player.playbackState == Player.STATE_ENDED) { recordProgress(); player.clearMediaItems() }
                 }
             }
             override fun onIsPlayingChanged(isPlaying: Boolean) { if (!isPlaying) recordProgress(activeItem) }

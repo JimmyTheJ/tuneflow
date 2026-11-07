@@ -643,3 +643,17 @@ async fn simultaneous_playback_requests_extract_only_once() {
     }
     assert_eq!(std::fs::read_to_string(counter).unwrap().lines().count(), 1);
 }
+
+#[test]
+fn youtube_track_exposes_upload_metadata_without_private_stream_urls() {
+    let track = media::track(&json!({
+        "id":"abcdefghijk", "track":"Song", "title":"Full video title",
+        "artist":"Singer", "uploader":"Uploader", "channel_id":"UCfixture",
+        "url":"https://private.example/stream?token=secret"
+    }))
+    .unwrap();
+    assert_eq!(track["source_title"], "Full video title");
+    assert_eq!(track["uploader"], "Uploader");
+    assert_eq!(track["channel_id"], "UCfixture");
+    assert!(track.get("url").is_none());
+}

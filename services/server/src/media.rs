@@ -28,7 +28,7 @@ pub fn track(e: &Value) -> Option<Value> {
         return None;
     }
     Some(
-        json!({"id":format!("youtube:{vid}"),"video_id":vid,"source":"youtube","title":e["track"].as_str().or(e["title"].as_str()).unwrap_or(vid),"artist":e["artist"].as_str().or(e["uploader"].as_str()).or(e["channel"].as_str()),"duration_sec":e["duration"].as_f64().map(|v|v as i64),"thumbnail_url":format!("https://i.ytimg.com/vi/{vid}/hqdefault.jpg"),"source_title":e["title"],"channel_id":e["channel_id"]}),
+        json!({"id":format!("youtube:{vid}"),"video_id":vid,"source":"youtube","title":e["track"].as_str().or(e["title"].as_str()).unwrap_or(vid),"artist":e["artist"].as_str().or(e["uploader"].as_str()).or(e["channel"].as_str()),"duration_sec":e["duration"].as_f64().map(|v|v as i64),"thumbnail_url":format!("https://i.ytimg.com/vi/{vid}/hqdefault.jpg"),"source_title":e["title"],"uploader":e["uploader"].as_str().or(e["channel"].as_str()),"channel_id":e["channel_id"]}),
     )
 }
 pub async fn extract(s: &Shared, args: Vec<String>, seconds: u64) -> Result<Value> {

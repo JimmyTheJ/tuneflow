@@ -11,6 +11,27 @@ use serde_json::json;
 use tuneflow_server::{App, Config, auth, db, jellyfin};
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Reuse this binary as a deterministic extractor; device tests never contact YouTube.
+    let arguments = std::env::args().collect::<Vec<_>>();
+    if arguments.iter().any(|arg| arg == "--dump-single-json") {
+        let tracks = [("abc123def45", "First song"), ("xyz123def45", "Second song"), ("uvw123def45", "Third song")]
+            .map(|(id, name)| json!({
+                "id":id, "title":format!("{name} — a full length live performance with a deliberately long video title for information view testing"),
+                "artist":"Fixture artist", "uploader":"Fixture uploader", "channel_id":"UCfixture",
+                "duration":60, "url":"http://127.0.0.1:18011/source", "ext":"wav"
+            }));
+        let request = arguments.last().map(String::as_str).unwrap_or("");
+        let output = if request.starts_with("ytsearch") {
+            json!({"entries":tracks})
+        } else {
+            tracks
+                .into_iter()
+                .find(|track| request.ends_with(track["id"].as_str().unwrap()))
+                .unwrap_or_default()
+        };
+        println!("{output}");
+        return Ok(());
+    }
     let dir = std::env::temp_dir().join("tuneflow-playback-fixture");
     tokio::fs::create_dir_all(&dir).await?;
     let wav = dir.join("tone.wav");
@@ -35,11 +56,25 @@ async fn main() -> anyhow::Result<()> {
     }
     tokio::fs::write(&wav, audio).await?;
     let file = wav.clone();
+    let youtube_audio = wav.clone();
     let upstream=Router::new().route("/Users/AuthenticateByName",post(||async{Json(json!({"AccessToken":"fixture-only","User":{"Id":"cccccccccccccccccccccccccccccccc","Name":"Fixture"}}))}))
  .route("/Items",get(||async{Json(json!({"TotalRecordCount":2,"Items":[{"Id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","Name":"Fixture One","Artists":["Tuneflow tests"],"Album":"Native playback tests","AlbumId":"dddddddddddddddddddddddddddddddd","Container":"wav","RunTimeTicks":450000000,"Type":"Audio"},{"Id":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","Name":"Fixture Two","Artists":["Tuneflow tests"],"Album":"Native playback tests","AlbumId":"dddddddddddddddddddddddddddddddd","Container":"wav","RunTimeTicks":450000000,"Type":"Audio"}]}))}))
  .route("/Users/{uid}/Items/{id}",get(||async{Json(json!({"Type":"Audio"}))}))
  .route("/Audio/{id}/stream",get(move|Path(_):Path<String>,request:Request<Body>|{let file=file.clone();async move{tower_http::services::ServeFile::new(file).try_call(request).await.unwrap().into_response()}}));
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let upstream = upstream.route(
+        "/source",
+        get(move |request: Request<Body>| {
+            let file = youtube_audio.clone();
+            async move {
+                tower_http::services::ServeFile::new(file)
+                    .try_call(request)
+                    .await
+                    .unwrap()
+                    .into_response()
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:18011").await?;
     let base = format!("http://{}", listener.local_addr()?);
     tokio::spawn(async move {
         axum::serve(listener, upstream).await.unwrap();
@@ -47,7 +82,7 @@ async fn main() -> anyhow::Result<()> {
     let s = App::open(Config {
         data_dir: dir,
         jwt_secret: "fixture-only-not-for-production-secret".into(),
-        youtube_bin: "missing".into(),
+        youtube_bin: std::env::current_exe()?.to_string_lossy().into(),
         jellyfin_url: Some(base.clone()),
         jellyfin_allowed_urls: vec![],
     })

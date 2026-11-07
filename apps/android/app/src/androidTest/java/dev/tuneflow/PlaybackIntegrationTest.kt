@@ -60,7 +60,7 @@ class PlaybackIntegrationTest {
         Thread.sleep(1500)
         instrumentation.runOnMainSync { assertTrue("Playback continues with activity in background", player.isPlaying && player.currentPosition > before + 500) }
         instrumentation.runOnMainSync { player.seekToNextMediaItem() }
-        waitFor("Queue should advance") { player.currentMediaItemIndex == 1 && player.isPlaying && player.currentPosition > 500 }
+        waitFor("Queue should advance") { player.currentMediaItem?.mediaId == items[1].mediaId && player.currentMediaItemIndex == 0 && player.isPlaying && player.currentPosition > 500 }
         instrumentation.runOnMainSync { player.stop(); player.clearMediaItems(); player.release(); MediaController.releaseFuture(future) }
     }
 }

@@ -12,10 +12,12 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
 data class Track(val id: String, val title: String, val artist: String, val duration: Long = 0, val artwork: String = "", val blocked: String = "",
-                 val album: String = "", val albumId: String = "", val albumArtist: String = "", val discNumber: Int? = null, val trackNumber: Int? = null) {
+                 val album: String = "", val albumId: String = "", val albumArtist: String = "", val discNumber: Int? = null, val trackNumber: Int? = null,
+                 val sourceTitle: String = "", val uploader: String = "", val channelId: String = "") {
     fun json() = JSONObject().put("video_id", id).put("title", title).put("artist", artist)
         .put("duration_sec", duration).put("thumbnail_url", artwork).put("album", album).put("album_id", albumId)
         .put("album_artist", albumArtist).put("disc_number", discNumber).put("track_number", trackNumber)
+        .put("source_title", sourceTitle).put("uploader", uploader).put("channel_id", channelId).put("blocked_reason", blocked)
     companion object {
         fun from(v: JSONObject) = Track(v.optString("video_id"), v.optString("title", "Unknown track"),
             v.optString("artist", "").takeUnless { it == "null" } ?: "", v.optLong("duration_sec", 0),
@@ -25,7 +27,10 @@ data class Track(val id: String, val title: String, val artist: String, val dura
             v.optString("album_id", "").takeUnless { it == "null" } ?: "",
             v.optString("album_artist", "").takeUnless { it == "null" } ?: "",
             v.optInt("disc_number").takeIf { !v.isNull("disc_number") && v.has("disc_number") },
-            v.optInt("track_number").takeIf { !v.isNull("track_number") && v.has("track_number") })
+            v.optInt("track_number").takeIf { !v.isNull("track_number") && v.has("track_number") },
+            v.optString("source_title", "").takeUnless { it == "null" } ?: "",
+            v.optString("uploader", "").takeUnless { it == "null" } ?: "",
+            v.optString("channel_id", "").takeUnless { it == "null" } ?: "")
     }
 }
 class ApiException(val status: Int, message: String) : IOException(message)

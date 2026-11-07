@@ -71,6 +71,27 @@ Tracks with an album name but no Jellyfin album ID are grouped by name and
 album artist. Android resolves YouTube audio before starting Media3 playback;
 an upstream extraction failure is shown directly in the app.
 
+Android's expanded Now Playing panel scrolls into two upcoming queues. Explicit
+requests (**Play next** or **Add to your queue**) play before the remaining
+playlist, album, artist or search **Play all** selection. Completed tracks leave
+the queue; hold and drag to reorder within either section, or tap × to remove.
+Repeat playlist cycles the background selection; manual requests are consumed
+once. Repeat track loops the current song. Shuffle playlist rearranges only
+upcoming background tracks. Starting another context retains manual requests.
+
+YouTube searches submit from the search icon or keyboard. Recent searches and
+fuzzy history suggestions appear as you type; library searches still run after
+300 ms. YouTube results persist across navigation by default; Settings can clear
+them when leaving YouTube. The × next to Search clears the current search and
+results; **Clear history** removes saved queries. State is local to each account
+and server. A track's ⋮ → **Info** shows its full title, upload metadata when
+available, and a YouTube link with open/copy actions. Home shows recent listening
+and playlists rather than repeating the navigation menu.
+
+Android retains five-second Media3 preloading and prepares the next two YouTube
+stream URLs, including after queue edits. Playback starts from the streamed
+response; it does not wait for a whole-track download.
+
 Jellyfin passwords are used only for authentication. The resulting access token
 is encrypted at rest using a key derived from `JWT_SECRET` and never sent to clients.
 Library indexing is scoped to the linked Jellyfin user. Playback remains in Tuneflow,
@@ -202,7 +223,7 @@ scoped media tokens, idempotent listening progress, Jellyfin indexing and permis
 range forwarding, progressive first-byte delivery, and shared YouTube extraction.
 Provider tests use local mock servers and do not need a real Jellyfin account.
 
-For the Android playback integration test, start the synthetic fixture in one terminal:
+For the Android playback, queue and discovery UI tests, start the synthetic fixture in one terminal:
 
 ```bash
 cargo run --manifest-path services/server/Cargo.toml --example playback_fixture
@@ -216,7 +237,10 @@ cd apps/android
 ./gradlew connectedDebugAndroidTest
 ```
 
-This plays generated audio and checks startup, seeking, queue advancement, and
+The fixture uses loopback ports 18010 and 18011 and a synthetic extractor; no real
+YouTube or Jellyfin account is used. Tests check search persistence, fuzzy history,
+full track information, long-press queue dragging, foreground priority and consumption,
+startup, seeking, queue advancement, and
 background playback. It uses temporary data under the system temp directory and
 never accesses a real Jellyfin library. See [the architecture notes](docs/architecture.md)
 for the API and operational details.
