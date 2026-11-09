@@ -1,5 +1,12 @@
 package dev.tuneflow
 
+import android.os.Bundle
+import androidx.media3.session.SessionCommand
+import androidx.media3.session.SessionResult
+import androidx.media3.session.SessionError
+import com.google.common.util.concurrent.Futures
+import com.google.common.util.concurrent.SettableFuture
+import com.google.common.util.concurrent.ListenableFuture
 import android.content.Intent
 import android.app.PendingIntent
 import androidx.media3.common.*
@@ -22,6 +29,50 @@ import android.os.Looper
 
 @UnstableApi
 class PlaybackService : MediaSessionService() {
+    companion object {
+        const val SELECT = "dev.tuneflow.SELECT"
+        const val CANCEL_SELECTION = "dev.tuneflow.CANCEL_SELECTION"
+    }
+    private var stagingPlayer: ExoPlayer? = null
+    private var pendingSelection: SettableFuture<SessionResult>? = null
+    private var selectionTimeout: Runnable? = null
+    private lateinit var sources: DefaultMediaSourceFactory
+    private fun cancelSelection(code: @SessionError.Code Int = SessionError.INFO_CANCELLED) {
+        selectionTimeout?.let(handler::removeCallbacks); selectionTimeout = null
+        stagingPlayer?.release(); stagingPlayer = null
+        pendingSelection?.set(SessionResult(code)); pendingSelection = null
+    }
+    private fun select(args: Bundle): ListenableFuture<SessionResult> {
+        cancelSelection()
+        val selected = args.getBundle("selected")?.let(MediaItem::fromBundle)
+            ?: return Futures.immediateFuture(SessionResult(SessionError.ERROR_BAD_VALUE))
+        val background = args.getBinder("background")?.let(BundleListRetriever::getList)?.map(MediaItem::fromBundle)
+        if (selected.mediaId.startsWith("jf_")) {
+            PlaybackQueue.start(player, selected, background)
+            return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+        }
+        val result = SettableFuture.create<SessionResult>()
+        pendingSelection = result
+        // A silent player fills the shared disk cache before changing the audible timeline.
+        val staging = ExoPlayer.Builder(this).setMediaSourceFactory(sources)
+            .setLoadControl(DefaultLoadControl.Builder().setBufferDurationsMs(5000, 10000, 1000, 1000).build()).build()
+        stagingPlayer = staging
+        staging.addListener(object : Player.Listener {
+            override fun onPlaybackStateChanged(state: Int) {
+                if (state == Player.STATE_READY && stagingPlayer === staging) {
+                    cancelSelection(SessionResult.RESULT_SUCCESS)
+                    PlaybackQueue.start(player, selected, background)
+                }
+            }
+            override fun onPlayerError(error: PlaybackException) {
+                if (stagingPlayer === staging) cancelSelection(SessionError.ERROR_IO)
+            }
+        })
+        selectionTimeout = Runnable { if (stagingPlayer === staging) cancelSelection(SessionError.ERROR_IO) }
+            .also { handler.postDelayed(it, 35_000) }
+        staging.setMediaItem(selected); staging.prepare()
+        return result
+    }
     private var session: MediaSession? = null
     private lateinit var player: ExoPlayer
     private lateinit var cache: SimpleCache
@@ -65,8 +116,9 @@ class PlaybackService : MediaSessionService() {
         val source = CacheDataSource.Factory().setCache(cache)
             .setUpstreamDataSourceFactory(DefaultDataSource.Factory(this, http))
             .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+        sources = DefaultMediaSourceFactory(source)
         player = ExoPlayer.Builder(this)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(source))
+            .setMediaSourceFactory(sources)
             .setLoadControl(DefaultLoadControl.Builder().setBufferDurationsMs(15000, 60000, 1000, 2000).build())
             .setWakeMode(C.WAKE_MODE_NETWORK).build()
         player.setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build(), true)
@@ -75,9 +127,28 @@ class PlaybackService : MediaSessionService() {
         val pending = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         session = MediaSession.Builder(this, player).setSessionActivity(pending)
             .setCallback(object : MediaSession.Callback {
-                override fun onConnect(session: MediaSession, controller: MediaSession.ControllerInfo): MediaSession.ConnectionResult =
-                    if (controller.packageName == packageName || controller.isTrusted) super.onConnect(session, controller)
-                    else MediaSession.ConnectionResult.reject()
+                override fun onConnect(session: MediaSession, controller: MediaSession.ControllerInfo): MediaSession.ConnectionResult {
+                    if (controller.packageName != packageName && !controller.isTrusted) return MediaSession.ConnectionResult.reject()
+                    val commands = MediaSession.ConnectionResult.DEFAULT_SESSION_COMMANDS.buildUpon()
+                    if (controller.packageName == packageName) {
+                        commands.add(SessionCommand(SELECT, Bundle.EMPTY))
+                        commands.add(SessionCommand(CANCEL_SELECTION, Bundle.EMPTY))
+                    }
+                    return MediaSession.ConnectionResult.AcceptedResultBuilder(session, controller)
+                        .setAvailableSessionCommands(commands.build()).build()
+                }
+                override fun onCustomCommand(session: MediaSession, controller: MediaSession.ControllerInfo,
+                    command: SessionCommand, args: Bundle): ListenableFuture<SessionResult> = when (command.customAction) {
+                    SELECT -> select(args)
+                    CANCEL_SELECTION -> { cancelSelection(); Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS)) }
+                    else -> super.onCustomCommand(session, controller, command, args)
+                }
+                override fun onPlayerCommandRequest(session: MediaSession, controller: MediaSession.ControllerInfo, command: Int): Int {
+                    if (command in listOf(Player.COMMAND_PLAY_PAUSE, Player.COMMAND_STOP, Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM,
+                        Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM, Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM,
+                        Player.COMMAND_CHANGE_MEDIA_ITEMS, Player.COMMAND_SET_MEDIA_ITEM)) cancelSelection()
+                    return SessionResult.RESULT_SUCCESS
+                }
             }).build()
         player.addListener(object : Player.Listener {
             override fun onMediaItemTransition(item: MediaItem?, reason: Int) {
@@ -85,6 +156,7 @@ class PlaybackService : MediaSessionService() {
                 listenedMs = 0; recordedMs = 0; lastTick = 0; activeDuration = 0
                 activeItem = item; playSession = java.util.UUID.randomUUID().toString()
                 handler.post {
+                    if (item != null && player.currentMediaItem?.let(PlaybackQueue::entry) != PlaybackQueue.entry(item)) return@post
                     // Consume in the service so background playback has the same queue semantics.
                     if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT && item != null &&
                         PlaybackQueue.lane(item) == PlaybackQueue.MANUAL && player.mediaItemCount == 1) {
@@ -118,6 +190,7 @@ class PlaybackService : MediaSessionService() {
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
         recordProgress()
+        cancelSelection()
         session?.release(); player.release(); cache.release()
         scope.cancel()
         super.onDestroy()

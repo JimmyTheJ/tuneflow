@@ -105,6 +105,13 @@ pub async fn init(db: &SqlitePool) -> Result<()> {
     sqlx::raw_sql(include_str!("../schema.sql"))
         .execute(db)
         .await?;
+    let playlist_columns = all(db, "PRAGMA table_info(playlist_tracks)", vec![]).await?;
+    if !playlist_columns
+        .iter()
+        .any(|c| text(c, "name") == "added_by_user_id")
+    {
+        sqlx::query("ALTER TABLE playlist_tracks ADD COLUMN added_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL").execute(db).await?;
+    }
     let columns = all(db, "PRAGMA table_info(library_tracks)", vec![]).await?;
     for (name, definition) in [
         ("album_artist", "TEXT"),

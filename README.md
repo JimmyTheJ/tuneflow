@@ -86,7 +86,7 @@ playlist, album, artist or search **Play all** selection. Completed tracks leave
 the queue; hold and drag to reorder within either section, or tap × to remove.
 Repeat playlist cycles the background selection; manual requests are consumed
 once. Repeat track loops the current song. Shuffle playlist rearranges only
-upcoming background tracks. Starting another context retains manual requests.
+upcoming background tracks. Starting another context retains upcoming manual requests and starts the newly selected song. Tapping a queued song starts it without leaving another pending copy.
 
 YouTube searches submit from the search icon or keyboard. Recent searches and
 fuzzy history suggestions appear as you type; library searches still run after
@@ -96,6 +96,19 @@ results; **Clear history** removes saved queries. State is local to each account
 and server. A track's ⋮ → **Info** shows its full title, upload metadata when
 available, and a YouTube link with open/copy actions. Home shows recent listening
 and playlists rather than repeating the navigation menu.
+
+Android Playlists can create personal or family playlists and move a playlist between
+those scopes. Owners can remove any track, including unmatched imports. Family
+administrators can manage any family playlist in their household; moving one to
+personal playlists makes it personal to that administrator. Track Info shows who
+added each playlist entry and when. Historical entries without attribution show
+Unknown rather than inferring a contributor. Rebuild the Rust API with this update
+for playlist permissions and contributor tracking.
+
+Selecting library audio replaces the current song directly. YouTube selections are
+prepared silently into the shared playback cache before switching, preserving the
+current song's playing or paused state until the new audio is ready. A failed
+preparation leaves the current song in place; a newer selection cancels it.
 
 Android retains five-second Media3 preloading and prepares the next two YouTube
 stream URLs, including after queue edits. Playback starts from the streamed

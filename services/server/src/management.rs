@@ -29,15 +29,28 @@ pub async fn patch(
     }
     Ok(())
 }
+fn family_admin(u: &Value) -> bool {
+    u["is_root_admin"] == true
+        || u["role_profiles"]
+            .as_array()
+            .is_some_and(|roles| roles.iter().any(|r| r["slug"] == "household_admin"))
+}
+fn can_manage(u: &Value, p: &Value) -> bool {
+    p["user_id"] == u["id"]
+        || (p["visibility"] == "household"
+            && !u["household_id"].is_null()
+            && p["household_id"] == u["household_id"]
+            && family_admin(u))
+}
 async fn playlist(s: &Shared, u: &Value, pid: i64, write: bool, deleted: bool) -> Result<Value> {
     let p=db::one(&s.db,"SELECT p.*,u.display_name AS owner_display_name,u.household_id FROM playlists p JOIN users u ON u.id=p.user_id WHERE p.id=?",vec![json!(pid)]).await?;
     if !deleted && !p["deleted_at"].is_null() {
         return Err(ApiError::missing());
     }
     let own = p["user_id"] == u["id"];
-    if write && !own {
+    if write && !can_manage(u, &p) {
         return Err(ApiError::forbidden(
-            "Only the playlist owner can change this playlist",
+            "Only the owner or a family administrator can change this playlist",
         ));
     }
     if !own
@@ -53,12 +66,13 @@ async fn playlist_read(s: &Shared, u: &Value, mut p: Value, detail: bool) -> Res
     let pid = id(&p);
     let ts = db::all(
         &s.db,
-        "SELECT * FROM playlist_tracks WHERE playlist_id=? ORDER BY position,id",
+        "SELECT t.*,u.display_name AS added_by_display_name FROM playlist_tracks t LEFT JOIN users u ON u.id=t.added_by_user_id WHERE t.playlist_id=? ORDER BY t.position,t.id",
         vec![json!(pid)],
     )
     .await?;
     p["owner_id"] = p["user_id"].clone();
     p["is_owner"] = json!(p["user_id"] == u["id"]);
+    p["can_manage"] = json!(can_manage(u, &p));
     p["track_count"] = json!(ts.len());
     p["match_summary"] = json!({"matched":ts.iter().filter(|t|t["match_status"]=="matched").count(),"unmatched":ts.iter().filter(|t|t["match_status"]=="unmatched").count(),"pending":ts.iter().filter(|t|t["match_status"]=="pending").count()});
     if detail {
@@ -83,7 +97,7 @@ fn track_body(b: &Value) -> Result<()> {
     }
     Ok(())
 }
-async fn add_track(s: &Shared, pid: i64, b: &Value) -> Result<Value> {
+async fn add_track(s: &Shared, u: &Value, pid: i64, b: &Value) -> Result<Value> {
     track_body(b)?;
     let pos = db::one(
         &s.db,
@@ -92,7 +106,7 @@ async fn add_track(s: &Shared, pid: i64, b: &Value) -> Result<Value> {
     )
     .await?["n"]
         .clone();
-    let tid=db::exec(&s.db,"INSERT INTO playlist_tracks(playlist_id,video_id,title,artist,thumbnail_url,duration_sec,position,match_status) VALUES(?,?,?,?,?,?,?,'matched')",vec![json!(pid),b["video_id"].clone(),b["title"].clone(),b["artist"].clone(),b["thumbnail_url"].clone(),b["duration_sec"].clone(),pos]).await?;
+    let tid=db::exec(&s.db,"INSERT INTO playlist_tracks(playlist_id,video_id,title,artist,thumbnail_url,duration_sec,position,match_status,added_by_user_id) VALUES(?,?,?,?,?,?,?,'matched',?)",vec![json!(pid),b["video_id"].clone(),b["title"].clone(),b["artist"].clone(),b["thumbnail_url"].clone(),b["duration_sec"].clone(),pos,json!(id(u))]).await?;
     db::exec(
         &s.db,
         "UPDATE playlists SET updated_at=CURRENT_TIMESTAMP WHERE id=?",
@@ -124,7 +138,7 @@ pub async fn personal(
  ("POST",["likes"])=>{track_body(&b)?;let lid=db::exec(&s.db,"INSERT INTO likes(user_id,video_id,title,artist,thumbnail_url,duration_sec) VALUES(?,?,?,?,?,?)",vec![uid,b["video_id"].clone(),b["title"].clone(),b["artist"].clone(),b["thumbnail_url"].clone(),b["duration_sec"].clone()]).await?;db::one(&s.db,"SELECT * FROM likes WHERE id=?",vec![json!(lid)]).await},
  ("DELETE",["likes",vid])=>{db::exec(&s.db,"DELETE FROM likes WHERE user_id=? AND video_id=?",vec![uid,json!(vid)]).await?;Ok(Value::Null)},
  ("GET",["playlists"])=>{
- let rows=if q.get("scope").is_some_and(|v|v=="household"){db::all(&s.db,"SELECT p.*,u.display_name AS owner_display_name FROM playlists p JOIN users u ON u.id=p.user_id WHERE u.household_id=? AND p.visibility='household' AND p.deleted_at IS NULL ORDER BY p.updated_at DESC",vec![u["household_id"].clone()]).await?}else{db::all(&s.db,"SELECT p.*,u.display_name AS owner_display_name FROM playlists p JOIN users u ON u.id=p.user_id WHERE p.user_id=? AND p.deleted_at IS NULL ORDER BY p.updated_at DESC",vec![uid]).await?};
+ let rows=if q.get("scope").is_some_and(|v|v=="household"){db::all(&s.db,"SELECT p.*,u.display_name AS owner_display_name,u.household_id FROM playlists p JOIN users u ON u.id=p.user_id WHERE u.household_id=? AND p.visibility='household' AND p.deleted_at IS NULL ORDER BY p.updated_at DESC",vec![u["household_id"].clone()]).await?}else{db::all(&s.db,"SELECT p.*,u.display_name AS owner_display_name,u.household_id FROM playlists p JOIN users u ON u.id=p.user_id WHERE p.user_id=? AND p.deleted_at IS NULL ORDER BY p.updated_at DESC",vec![uid]).await?};
  let mut out=vec![];for p in rows{out.push(playlist_read(s,u,p,false).await?);}Ok(json!(out))},
  ("POST",["playlists"])=>{let pid=db::exec(&s.db,"INSERT INTO playlists(user_id,name,description,visibility,source_type) VALUES(?,?,?,?,'manual')",vec![uid,json!(required(&b,"name",200)?),b["description"].clone(),json!(visibility(&b)?)]).await?;playlist_read(s,u,playlist(s,u,pid,false,false).await?,false).await},
  ("GET",["playlists","deleted"])=>{let rows=db::all(&s.db,"SELECT p.*,u.display_name AS owner_display_name,u.username AS owner_username,p.user_id AS owner_id FROM playlists p JOIN users u ON u.id=p.user_id WHERE p.deleted_at IS NOT NULL AND (p.user_id=? OR ?=1) ORDER BY p.deleted_at DESC",vec![uid,u["is_root_admin"].clone()]).await?;let mut out=vec![];for p in rows{out.push(playlist_read(s,u,p,false).await?);}Ok(json!(out))},
@@ -134,11 +148,16 @@ pub async fn personal(
  match (m.as_str(),rest){
  ("GET",[])=>playlist_read(s,u,p,true).await,
  ("PATCH",[])=>{if b.get("name").is_some(){required(&b,"name",200)?;}
- if b.get("visibility").is_some(){visibility(&b)?;}patch(s,"playlists","id",json!(pid),&b,&["name","description","visibility"]).await?;playlist_read(s,u,playlist(s,u,pid,false,false).await?,false).await},
+ if b.get("visibility").is_some(){visibility(&b)?;}
+ // Taking a family playlist private makes it personal to the acting administrator.
+ if b["visibility"]=="private" && p["user_id"]!=u["id"] {
+ db::exec(&s.db,"UPDATE playlists SET user_id=? WHERE id=?",vec![uid.clone(),json!(pid)]).await?;
+ }
+ patch(s,"playlists","id",json!(pid),&b,&["name","description","visibility"]).await?;playlist_read(s,u,playlist(s,u,pid,false,false).await?,false).await},
  ("DELETE",[])=>{db::exec(&s.db,"UPDATE playlists SET deleted_at=CURRENT_TIMESTAMP,deleted_by_user_id=? WHERE id=?",vec![uid,json!(pid)]).await?;Ok(Value::Null)},
  ("POST",["restore"])=>{db::exec(&s.db,"UPDATE playlists SET deleted_at=NULL,deleted_by_user_id=NULL WHERE id=?",vec![json!(pid)]).await?;playlist_read(s,u,playlist(s,u,pid,false,false).await?,false).await},
- ("POST",["copy"])=>{let copy=db::exec(&s.db,"INSERT INTO playlists(user_id,name,description,visibility,source_type) VALUES(?,?,?,'private','manual')",vec![uid,json!(format!("{} (copy)",text(&p,"name"))),p["description"].clone()]).await?;db::exec(&s.db,"INSERT INTO playlist_tracks(playlist_id,video_id,title,artist,thumbnail_url,duration_sec,position,match_status) SELECT ?,video_id,title,artist,thumbnail_url,duration_sec,position,match_status FROM playlist_tracks WHERE playlist_id=?",vec![json!(copy),json!(pid)]).await?;playlist_read(s,u,playlist(s,u,copy,false,false).await?,false).await},
- ("POST",["tracks"])=>add_track(s,pid,&b).await,
+ ("POST",["copy"])=>{let copy=db::exec(&s.db,"INSERT INTO playlists(user_id,name,description,visibility,source_type) VALUES(?,?,?,'private','manual')",vec![uid,json!(format!("{} (copy)",text(&p,"name"))),p["description"].clone()]).await?;db::exec(&s.db,"INSERT INTO playlist_tracks(playlist_id,video_id,title,artist,thumbnail_url,duration_sec,position,match_status,added_by_user_id) SELECT ?,video_id,title,artist,thumbnail_url,duration_sec,position,match_status,? FROM playlist_tracks WHERE playlist_id=?",vec![json!(copy),json!(id(u)),json!(pid)]).await?;playlist_read(s,u,playlist(s,u,copy,false,false).await?,false).await},
+ ("POST",["tracks"])=>add_track(s,u,pid,&b).await,
  ("DELETE",["tracks",tid])=>{db::exec(&s.db,"DELETE FROM playlist_tracks WHERE playlist_id=? AND id=?",vec![json!(pid),json!(tid.parse::<i64>().map_err(|_|ApiError::missing())?)]).await?;Ok(Value::Null)},
  ("POST",["tracks","reorder"])=>{
  let ids=b["track_ids"].as_array().ok_or_else(||ApiError::bad("track_ids required"))?;let existing=db::all(&s.db,"SELECT id FROM playlist_tracks WHERE playlist_id=?",vec![json!(pid)]).await?;

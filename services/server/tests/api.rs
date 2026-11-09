@@ -356,3 +356,155 @@ async fn login_tokens_are_not_accepted_in_query_strings() {
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 }
+
+#[tokio::test]
+async fn family_playlist_management_and_track_attribution() {
+    let (_d, s, app) = test_app().await;
+    let root = setup(&app).await;
+    let admin = household(&app, &root, "family").await;
+    let outsider = household(&app, &root, "outside").await;
+    let (_, me) = request(&app, "GET", "/api/auth/me", &admin, json!({})).await;
+    let member_id = db::exec(&s.db,
+        "INSERT INTO users(username,password_hash,display_name,household_id) VALUES('member','unused','Member',?)",
+        vec![me["household_id"].clone()]).await.unwrap();
+    let member = tuneflow_server::auth::token(&s, member_id, None).unwrap();
+    let (_, p) = request(
+        &app,
+        "POST",
+        "/api/playlists",
+        &member,
+        json!({"name":"Member mix","visibility":"private"}),
+    )
+    .await;
+    let path = format!("/api/playlists/{}", p["id"]);
+    assert_eq!(
+        request(
+            &app,
+            "PATCH",
+            &path,
+            &admin,
+            json!({"visibility":"household"})
+        )
+        .await
+        .0,
+        403
+    );
+    assert_eq!(
+        request(
+            &app,
+            "PATCH",
+            &path,
+            &member,
+            json!({"visibility":"household"})
+        )
+        .await
+        .0,
+        200
+    );
+    let (_, track) = request(
+        &app,
+        "POST",
+        &format!("{path}/tracks"),
+        &member,
+        json!({"video_id":"abcdefghijk","title":"Song","added_by_user_id":999}),
+    )
+    .await;
+    assert_eq!(track["added_by_user_id"], member_id);
+    let (_, detail) = request(&app, "GET", &path, &admin, json!({})).await;
+    assert_eq!(detail["can_manage"], true);
+    assert_eq!(detail["tracks"][0]["added_by_display_name"], "Member");
+    let (_, listed) = request(
+        &app,
+        "GET",
+        "/api/playlists?scope=household",
+        &admin,
+        json!({}),
+    )
+    .await;
+    assert_eq!(listed[0]["can_manage"], true);
+    let removal = format!("{path}/tracks/{}", track["id"]);
+    assert_eq!(
+        request(&app, "DELETE", &removal, &outsider, json!({}))
+            .await
+            .0,
+        403
+    );
+    // An unrelated ordinary member may view, but cannot remove another member's tracks.
+    let reader_id = db::exec(&s.db,
+        "INSERT INTO users(username,password_hash,display_name,household_id) VALUES('reader','unused','Reader',?)",
+        vec![me["household_id"].clone()]).await.unwrap();
+    let reader = tuneflow_server::auth::token(&s, reader_id, None).unwrap();
+    assert_eq!(
+        request(&app, "DELETE", &removal, &reader, json!({}))
+            .await
+            .0,
+        403
+    );
+    assert_eq!(
+        request(&app, "DELETE", &removal, &admin, json!({})).await.0,
+        204
+    );
+    let (_, added) = request(
+        &app,
+        "POST",
+        &format!("{path}/tracks"),
+        &admin,
+        json!({"video_id":"abcdefghijk","title":"Added by admin"}),
+    )
+    .await;
+    assert_eq!(added["added_by_user_id"], me["id"]);
+    // The owner can remove a track added by an administrator.
+    assert_eq!(
+        request(
+            &app,
+            "DELETE",
+            &format!("{path}/tracks/{}", added["id"]),
+            &member,
+            json!({})
+        )
+        .await
+        .0,
+        204
+    );
+    // Unmatched imports also remain removable by administrators.
+    let unmatched = db::exec(&s.db, "INSERT INTO playlist_tracks(playlist_id,title,match_status) VALUES(?,'Unmatched','unmatched')", vec![p["id"].clone()]).await.unwrap();
+    assert_eq!(
+        request(
+            &app,
+            "DELETE",
+            &format!("{path}/tracks/{unmatched}"),
+            &admin,
+            json!({})
+        )
+        .await
+        .0,
+        204
+    );
+    let (status, personal) = request(
+        &app,
+        "PATCH",
+        &path,
+        &admin,
+        json!({"visibility":"private"}),
+    )
+    .await;
+    assert_eq!(status, 200);
+    assert_eq!(personal["owner_id"], me["id"]);
+    assert_eq!(request(&app, "GET", &path, &member, json!({})).await.0, 404);
+    assert_eq!(
+        request(
+            &app,
+            "PATCH",
+            &path,
+            &admin,
+            json!({"visibility":"household"})
+        )
+        .await
+        .0,
+        200
+    );
+    assert_eq!(
+        request(&app, "DELETE", &path, &admin, json!({})).await.0,
+        204
+    );
+}

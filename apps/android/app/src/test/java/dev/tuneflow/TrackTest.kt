@@ -27,4 +27,11 @@ class TrackTest {
             sourceTitle = "Full original upload title", uploader = "Uploader", channelId = "UCfixture")
         assertEquals(track, Track.from(track.json()))
     }
+    @Test fun playlistEntryIdentityAndContributorSurvivePlaybackMetadata() {
+        val track = Track.from(JSONObject("""{"video_id":"abcdefghijk","title":"Song","id":42,"playlist_id":7,"added_by_user_id":3,"added_by_display_name":"Member","added_at":"2026-11-08 12:00:00"}"""))
+        assertEquals(42L, track.playlistTrackId)
+        assertEquals(7L, track.playlistId)
+        assertEquals("Member", track.addedBy)
+        assertEquals(track, Track.from(track.json()))
+    }
 }

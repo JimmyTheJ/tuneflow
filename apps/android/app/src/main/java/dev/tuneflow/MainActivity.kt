@@ -24,6 +24,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.HttpDataSource
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
+import androidx.media3.session.SessionCommand
 import kotlinx.coroutines.*
 import org.json.JSONArray
 import org.json.JSONObject
@@ -583,29 +584,24 @@ class MainActivity : Activity() {
         if (selected.blocked.isNotEmpty()) { showError(Exception(selected.blocked)); return }
         val playable = tracks.drop(start).filter { it.blocked.isEmpty() }
         val generation = ++playGeneration
+        player.sendCustomCommand(SessionCommand(PlaybackService.CANCEL_SELECTION, Bundle.EMPTY), Bundle.EMPTY)
         val singles = tracks.size == 1 && !ordered
         fun startPlayback(stream: JSONObject?) {
             if (generation != playGeneration) return
-            player.shuffleModeEnabled = false
-            if (singles) {
-                PlaybackQueue.add(player, item(selected, stream), next = true)
-                // An explicit tap starts this track, retaining the rest of both queues.
-                if (player.currentMediaItem?.mediaId != selected.id || player.mediaItemCount > 1) {
-                    if (player.hasNextMediaItem()) player.seekToNextMediaItem()
-                }
-                player.prepare(); player.play()
-            } else {
-                val manual = if (player.mediaItemCount == 0) emptyList() else
-                    (player.currentMediaItemIndex.coerceAtLeast(0) until player.mediaItemCount).map(player::getMediaItemAt)
-                        .filter { PlaybackQueue.lane(it) == PlaybackQueue.MANUAL }
-                val background = playable.map { PlaybackQueue.tagged(item(it, if (it == selected) stream else null), PlaybackQueue.CONTEXT, contextName) }
-                val preserveCurrent = manual.firstOrNull()?.let { PlaybackQueue.entry(it) == player.currentMediaItem?.let(PlaybackQueue::entry) } == true
-                if (preserveCurrent) {
-                    player.removeMediaItems(player.currentMediaItemIndex + 1, player.mediaItemCount)
-                    player.addMediaItems(manual.drop(1) + background)
-                } else player.setMediaItems(manual + background, 0, 0)
-                player.prepare(); player.play()
+            val selection = PlaybackQueue.tagged(item(selected, stream),
+                if (singles) PlaybackQueue.MANUAL else PlaybackQueue.CONTEXT, contextName)
+            val args = Bundle().apply {
+                putBundle("selected", selection.toBundleIncludeLocalConfiguration())
+                if (!singles) putBinder("background", BundleListRetriever(playable.drop(1).map {
+                    PlaybackQueue.tagged(item(it), PlaybackQueue.CONTEXT, contextName).toBundleIncludeLocalConfiguration()
+                }))
             }
+            val pending = player.sendCustomCommand(SessionCommand(PlaybackService.SELECT, Bundle.EMPTY), args)
+            pending.addListener({
+                if (generation == playGeneration) runCatching { pending.get() }.onSuccess { result ->
+                    if (result.resultCode < 0) showError(Exception("Audio could not be buffered. Please try again."))
+                }.onFailure { showError(Exception("Playback could not start", it)) }
+            }, Executor { tick.post(it) })
         }
         if (selected.id.startsWith("jf_")) startPlayback(null)
         else {
@@ -640,6 +636,10 @@ class MainActivity : Activity() {
         field("Title", track.title)
         if (track.sourceTitle != track.title) field("Video title", track.sourceTitle)
         field("Artist", track.artist); field("Uploaded by", track.uploader)
+        if (track.playlistId > 0) {
+            field("Added by", track.addedBy.ifBlank { "Unknown (not recorded)" })
+            field("Added to playlist", track.addedAt)
+        }
         field("Album", track.album)
         if (track.duration > 0) field("Duration", formatTime(track.duration * 1000))
         if (!track.id.startsWith("jf_")) {
@@ -672,9 +672,17 @@ class MainActivity : Activity() {
             option("Add to your queue") { controller?.let { PlaybackQueue.add(it, item(track)) } }
         }
         option("Info") { trackInfo(track) }
+        if (track.canManagePlaylist && track.playlistId > 0) option("Remove from playlist") {
+            AlertDialog.Builder(this).setTitle("Remove track?").setMessage(track.title)
+                .setPositiveButton("Remove") { _, _ -> launchWork {
+                    api.call("playlists/${track.playlistId}/tracks/${track.playlistTrackId}", "DELETE")
+                    showTracks(titleView.text.toString(), "playlists/${track.playlistId}", track.playlistId)
+                } }.setNegativeButton("Cancel", null).show()
+        }
         option("Like") { launchWork { api.call("likes", "POST", track.json()); Toast.makeText(this@MainActivity, "Liked", Toast.LENGTH_SHORT).show() } }
         option("Add to playlist") { launchWork {
-            val playlists = api.array("playlists").objects()
+            val playlists = (api.array("playlists").objects() + api.array("playlists?scope=household").objects())
+                .distinctBy { it.getLong("id") }.filter { it.optBoolean("can_manage", it.optBoolean("is_owner")) }
             AlertDialog.Builder(this@MainActivity).setTitle("Add to playlist").setItems(playlists.map { it.optString("name") }.toTypedArray()) { _, index ->
                 launchWork { api.call("playlists/${playlists[index].getLong("id")}/tracks", "POST", track.json()); Toast.makeText(this@MainActivity, "Added", Toast.LENGTH_SHORT).show() }
             }.show()
@@ -806,6 +814,7 @@ class MainActivity : Activity() {
                     tile.addView(text(listOf(track.artist, track.album).filter { it.isNotBlank() }.joinToString(" · "), 12f, secondary))
                     tile.setOnClickListener { play(listOf(track), 0) }
                     action("▶ Play", tile) { play(listOf(track), 0) }
+                    action("Track options", tile) { trackMenu(track) }
                     row.addView(tile, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(6); bottomMargin = dp(8) })
                 }
                 target.addView(row)
@@ -935,9 +944,32 @@ class MainActivity : Activity() {
         screenJob?.cancel(); backAction = { home() }; content.removeAllViews(); titleView.text = title
         action("Back") { home() }
         screenJob = scope.launch { try {
-            val tracks = if (playlistId == null) api.array(path).objects().map(Track::from)
-                else api.obj(path).getJSONArray("tracks").objects().filter { !it.isNull("video_id") }.map(Track::from)
-            if (tracks.isNotEmpty()) action("Play all") { play(tracks, 0, ordered = true, contextName = title) }
+            val playlist = if (playlistId != null) api.obj(path) else null
+            val tracks = if (playlist == null) api.array(path).objects().map(Track::from)
+                else playlist.getJSONArray("tracks").objects().map { row ->
+                    val track = Track.from(row)
+                    track.copy(playlistId = playlistId ?: 0,
+                        canManagePlaylist = playlist.optBoolean("can_manage", playlist.optBoolean("is_owner")),
+                        blocked = if (row.isNull("video_id")) "No playable match" else track.blocked)
+                }
+            if (playlist != null && playlist.optBoolean("can_manage", playlist.optBoolean("is_owner"))) {
+                val family = playlist.optString("visibility") == "household"
+                action(if (family) "Move to personal playlists" else "Move to family playlists") {
+                    AlertDialog.Builder(this@MainActivity).setTitle("Move playlist?")
+                        .setMessage(if (family) "This will become your personal playlist." else "Everyone in your family will be able to see this playlist.")
+                        .setPositiveButton("Move") { _, _ -> launchWork {
+                            api.call(path, "PATCH", JSONObject().put("visibility", if (family) "private" else "household"))
+                            showTracks(title, path, playlistId)
+                        } }.setNegativeButton("Cancel", null).show()
+                }
+                action("Delete playlist") {
+                    AlertDialog.Builder(this@MainActivity).setTitle("Delete playlist?").setMessage(title)
+                        .setPositiveButton("Delete") { _, _ -> launchWork { api.call(path, "DELETE"); home() } }
+                        .setNegativeButton("Cancel", null).show()
+                }
+            }
+            val playable = tracks.filter { it.blocked.isEmpty() }
+            if (playable.isNotEmpty()) action("Play all") { play(playable, 0, ordered = true, contextName = title) }
             val list = box(0)
             viewPicker("songs", content) { renderTracks(list, tracks, "songs") }
             content.addView(list); renderTracks(list, tracks, "songs")
@@ -948,8 +980,10 @@ class MainActivity : Activity() {
         action("Recently played") { showTracks("Recently played", "history?limit=100") }
         action("Create playlist") {
             val form = box(); val name = input("Playlist name", target = form)
+            val family = Switch(this).apply { text = "Family playlist"; setTextColor(Color.WHITE) }
+            form.addView(family)
             AlertDialog.Builder(this).setTitle("New playlist").setView(form).setPositiveButton("Create") { _, _ -> launchWork {
-                api.call("playlists", "POST", JSONObject().put("name", name.text.toString())); home()
+                api.call("playlists", "POST", JSONObject().put("name", name.text.toString()).put("visibility", if (family.isChecked) "household" else "private")); home()
             } }.setNegativeButton("Cancel", null).show()
         }
         screenJob = scope.launch { try {

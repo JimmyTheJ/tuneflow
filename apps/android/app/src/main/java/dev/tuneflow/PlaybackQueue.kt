@@ -31,6 +31,15 @@ object PlaybackQueue {
         player.addMediaItem(index, tagged(item, MANUAL))
         if (empty) { player.prepare(); player.play() }
     }
+    fun start(player: Player, selected: MediaItem, background: List<MediaItem>? = null) {
+        val upcoming = ((player.currentMediaItemIndex + 1).coerceAtLeast(0) until player.mediaItemCount)
+            .map(player::getMediaItemAt).filter { it.mediaId != selected.mediaId }
+        val remaining = if (background == null) upcoming else
+            upcoming.filter { lane(it) == MANUAL } + background
+        player.shuffleModeEnabled = false
+        player.setMediaItems(listOf(selected) + remaining, 0, 0)
+        player.prepare(); player.play()
+    }
     fun consumePlayed(player: Player) {
         val count = player.currentMediaItemIndex
         if (count <= 0) return

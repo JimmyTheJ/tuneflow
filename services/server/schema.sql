@@ -101,6 +101,7 @@ CREATE TABLE IF NOT EXISTS playlist_tracks (
   source_artist TEXT,
   source_duration_ms INTEGER,
   source_spotify_id TEXT,
+  added_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
   added_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
