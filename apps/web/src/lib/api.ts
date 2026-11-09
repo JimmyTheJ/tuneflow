@@ -53,9 +53,11 @@ type RequestOptions = {
   body?: unknown;
   auth?: boolean;
   signal?: AbortSignal;
+  keepalive?: boolean;
 };
 
 export type LibraryQuery = {
+  initial?: string;
   q?: string;
   artist?: string;
   album_id?: string;
@@ -83,6 +85,7 @@ async function executeRequest<T>(path: string, options: RequestOptions = {}): Pr
 
   const response = await fetch(`${baseUrl}${path}`, {
     method: options.method ?? "GET",
+    keepalive: options.keepalive,
     headers,
     body: options.body ? JSON.stringify(options.body) : undefined,
     signal: options.signal,
@@ -153,6 +156,8 @@ export const api = {
   linkJellyfin: (server_url: string, username: string, password: string) => request("/api/jellyfin/link", { method: "POST", body: { server_url, username, password } }),
   syncJellyfin: () => request("/api/jellyfin/sync", { method: "POST" }),
   unlinkJellyfin: () => request("/api/jellyfin", { method: "DELETE" }),
+  libraryInitials: (section: "artists" | "albums" | "songs", q = "") => request<{ grouping: "initial"; groups: { initial: string; count: number }[] }>(
+    `/api/library/${section === "songs" ? "tracks" : section}?group_by=initial&q=${encodeURIComponent(q)}`),
   libraryTracks: (query: LibraryQuery = {}) => request<Track[]>(libraryPath("tracks", query)),
   libraryArtists: (query: LibraryQuery = {}) => request<LibraryArtist[]>(libraryPath("artists", query)),
   libraryAlbums: (query: LibraryQuery = {}) => request<LibraryAlbum[]>(libraryPath("albums", query)),
@@ -254,7 +259,8 @@ export const api = {
   getImportJob: (id: number) => request<ImportJob>(`/api/imports/${id}`),
   listImportJobs: () => request<ImportJob[]>("/api/imports"),
   listHistory: () => request<PlayHistoryEntry[]>("/api/history"),
-  recordPlay: (track: Track) => request<PlayHistoryEntry>("/api/history", { method: "POST", body: track }),
+  recordPlay: (track: Track & { session_id: string; listened_sec: number }) => request<PlayHistoryEntry>("/api/history", { method: "POST", body: track, keepalive: true }),
+  recordNowPlaying: (track: Track) => request<void>("/api/history/now-playing", { method: "POST", body: track, keepalive: true }),
   listLikes: () => request<LikeEntry[]>("/api/likes"),
   likeTrack: (track: Track) => request<LikeEntry>("/api/likes", { method: "POST", body: track }),
   unlikeTrack: (videoId: string) => request<void>(`/api/likes/${videoId}`, { method: "DELETE" }),

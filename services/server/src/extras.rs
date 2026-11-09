@@ -700,20 +700,30 @@ async fn scrobble_call(
     s: &Shared,
     provider_name: &str,
     method: &str,
+    params: BTreeMap<String, String>,
+) -> Result<Value> {
+    let (api, _, key, secret) = provider(provider_name)?;
+    scrobble_request(s, &api, &key, &secret, method, params).await
+}
+async fn scrobble_request(
+    s: &Shared,
+    api: &str,
+    key: &str,
+    secret: &str,
+    method: &str,
     mut params: BTreeMap<String, String>,
 ) -> Result<Value> {
     use md5::{Digest, Md5};
-    let (api, _, key, secret) = provider(provider_name)?;
     if key.is_empty() || secret.is_empty() {
         return Err(ApiError::bad("Scrobbler is not configured"));
     }
     params.insert("method".into(), method.into());
-    params.insert("api_key".into(), key);
+    params.insert("api_key".into(), key.into());
     let payload = params
         .iter()
         .map(|(k, v)| format!("{k}{v}"))
         .collect::<String>()
-        + &secret;
+        + secret;
     params.insert(
         "api_sig".into(),
         format!("{:x}", Md5::digest(payload.as_bytes())),
@@ -730,7 +740,11 @@ async fn scrobble_call(
         .json()
         .await?;
     if v.get("error").is_some() {
-        return Err(ApiError::upstream("Scrobbler rejected request"));
+        return Err(ApiError::upstream(format!(
+            "Scrobbler error {}: {}",
+            v["error"],
+            text(&v, "message")
+        )));
     }
     Ok(v)
 }
@@ -760,7 +774,8 @@ async fn scrobbler(s: &Shared, u: &Value, path: &str, m: &Method, b: Value) -> R
     .await?;
     match (m.as_str(), &p[2..]) {
         ("GET", []) => Ok(
-            json!({"provider":name,"configured":configured,"linked":existing.is_some(),"username":existing.as_ref().map(|v|v["username"].clone()),"scrobbling_enabled":existing.as_ref().map(|v|v["scrobbling_enabled"].clone()).unwrap_or(json!(false)),"linked_at":existing.map(|v|v["linked_at"].clone())}),
+            json!({"provider":name,"configured":configured,"linked":existing.is_some(),"username":existing.as_ref().map(|v|v["username"].clone()),"scrobbling_enabled":existing.as_ref().map(|v|v["scrobbling_enabled"].clone()).unwrap_or(json!(false)),"linked_at":existing.as_ref().map(|v|v["linked_at"].clone()),
+            "delivery": db::one(&s.db, "SELECT count(CASE WHEN status IN ('pending','sending') THEN 1 END) AS pending_count,MAX(sent_at) AS last_success_at,(SELECT d.last_error FROM scrobble_deliveries d JOIN scrobbler_connections c ON c.id=d.connection_id WHERE c.user_id=? AND c.provider=? AND d.last_error IS NOT NULL AND d.status<>'sent' ORDER BY d.id DESC LIMIT 1) AS last_error FROM scrobble_deliveries d JOIN scrobbler_connections c ON c.id=d.connection_id WHERE c.user_id=? AND c.provider=?", vec![json!(id(u)),json!(name),json!(id(u)),json!(name)]).await?}),
         ),
         ("POST", ["link", "start"]) => {
             let v = scrobble_call(s, name, "auth.getToken", BTreeMap::new()).await?;
@@ -776,7 +791,7 @@ async fn scrobbler(s: &Shared, u: &Value, path: &str, m: &Method, b: Value) -> R
                 BTreeMap::from([("token".into(), required(&b, "token", 500)?)]),
             )
             .await?;
-            db::exec(&s.db,"INSERT INTO scrobbler_connections(user_id,provider,username,session_key,scrobbling_enabled) VALUES(?,?,?,?,1) ON CONFLICT(user_id,provider) DO UPDATE SET username=excluded.username,session_key=excluded.session_key",vec![json!(id(u)),json!(name),v["session"]["name"].clone(),v["session"]["key"].clone()]).await?;
+            db::exec(&s.db,"INSERT INTO scrobbler_connections(user_id,provider,username,session_key,scrobbling_enabled) VALUES(?,?,?,?,1) ON CONFLICT(user_id,provider) DO UPDATE SET username=excluded.username,session_key=excluded.session_key,scrobbling_enabled=1",vec![json!(id(u)),json!(name),v["session"]["name"].clone(),v["session"]["key"].clone()]).await?;
             let mut r = db::one(
                 &s.db,
                 "SELECT * FROM scrobbler_connections WHERE user_id=? AND provider=?",
@@ -809,39 +824,128 @@ async fn scrobbler(s: &Shared, u: &Value, path: &str, m: &Method, b: Value) -> R
         _ => Err(ApiError::missing()),
     }
 }
-pub fn schedule_scrobble(s: &Shared, u: &Value, track: &Value, listened: i64) {
-    let threshold = track["duration_sec"]
-        .as_i64()
-        .map(|v| (v / 2).min(240))
-        .unwrap_or(30);
-    if listened < threshold || text(track, "artist").is_empty() {
-        return;
+/// Last.fm requires a track longer than 30s and half its duration (capped at 4min).
+/// Unknown durations wait 4min instead of prematurely submitting after 30s.
+pub fn scrobble_threshold(duration: Option<i64>) -> Option<i64> {
+    match duration {
+        Some(1..=30) => None,
+        Some(v) if v > 30 => Some(((v + 1) / 2).min(240)),
+        _ => Some(240),
     }
-    let (s, u, t) = (s.clone(), u.clone(), track.clone());
-    tokio::spawn(async move {
-        if let Ok(rows) = db::all(
-            &s.db,
-            "SELECT * FROM scrobbler_connections WHERE user_id=? AND scrobbling_enabled=1",
-            vec![json!(id(&u))],
-        )
-        .await
+}
+pub async fn now_playing(s: &Shared, u: &Value, track: &Value) -> Result<Value> {
+    auth::budget(s, format!("now-playing:{}", id(u)), 120).await?;
+    if text(track, "artist").trim().is_empty() {
+        return Ok(json!({"status":"missing_artist"}));
+    }
+    let rows = db::all(
+        &s.db,
+        "SELECT * FROM scrobbler_connections WHERE user_id=? AND scrobbling_enabled=1",
+        vec![json!(id(u))],
+    )
+    .await?;
+    let mut errors = vec![];
+    for r in rows {
+        let mut params = BTreeMap::from([
+            ("sk".into(), text(&r, "session_key").into()),
+            ("artist".into(), text(track, "artist").into()),
+            ("track".into(), text(track, "title").into()),
+        ]);
+        if let Some(duration) = track["duration_sec"].as_i64().filter(|v| *v > 0) {
+            params.insert("duration".into(), duration.to_string());
+        }
+        if !text(track, "album").is_empty() {
+            params.insert("album".into(), text(track, "album").into());
+        }
+        if let Err(e) =
+            scrobble_call(s, text(&r, "provider"), "track.updateNowPlaying", params).await
         {
-            for r in rows {
-                let p = BTreeMap::from([
-                    ("sk".into(), text(&r, "session_key").into()),
-                    ("artist[0]".into(), text(&t, "artist").into()),
-                    ("track[0]".into(), text(&t, "title").into()),
-                    (
-                        "timestamp[0]".into(),
-                        chrono::Utc::now().timestamp().to_string(),
-                    ),
-                ]);
-                let _ = scrobble_call(&s, text(&r, "provider"), "track.scrobble", p).await;
-            }
+            tracing::warn!(provider=text(&r,"provider"), error=%e.1, "now playing failed");
+            errors.push(json!({"provider":r["provider"],"error":e.1}));
+        }
+    }
+    Ok(json!({"errors":errors}))
+}
+pub fn send_scrobbles(s: Shared) {
+    tokio::spawn(async move {
+        if let Err(e) = drain_scrobbles(&s).await {
+            tracing::warn!(error=%e.1,"scrobble queue failed");
         }
     });
 }
+async fn drain_scrobbles(s: &Shared) -> Result<()> {
+    // A bounded lease lets a restarted server recover an interrupted submission.
+    db::exec(&s.db,"UPDATE scrobble_deliveries SET status='pending' WHERE status='sending' AND next_attempt<unixepoch()",vec![]).await?;
+    let rows = db::all(&s.db,"SELECT d.id,d.attempts,c.provider,c.session_key,h.title,h.artist,h.duration_sec,CAST(strftime('%s',h.played_at) AS INTEGER) AS started_at FROM scrobble_deliveries d JOIN scrobbler_connections c ON c.id=d.connection_id JOIN play_history h ON h.id=d.history_id WHERE d.status='pending' AND d.next_attempt<=unixepoch() AND c.scrobbling_enabled=1 ORDER BY d.id LIMIT 20",vec![]).await?;
+    for row in rows {
+        let claimed = sqlx::query("UPDATE scrobble_deliveries SET status='sending',next_attempt=unixepoch()+60 WHERE id=? AND status='pending'").bind(id(&row)).execute(&s.db).await?.rows_affected();
+        if claimed == 0 {
+            continue;
+        }
+        let (api, _, key, secret) = provider(text(&row, "provider"))?;
+        deliver_scrobble(s, &row, &api, &key, &secret).await?;
+    }
+    Ok(())
+}
+async fn deliver_scrobble(
+    s: &Shared,
+    row: &Value,
+    api: &str,
+    key: &str,
+    secret: &str,
+) -> Result<()> {
+    let mut params = BTreeMap::from([
+        ("sk".into(), text(row, "session_key").into()),
+        ("artist[0]".into(), text(row, "artist").into()),
+        ("track[0]".into(), text(row, "title").into()),
+        (
+            "timestamp[0]".into(),
+            row["started_at"]
+                .as_i64()
+                .unwrap_or_else(|| chrono::Utc::now().timestamp())
+                .to_string(),
+        ),
+    ]);
+    if let Some(duration) = row["duration_sec"].as_i64().filter(|v| *v > 0) {
+        params.insert("duration[0]".into(), duration.to_string());
+    }
+    let result = scrobble_request(s, api, key, secret, "track.scrobble", params)
+        .await
+        .and_then(|v| {
+            if v["scrobbles"]["@attr"]["accepted"].as_str() == Some("1")
+                || v["scrobbles"]["@attr"]["accepted"].as_i64() == Some(1)
+            {
+                Ok(())
+            } else {
+                Err(ApiError::upstream(format!(
+                    "Scrobbler did not accept play: {}",
+                    v["scrobbles"]["scrobble"]["ignoredMessage"]
+                )))
+            }
+        });
+    match result {
+        Ok(()) => {
+            db::exec(&s.db,"UPDATE scrobble_deliveries SET status='sent',attempts=attempts+1,last_error=NULL,sent_at=CURRENT_TIMESTAMP WHERE id=?",vec![row["id"].clone()]).await?;
+        }
+        Err(error) => {
+            let attempts = row["attempts"].as_i64().unwrap_or(0) + 1;
+            let status = if attempts >= 10 { "failed" } else { "pending" };
+            tracing::warn!(provider=text(row,"provider"),error=%error.1,"scrobble delivery failed");
+            db::exec(&s.db,"UPDATE scrobble_deliveries SET status=?,attempts=?,last_error=?,next_attempt=unixepoch()+? WHERE id=?",vec![json!(status),json!(attempts),json!(error.1),json!((30_i64 * (1_i64 << attempts.min(10))).min(3600)),row["id"].clone()]).await?;
+        }
+    }
+    Ok(())
+}
 pub fn maintenance(s: Shared) {
+    let submissions = s.clone();
+    tokio::spawn(async move {
+        loop {
+            if let Err(e) = drain_scrobbles(&submissions).await {
+                tracing::warn!(error=%e.1,"scrobble retry failed");
+            }
+            tokio::time::sleep(Duration::from_secs(15)).await;
+        }
+    });
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(Duration::from_secs(3600)).await;
@@ -861,4 +965,113 @@ pub fn maintenance(s: Shared) {
             let _=db::exec(&s.db,"DELETE FROM catalog_cache_entries WHERE cached_at<datetime('now','-'||(SELECT catalog_cache_retention_days FROM system_settings WHERE id=1)||' days')",vec![]).await;
         }
     });
+}
+
+#[cfg(test)]
+mod scrobble_tests {
+    use super::*;
+    #[test]
+    fn thresholds_follow_lastfm_rules() {
+        assert_eq!(scrobble_threshold(Some(30)), None);
+        assert_eq!(scrobble_threshold(Some(31)), Some(16));
+        assert_eq!(scrobble_threshold(Some(181)), Some(91));
+        assert_eq!(scrobble_threshold(Some(900)), Some(240));
+        assert_eq!(scrobble_threshold(None), Some(240));
+        assert_eq!(scrobble_threshold(Some(0)), Some(240));
+    }
+    #[tokio::test]
+    async fn provider_signatures_rejections_ignored_plays_and_retry_delivery_are_checked() {
+        use axum::{Json, Router, extract::Form, routing::post};
+        use std::sync::{Arc, Mutex};
+        let captured = Arc::new(Mutex::new(Vec::<BTreeMap<String, String>>::new()));
+        let requests = captured.clone();
+        let mock=Router::new().route("/",post(move |Form(params):Form<BTreeMap<String,String>>| {
+            let captured=requests.clone();
+            async move {
+                let mut rows=captured.lock().unwrap();rows.push(params);
+                Json(match rows.len() {
+                    1=>json!({"error":9,"message":"Invalid session key"}),
+                    2=>json!({"scrobbles":{"@attr":{"accepted":"0","ignored":"1"},"scrobble":{"ignoredMessage":{"code":"1","#text":"Artist was ignored"}}}}),
+                    _=>json!({"scrobbles":{"@attr":{"accepted":"1","ignored":"0"}}}),
+                })
+            }
+        }));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            axum::serve(listener, mock).await.unwrap();
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let s = crate::App::open(crate::Config {
+            data_dir: dir.path().into(),
+            jwt_secret: "test-secret-of-at-least-thirty-two-bytes".into(),
+            youtube_bin: "/nonexistent".into(),
+            jellyfin_url: None,
+            jellyfin_allowed_urls: vec![],
+        })
+        .await
+        .unwrap();
+        db::exec(&s.db,"INSERT INTO users(id,username,display_name,password_hash,household_id) VALUES(1,'user','User','unused',1)",vec![]).await.unwrap();
+        db::exec(&s.db,"INSERT INTO play_history(id,user_id,video_id,title,artist,listened_sec,duration_sec) VALUES(1,1,'jf_test','Song','Artist',100,200)",vec![]).await.unwrap();
+        db::exec(&s.db,"INSERT INTO scrobbler_connections(id,user_id,provider,username,session_key) VALUES(1,1,'lastfm','user','session')",vec![]).await.unwrap();
+        db::exec(
+            &s.db,
+            "INSERT INTO scrobble_deliveries(id,history_id,connection_id) VALUES(1,1,1)",
+            vec![],
+        )
+        .await
+        .unwrap();
+        let row = json!({"id":1,"attempts":0,"title":"Song","artist":"Artist","duration_sec":200,"session_key":"session","started_at":1700000000,"provider":"lastfm"});
+        deliver_scrobble(&s, &row, &url, "key", "secret")
+            .await
+            .unwrap();
+        let failed = db::one(
+            &s.db,
+            "SELECT * FROM scrobble_deliveries WHERE id=1",
+            vec![],
+        )
+        .await
+        .unwrap();
+        assert_eq!(failed["status"], "pending");
+        assert!(text(&failed, "last_error").contains("Invalid session key"));
+        assert!(failed["next_attempt"].as_i64().unwrap() > chrono::Utc::now().timestamp());
+        deliver_scrobble(&s, &row, &url, "key", "secret")
+            .await
+            .unwrap();
+        let ignored = db::one(
+            &s.db,
+            "SELECT * FROM scrobble_deliveries WHERE id=1",
+            vec![],
+        )
+        .await
+        .unwrap();
+        assert!(text(&ignored, "last_error").contains("Artist was ignored"));
+        deliver_scrobble(&s, &row, &url, "key", "secret")
+            .await
+            .unwrap();
+        let sent = db::one(
+            &s.db,
+            "SELECT * FROM scrobble_deliveries WHERE id=1",
+            vec![],
+        )
+        .await
+        .unwrap();
+        assert_eq!(sent["status"], "sent");
+        assert!(!sent["sent_at"].is_null());
+        assert!(sent["last_error"].is_null());
+        let rows = captured.lock().unwrap();
+        let params = &rows[0];
+        assert_eq!(params["timestamp[0]"], "1700000000");
+        assert_eq!(params["artist[0]"], "Artist");
+        assert_eq!(params["track[0]"], "Song");
+        use md5::{Digest, Md5};
+        let payload = params
+            .iter()
+            .filter(|(k, _)| *k != "format" && *k != "api_sig")
+            .map(|(k, v)| format!("{k}{v}"))
+            .collect::<String>()
+            + "secret";
+        assert_eq!(params["api_sig"], format!("{:x}", Md5::digest(payload)));
+        server.abort();
+    }
 }

@@ -132,6 +132,7 @@ pub async fn personal(
     let uid = json!(id(u));
     match (m.as_str(),parts.as_slice()){
  ("GET",["history"])=>Ok(json!(db::all(&s.db,"SELECT * FROM play_history WHERE user_id=? ORDER BY played_at DESC,id DESC LIMIT ?",vec![uid,json!(number(q,"limit",50,1,200))]).await?)),
+ ("POST",["history","now-playing"])=>{track_body(&b)?;crate::extras::now_playing(s,u,&b).await},
  ("POST",["history"])=>{
  track_body(&b)?;record_history(s,u,&b).await},
  ("GET",["likes"])=>Ok(json!(db::all(&s.db,"SELECT * FROM likes WHERE user_id=? ORDER BY liked_at DESC,id DESC",vec![uid]).await?)),
@@ -682,19 +683,8 @@ async fn record_history(s: &Shared, u: &Value, b: &Value) -> Result<Value> {
         .fetch_optional(&mut *tx)
         .await?
     };
-    let before: i64 = if let Some(hid) = previous {
-        sqlx::query_scalar(
-            "SELECT coalesce(listened_sec,0) FROM play_history WHERE id=? AND user_id=?",
-        )
-        .bind(hid)
-        .bind(id(u))
-        .fetch_one(&mut *tx)
-        .await?
-    } else {
-        0
-    };
     let hid = if let Some(hid) = previous {
-        sqlx::query("UPDATE play_history SET listened_sec=max(coalesce(listened_sec,0),?) WHERE id=? AND user_id=?").bind(listened).bind(hid).bind(id(u)).execute(&mut *tx).await?;
+        sqlx::query("UPDATE play_history SET listened_sec=max(coalesce(listened_sec,0),?),duration_sec=coalesce(?,duration_sec) WHERE id=? AND user_id=?").bind(listened).bind(b["duration_sec"].as_i64().filter(|v| *v > 0)).bind(hid).bind(id(u)).execute(&mut *tx).await?;
         hid
     } else {
         let hid=sqlx::query("INSERT INTO play_history(user_id,video_id,title,artist,thumbnail_url,duration_sec,listened_sec) VALUES(?,?,?,?,?,?,?)").bind(id(u)).bind(text(b,"video_id")).bind(text(b,"title")).bind(b["artist"].as_str()).bind(b["thumbnail_url"].as_str()).bind(b["duration_sec"].as_i64()).bind(listened).execute(&mut *tx).await?.last_insert_rowid();
@@ -710,13 +700,25 @@ async fn record_history(s: &Shared, u: &Value, b: &Value) -> Result<Value> {
         }
         hid
     };
+    let track_row: (Option<i64>, i64, String, Option<String>) = sqlx::query_as(
+        "SELECT duration_sec,coalesce(listened_sec,0),title,artist FROM play_history WHERE id=?",
+    )
+    .bind(hid)
+    .fetch_one(&mut *tx)
+    .await?;
+    let eligible = crate::extras::scrobble_threshold(track_row.0)
+        .is_some_and(|threshold| track_row.1 >= threshold)
+        && !track_row.2.trim().is_empty()
+        && track_row
+            .3
+            .as_ref()
+            .is_some_and(|artist| !artist.trim().is_empty());
+    if eligible {
+        sqlx::query("INSERT OR IGNORE INTO scrobble_deliveries(history_id,connection_id) SELECT ?,id FROM scrobbler_connections WHERE user_id=? AND scrobbling_enabled=1").bind(hid).bind(id(u)).execute(&mut *tx).await?;
+    }
     tx.commit().await?;
-    let threshold = b["duration_sec"]
-        .as_i64()
-        .map(|v| (v / 2).clamp(1, 240))
-        .unwrap_or(30);
-    if before < threshold && listened >= threshold {
-        crate::extras::schedule_scrobble(s, u, b, listened);
+    if eligible {
+        crate::extras::send_scrobbles(s.clone());
     }
     db::one(
         &s.db,

@@ -64,15 +64,15 @@ Play all on an artist or album replaces the queue with that selection; selecting
 a song plays only that song. Album playback uses disc and track order. If you
 synced before this browsing update, run **Sync library** again in Settings to
 fill in album artist and track numbers from Jellyfin.
-The Android artist and album browsers start with collapsed letter groups: A–Z,
-each digit 0–9, and # for other starting characters. Artists group by artist name;
-albums group by album title. **Jump to letter** opens a letter directly. Search
-narrows the groups, with counts shown before any entries or artwork are loaded.
-Opening a group fetches 40 entries; more load as you scroll, and only visible rows
-are rendered. Tiles, List and Details remain available. Returning from an artist
-or album retains your open groups and scroll position. Rebuild the Rust API to
-provide the new letter counts and filtered pages; older clients retain their
-existing API responses.
+The web and Android Artists, Albums and Songs browsers start with collapsed
+initial groups, ordered **A–Z, then 0–9, then #** for other starting characters.
+Artists group by name; albums and songs group by title. The web letter bar and
+Android **Jump to letter** open a group directly. Search narrows the groups,
+with counts shown before entries or artwork load. Web groups load 60 entries
+at a time using **Load more**; Android loads 40 and pages as you scroll.
+Tiles, List and Details remain available, and changing views reuses loaded pages.
+Rebuild the Rust API and web app together for song counts and filtered pages.
+Album playback continues to use disc and track order.
 The Android artist and album screens page their results; playback loads the
 complete queue only when requested. If Android says the server is too old for
 artist search, rebuild and restart `tuneflow-api` from the current checkout.
@@ -195,6 +195,23 @@ npm --prefix apps/web install
 npm --prefix apps/web run dev
 ```
 
+## Scrobbling
+
+Link Last.fm or Libre.fm in web Settings for each listener's own profile. Both
+players send Now Playing when audio starts and report cumulative listening time;
+pauses, buffering and seeks do not count as listening. Tracks longer than 30
+seconds qualify after half their duration or four minutes, whichever comes first.
+Unknown durations wait four minutes. Artist and title are required.
+
+Eligible plays enter a persistent, per-provider queue. Progress updates share a
+play-session ID, preventing duplicate history rows and duplicate queued submissions.
+The API checks provider acceptance, logs failures, and retries failed submissions
+with backoff (up to ten attempts). After rebuilding and restarting the API and web
+app, Settings shows the last accepted play, pending count and latest delivery
+error; reopen Settings to refresh it. No credentials or reauthorization should be
+needed for an existing valid link. Old web history rows containing zero listening
+time cannot be safely reconstructed into scrobbles.
+
 ## Native Android
 
 Open `apps/android` in Android Studio, or use JDK 21 and an Android SDK containing
@@ -246,8 +263,8 @@ library or a guarantee that every queued track is available without the server.
 - Recordings are not silently replaced with covers or alternate uploads after failure.
   YouTube extraction remains dependent on upstream availability and restrictions.
 
-The existing web interface has only compatibility changes: Jellyfin linking,
-Library/YouTube source selection, artwork support, and working request cancellation.
+The web interface supports grouped library browsing, Jellyfin linking, explicit
+Library/YouTube source selection, artwork, scrobbling and request cancellation.
 A broader web redesign is deferred.
 
 ## Validation

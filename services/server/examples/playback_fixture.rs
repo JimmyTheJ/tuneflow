@@ -127,7 +127,10 @@ async fn main() -> anyhow::Result<()> {
                 async move {
                     if matches!(
                         request.uri().path(),
-                        "/api/library/artists" | "/api/library/albums"
+                        "/api/library/artists"
+                            | "/api/library/albums"
+                            | "/api/library/tracks"
+                            | "/api/history/now-playing"
                     ) {
                         requests.lock().unwrap().push(request.uri().to_string());
                     }

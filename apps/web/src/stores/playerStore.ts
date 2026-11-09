@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { disconnectEq, installEqAudioContextKeepAlive } from "@/lib/eqAudioGraph";
 import { getResolvedEqForCurrentTrack, syncEqPlayback } from "@/lib/eqSync";
 import { api } from "@/lib/api";
+import { ListeningSession } from "@/lib/listening";
 import {
   clearMediaSession,
   installMediaSessionHandlers,
@@ -82,6 +83,9 @@ type PlayerState = {
   toggleEqBroadcast: () => void;
 };
 
+let listeningSession: ListeningSession | null = null;
+const listeningSink = { progress: api.recordPlay, nowPlaying: api.recordNowPlaying };
+
 const DEFAULT_SELECTION: StreamSelection = { video: false, audio: true };
 const VOLUME_KEY = "tuneflow.volume";
 
@@ -140,6 +144,7 @@ function applyVolume(
 
 function disposeMedia(media: HTMLMediaElement | null): void {
   if (!media) return;
+  listeningSession?.detach(media);
   disconnectEq(media);
   const tagged = media as MediaWithListeners;
   tagged.__tuneflowListeners?.abort();
@@ -506,6 +511,8 @@ function attachMediaListeners(
   set: (partial: Partial<PlayerState>) => void,
   get: () => PlayerState,
 ) {
+  listeningSession ??= new ListeningSession(track, listeningSink);
+  listeningSession.attach(media);
   const tagged = media as MediaWithListeners;
   tagged.__tuneflowListeners?.abort();
   const abort = new AbortController();
@@ -904,6 +911,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
     const generation = nextPlayGeneration();
     disposeMedia(get().media);
+    listeningSession = new ListeningSession(track, listeningSink);
 
     const selection = normalizeSelection(get().streamSelection, get().stream);
     const adopted = tryAdoptPrefetch(track, selection);
@@ -1012,7 +1020,6 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       persistSnapshot(get());
       syncMediaSessionFromState(get());
       pendingMedia = null;
-      void api.recordPlay(track).catch(() => undefined);
       resetPlaybackFailureState();
       schedulePrefetchNext(get);
     } catch (error) {
@@ -1465,6 +1472,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     nextPlayGeneration();
     invalidatePrefetch();
     disposeMedia(get().media);
+    listeningSession = null;
     clearPlayerSession();
     clearMediaSession();
     set({

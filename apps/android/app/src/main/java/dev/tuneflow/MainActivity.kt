@@ -456,35 +456,7 @@ class MainActivity : Activity() {
     }
     private fun libraryOrDiscovery() {
         if (tab == "YouTube") { youtubeDiscovery(); return }
-        label("Fast playback from your Jellyfin collection.")
-        val query = input("Search your library", browseQueries["songs"].orEmpty())
-        val results = box(0); content.addView(results)
-        val songList = box(0)
-        var displayedTracks = listOf<Track>()
-        lateinit var load: (String, Int) -> Unit
-        load = { value, offset ->
-            browseQueries["songs"] = value
-            screenJob?.cancel(); results.removeAllViews(); label("Loading…", results)
-            screenJob = scope.launch {
-                try {
-                    val tracks = api.array("library/tracks?q=${Api.encode(value)}&limit=100&offset=$offset").objects().map(Track::from)
-                    results.removeAllViews(); displayedTracks = tracks
-                    if (tracks.isEmpty()) label("No tracks found. Link Jellyfin and sync your library in Settings.", results)
-                    else {
-                        action("Play all", results) { play(tracks, 0, ordered = true, contextName = "Library search") }
-                        results.addView(songList); renderTracks(songList, tracks, "songs")
-                    }
-                    if (offset > 0) action("Previous page", results) { pageOffset = (offset - 100).coerceAtLeast(0); load(value, pageOffset) }
-                    if (tracks.size == 100) action("Next page", results) { pageOffset = offset + 100; load(value, pageOffset) }
-                } catch (e: CancellationException) { throw e } catch (e: Exception) {
-                    results.removeAllViews(); label(e.message ?: "Could not load music", results)
-                }
-            }
-        }
-        val picker = box(0); content.addView(picker, content.indexOfChild(results))
-        viewPicker("songs", picker) { renderTracks(songList, displayedTracks, "songs") }
-        debounce(query) { pageOffset = 0; load(query.text.toString().trim(), 0) }
-        load(query.text.toString().trim(), 0)
+        browseGroups("songs")
     }
     private fun youtubeDiscovery() {
         val history = searchHistory()
@@ -794,12 +766,13 @@ class MainActivity : Activity() {
         screenJob = pageJob
         val pageScope = CoroutineScope(Dispatchers.Main.immediate + pageJob)
         val state = letterLibraryStates.getOrPut(section) { LetterLibraryState() }
-        label(if (artists) "Browse artists by name." else "Browse albums by title.")
-        val query = input(if (artists) "Find an artist" else "Find an album", state.query)
+        label(when (section) { "artists" -> "Browse artists by name."; "songs" -> "Browse songs by title."; else -> "Browse albums by title." })
+        val query = input(when (section) { "artists" -> "Find an artist"; "songs" -> "Search your library"; else -> "Find an album" }, state.query)
         val open: (BrowseGroup) -> Unit = { if (artists) showArtist(it.id) else showAlbum(it.id, it.title, it.subtitle) }
         val playSelected: (BrowseGroup) -> Unit = {
             if (artists) playGroup("library/tracks?artist=${Api.encode(it.id)}") else playGroup("library/tracks?album_id=${Api.encode(it.id)}")
         }
+        if (section == "songs") action("▶ Play all songs", content) { playGroup("library/tracks?q=${Api.encode(query.text.toString().trim())}") }
         lateinit var browser: LetterLibraryView
         action("A–Z · Jump to letter", content) { browser.search(query.text.toString().trim()); browser.chooseLetter() }
         viewPicker(section, content) { browser.changeView() }
@@ -807,12 +780,18 @@ class MainActivity : Activity() {
         header.setPadding(0, dp(8), 0, dp(12))
         (header.parent as? ViewGroup)?.removeView(header)
         browser = LetterLibraryView(this, header, state, pageScope, api, section, { viewMode(section) }, { value ->
-            if (artists) {
+            if (section == "songs") {
+                val track = Track.from(value)
+                BrowseGroup(track.id, track.title, track.artist, track.album, track.artwork, track)
+            } else if (artists) {
                 check(value.has("album_count")) { "Update the Rust API to enable artist albums" }
                 artistSummaries[value.optString("id")] = value.optInt("album_count") to value.optInt("track_count")
                 BrowseGroup(value.optString("id"), value.optString("name"), "${value.optInt("album_count")} albums · ${value.optInt("track_count")} songs", "${value.optInt("album_count")} albums · ${value.optInt("track_count")} songs", value.optString("thumbnail_url"))
             } else BrowseGroup(value.optString("id"), value.optString("title"), value.optString("artist"), "${value.optString("artist")} · ${value.optInt("track_count")} songs", value.optString("thumbnail_url"))
-        }, { target, entries -> groupRows(target, entries, section, open, playSelected) })
+        }, { target, entries ->
+            if (section == "songs") renderTracks(target, entries.mapNotNull { it.track }, section)
+            else groupRows(target, entries, section, open, playSelected)
+        })
         root.removeViewAt(1)
         root.addView(browser, 1, LinearLayout.LayoutParams(-1, 0, 1f))
         debounce(query) { browser.search(query.text.toString().trim()) }

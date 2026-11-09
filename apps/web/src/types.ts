@@ -369,6 +369,7 @@ export type ScrobblerConnectionStatus = {
   username?: string | null;
   scrobbling_enabled: boolean;
   linked_at?: string | null;
+  delivery?: { pending_count: number; last_success_at: string | null; last_error: string | null };
 };
 
 export type ScrobblerLinkStart = {

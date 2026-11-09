@@ -702,10 +702,30 @@ async fn library_initial_groups_count_names_and_lazy_pages_independently() {
         .unwrap();
         serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap()
     }
-    for (section, expected_a, expected_total) in [("artists", 3, 9), ("albums", 3, 9)] {
+    db::exec(
+        &s.db,
+        "UPDATE library_tracks SET title=album WHERE user_id=1",
+        vec![],
+    )
+    .await
+    .unwrap();
+    for (section, expected_a, expected_total) in
+        [("artists", 3, 9), ("albums", 3, 9), ("tracks", 3, 10)]
+    {
         let index = query(&s, &u, section, &[("group_by", "initial")]).await;
         assert_eq!(index["grouping"], "initial");
         let counts = index["groups"].as_array().unwrap();
+        assert_eq!(
+            counts
+                .iter()
+                .map(|g| g["initial"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            vec!["A", "B", "S", "Z", "2", "3", "#"]
+                .into_iter()
+                .filter(|letter| *letter != "B" || section == "artists")
+                .filter(|letter| *letter != "Z" || section != "artists")
+                .collect::<Vec<_>>()
+        );
         let count = |letter: &str| {
             counts.iter().find(|g| g["initial"] == letter).unwrap()["count"]
                 .as_i64()
@@ -760,6 +780,42 @@ async fn library_initial_groups_count_names_and_lazy_pages_independently() {
     )
     .await;
     assert_eq!(artist_filter["groups"], json!([{"initial":"Z","count":1}]));
+    let songs = query(&s, &u, "tracks", &[("initial", "A")]).await;
+    assert_eq!(songs[0]["title"], "A %_ album");
+    assert_eq!(songs[1]["title"], "Apple");
+    assert_eq!(songs[2]["title"], "Apricot");
+    let filtered_songs = query(&s, &u, "tracks", &[("group_by", "initial"), ("q", "Apple")]).await;
+    assert_eq!(filtered_songs["groups"], json!([{"initial":"A","count":1}]));
+    let song_artist = query(
+        &s,
+        &u,
+        "tracks",
+        &[("group_by", "initial"), ("artist", "Alpha")],
+    )
+    .await;
+    assert_eq!(song_artist["groups"], json!([{"initial":"Z","count":2}]));
+    let song_album = query(
+        &s,
+        &u,
+        "tracks",
+        &[
+            ("group_by", "initial"),
+            ("album_id", "name:[\"Alpha\",\"Zebra\"]"),
+        ],
+    )
+    .await;
+    assert_eq!(song_album["groups"], json!([{"initial":"Z","count":2}]));
+    let song_error = library::handle(
+        &s,
+        &u,
+        "library/tracks",
+        &HashMap::from([("initial".into(), "AB".into())]),
+        &Method::GET,
+        json!({}),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(song_error.0, StatusCode::BAD_REQUEST);
     let invalid = HashMap::from([("initial".into(), "AB".into())]);
     let error = library::handle(&s, &u, "library/artists", &invalid, &Method::GET, json!({}))
         .await

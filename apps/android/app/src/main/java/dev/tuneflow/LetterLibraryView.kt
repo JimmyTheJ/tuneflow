@@ -15,10 +15,10 @@ import androidx.recyclerview.widget.DiffUtil
 import kotlinx.coroutines.*
 import org.json.JSONObject
 
-internal data class BrowseGroup(val id: String, val title: String, val subtitle: String, val detail: String, val artwork: String = "")
+internal data class BrowseGroup(val id: String, val title: String, val subtitle: String, val detail: String, val artwork: String = "", val track: Track? = null)
 
 internal object LibraryLetters {
-    val keys = listOf("#") + ('0'..'9').map(Char::toString) + ('A'..'Z').map(Char::toString)
+    val keys = ('A'..'Z').map(Char::toString) + ('0'..'9').map(Char::toString) + listOf("#")
     fun initial(value: String): String = value.trim(' ').firstOrNull()?.let {
         val letter = it.uppercaseChar()
         if (letter in 'A'..'Z' && it.code < 128 || letter in '0'..'9') letter.toString() else "#"
@@ -177,7 +177,7 @@ internal class LetterLibraryView(
         val request = generation
         indexJob = pageScope.launch {
             try {
-                val raw = api.call("library/$section?group_by=initial&q=${Api.encode(state.query)}")
+                val raw = api.call("library/${if (section == "songs") "tracks" else section}?group_by=initial&q=${Api.encode(state.query)}")
                 val response = org.json.JSONTokener(raw).nextValue() as? JSONObject ?: error("Update the Rust API to enable letter browsing")
                 check(response.optString("grouping") == "initial") { "Update the Rust API to enable letter browsing" }
                 val groups = response.getJSONArray("groups")
@@ -202,7 +202,7 @@ internal class LetterLibraryView(
         // Lazy start makes the loading marker visible before the request can complete.
         val job = pageScope.launch(start = CoroutineStart.LAZY) {
             try {
-                val values = api.array("library/$section?initial=${Api.encode(letter)}&q=${Api.encode(state.query)}&limit=$pageSize&offset=$offset")
+                val values = api.array("library/${if (section == "songs") "tracks" else section}?initial=${Api.encode(letter)}&q=${Api.encode(state.query)}&limit=$pageSize&offset=$offset")
                 if (request != generation) return@launch
                 val page = (0 until values.length()).map { mapEntry(values.getJSONObject(it)) }
                 check(page.all { LibraryLetters.initial(it.title) == letter }) { "Update the Rust API to enable letter browsing" }

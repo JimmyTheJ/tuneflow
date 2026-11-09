@@ -1,12 +1,12 @@
 import { Disc3, Download, ListMusic, Music2, Plus, Search, UserRound } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { CreatePlaylistDialog } from "@/components/CreatePlaylistDialog";
 import { ImportPlaylistWizard } from "@/components/ImportPlaylistWizard";
 import { LibraryGroups, LibrarySongs, LibraryViewPicker, useLibraryViewMode, type LibraryGroupItem } from "@/components/LibraryBrowse";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
-import { MediaCardSkeleton } from "@/components/ui/Skeleton";
+import { LetterLibrary } from "@/components/LetterLibrary";
 import { useLikedTracks } from "@/hooks/useLikedTracks";
 import { api } from "@/lib/api";
 import { libraryQueue } from "@/lib/library";
@@ -15,7 +15,6 @@ import { usePlayerStore } from "@/stores/playerStore";
 import type { LibraryAlbum, LibraryArtist, LikeEntry, Playlist, Track } from "@/types";
 
 type Tab = "artists" | "albums" | "songs" | "playlists";
-const PAGE_SIZE = 60;
 const tabs = [
   { id: "artists" as const, label: "Artists", icon: UserRound },
   { id: "albums" as const, label: "Albums", icon: Disc3 },
@@ -28,16 +27,10 @@ export function LibraryPage() {
   const tab: Tab = tabs.find((entry) => entry.id === params.get("view"))?.id ?? "artists";
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
-  const [artists, setArtists] = useState<LibraryArtist[]>([]);
-  const [albums, setAlbums] = useState<LibraryAlbum[]>([]);
-  const [songs, setSongs] = useState<Track[]>([]);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [householdPlaylists, setHouseholdPlaylists] = useState<Playlist[]>([]);
   const [likes, setLikes] = useState<LikeEntry[]>([]);
   const [linked, setLinked] = useState<boolean | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [hasMore, setHasMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [playlistError, setPlaylistError] = useState<string | null>(null);
   const [playingGroup, setPlayingGroup] = useState(false);
@@ -45,7 +38,6 @@ export function LibraryPage() {
   const [createBusy, setCreateBusy] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [importOpen, setImportOpen] = useState(false);
-  const requestVersion = useRef(0);
   const [artistMode, setArtistMode] = useLibraryViewMode("artists");
   const [albumMode, setAlbumMode] = useLibraryViewMode("albums");
   const [songMode, setSongMode] = useLibraryViewMode("songs", "list");
@@ -77,69 +69,6 @@ export function LibraryPage() {
     return () => window.clearTimeout(timer);
   }, [search]);
 
-  useEffect(() => {
-    if (tab === "playlists") {
-      setLoading(false);
-      setLoadingMore(false);
-      setHasMore(false);
-      setError(null);
-      return;
-    }
-    const version = ++requestVersion.current;
-    setLoading(true);
-    setLoadingMore(false);
-    setError(null);
-    setHasMore(false);
-    setArtists([]);
-    setAlbums([]);
-    setSongs([]);
-    const load = async () => {
-      try {
-        const options = { q: query, limit: PAGE_SIZE };
-        if (tab === "artists") {
-          const page = await api.libraryArtists(options);
-          if (version === requestVersion.current) { setArtists(page); setHasMore(page.length === PAGE_SIZE); }
-        } else if (tab === "albums") {
-          const page = await api.libraryAlbums(options);
-          if (version === requestVersion.current) { setAlbums(page); setHasMore(page.length === PAGE_SIZE); }
-        } else {
-          const page = await api.libraryTracks(options);
-          if (version === requestVersion.current) { setSongs(page); setHasMore(page.length === PAGE_SIZE); }
-        }
-      } catch (cause) {
-        if (version === requestVersion.current) setError(cause instanceof Error ? cause.message : "Could not load library");
-      } finally {
-        if (version === requestVersion.current) setLoading(false);
-      }
-    };
-    void load();
-    return () => { requestVersion.current += 1; };
-  }, [tab, query]);
-
-  const loadMore = async () => {
-    if (!hasMore || loadingMore) return;
-    const version = requestVersion.current;
-    setLoadingMore(true);
-    setError(null);
-    try {
-      const options = { q: query, limit: PAGE_SIZE };
-      if (tab === "artists") {
-        const page = await api.libraryArtists({ ...options, offset: artists.length });
-        if (version === requestVersion.current) { setArtists((current) => [...current, ...page]); setHasMore(page.length === PAGE_SIZE); }
-      } else if (tab === "albums") {
-        const page = await api.libraryAlbums({ ...options, offset: albums.length });
-        if (version === requestVersion.current) { setAlbums((current) => [...current, ...page]); setHasMore(page.length === PAGE_SIZE); }
-      } else if (tab === "songs") {
-        const page = await api.libraryTracks({ ...options, offset: songs.length });
-        if (version === requestVersion.current) { setSongs((current) => [...current, ...page]); setHasMore(page.length === PAGE_SIZE); }
-      }
-    } catch (cause) {
-      if (version === requestVersion.current) setError(cause instanceof Error ? cause.message : "Could not load more");
-    } finally {
-      if (version === requestVersion.current) setLoadingMore(false);
-    }
-  };
-
   const playGroup = async (selection: { artist?: string; album_id?: string }) => {
     if (playingGroup) return;
     setPlayingGroup(true);
@@ -155,13 +84,13 @@ export function LibraryPage() {
     }
   };
 
-  const artistItems: LibraryGroupItem[] = artists.map((artist) => ({
+  const artistItems = (artists: LibraryArtist[]): LibraryGroupItem[] => artists.map((artist) => ({
     id: artist.id, title: artist.name, subtitle: `${artist.album_count} albums · ${artist.track_count} songs`,
     detail: `${artist.album_count} albums · ${artist.track_count} songs`, videoId: `jf_${artist.item_id}`,
     href: `/library/artist/${encodeURIComponent(artist.id)}`,
     onPlay: () => void playGroup({ artist: artist.id }),
   }));
-  const albumItems: LibraryGroupItem[] = albums.map((album) => ({
+  const albumItems = (albums: LibraryAlbum[]): LibraryGroupItem[] => albums.map((album) => ({
     id: album.id, title: album.title, subtitle: album.artist,
     detail: `${album.artist} · ${album.track_count} songs`, videoId: `jf_${album.item_id}`,
     href: `/library/album/${encodeURIComponent(album.id)}`,
@@ -174,7 +103,6 @@ export function LibraryPage() {
   ];
   const view = tab === "artists" ? artistMode : tab === "albums" ? albumMode : tab === "songs" ? songMode : playlistMode;
   const setView = tab === "artists" ? setArtistMode : tab === "albums" ? setAlbumMode : tab === "songs" ? setSongMode : setPlaylistMode;
-  const count = tab === "artists" ? artists.length : tab === "albums" ? albums.length : tab === "songs" ? songs.length : playlistItems.length;
 
   const createPlaylist = async (name: string) => {
     setCreateBusy(true);
@@ -215,19 +143,18 @@ export function LibraryPage() {
     {error ? <p role="alert" className="text-danger-fg">{error}</p> : null}
     {tab === "playlists" && playlistError ? <p role="alert" className="text-danger-fg">{playlistError}</p> : null}
     {playingGroup ? <p role="status" className="text-sm text-text-secondary">Preparing your queue…</p> : null}
-    {loading ? <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-      {Array.from({ length: 6 }).map((_, index) => <MediaCardSkeleton key={index} />)}
-    </div> : count === 0 ? <p className="rounded-xl border border-border bg-elevated p-6 text-text-secondary">
-      {tab !== "playlists" && linked === false ? <>Link Jellyfin in <Link to="/settings" className="text-accent">Settings</Link> to see your music.</>
-        : search ? `No ${tab} match “${search}”.` : tab === "playlists" ? "No playlists yet." : `No ${tab} found. Sync your Jellyfin library in Settings.`}
-    </p> : tab === "artists" ? <LibraryGroups items={artistItems} mode={artistMode} />
-      : tab === "albums" ? <LibraryGroups items={albumItems} mode={albumMode} />
-        : tab === "songs" ? <LibrarySongs tracks={songs} mode={songMode} likedVideoIds={likedVideoIds}
-          playlists={playlists} onLikedChange={() => void refreshLikedTracks()} onPlaylistsChange={() => void loadPlaylists()} />
-          : <LibraryGroups items={playlistItems} mode={playlistMode} />}
-    {hasMore && !loading && tab !== "playlists" ? <div className="flex justify-center">
-      <Button variant="secondary" disabled={loadingMore} onClick={() => void loadMore()}>{loadingMore ? "Loading…" : "Load more"}</Button>
-    </div> : null}
+    {tab === "playlists" ? playlistItems.length ? <LibraryGroups items={playlistItems} mode={playlistMode} />
+      : <p className="rounded-xl border border-border bg-elevated p-6 text-text-secondary">{search ? `No playlists match “${search}”.` : "No playlists yet."}</p>
+      : <LetterLibrary key={`${tab}:${query}`} section={tab} query={query} empty={
+        <p className="rounded-xl border border-border bg-elevated p-6 text-text-secondary">
+          {linked === false ? <>Link Jellyfin in <Link to="/settings" className="text-accent">Settings</Link> to see your music.</>
+            : query ? `No ${tab} match “${query}”.` : `No ${tab} found. Sync your Jellyfin library in Settings.`}
+        </p>
+      } render={(entries) => tab === "artists" ? <LibraryGroups items={artistItems(entries as LibraryArtist[])} mode={artistMode} />
+        : tab === "albums" ? <LibraryGroups items={albumItems(entries as LibraryAlbum[])} mode={albumMode} />
+          : <LibrarySongs tracks={entries as Track[]} mode={songMode} likedVideoIds={likedVideoIds}
+            playlists={playlists} onLikedChange={() => void refreshLikedTracks()} onPlaylistsChange={() => void loadPlaylists()} />
+      } />}
     <CreatePlaylistDialog visible={createOpen} defaultName={suggestedPlaylistName(playlists.length)}
       busy={createBusy} error={createError} onConfirm={createPlaylist}
       onCancel={() => { if (!createBusy) { setCreateOpen(false); setCreateError(null); } }} />

@@ -85,6 +85,7 @@ class PlaybackService : MediaSessionService() {
     private var activeItem: MediaItem? = null
     private var playSession = java.util.UUID.randomUUID().toString()
     private var activeDuration = 0L
+    private var lastNowPlayingMs = 0L
     private val handler = Handler(Looper.getMainLooper())
     private var preparedNext = emptyList<String>()
     private fun prepareUpcoming() {
@@ -153,7 +154,7 @@ class PlaybackService : MediaSessionService() {
         player.addListener(object : Player.Listener {
             override fun onMediaItemTransition(item: MediaItem?, reason: Int) {
                 recordProgress(activeItem)
-                listenedMs = 0; recordedMs = 0; lastTick = 0; activeDuration = 0
+                listenedMs = 0; recordedMs = 0; lastTick = 0; activeDuration = 0; lastNowPlayingMs = 0
                 activeItem = item; playSession = java.util.UUID.randomUUID().toString()
                 handler.post {
                     if (item != null && player.currentMediaItem?.let(PlaybackQueue::entry) != PlaybackQueue.entry(item)) return@post
@@ -171,14 +172,31 @@ class PlaybackService : MediaSessionService() {
                     if (player.playbackState == Player.STATE_ENDED) { recordProgress(); player.clearMediaItems() }
                 }
             }
-            override fun onIsPlayingChanged(isPlaying: Boolean) { if (!isPlaying) recordProgress(activeItem) }
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                if (!isPlaying) recordProgress(activeItem)
+                else {
+                    val now = android.os.SystemClock.elapsedRealtime()
+                    if (lastNowPlayingMs == 0L || now - lastNowPlayingMs >= 30_000) {
+                        lastNowPlayingMs = now
+                        val item = activeItem ?: return
+                        if (player.duration > 0) activeDuration = player.duration / 1000
+                        recordProgress(item, force = true)
+                        val body = JSONObject().put("video_id", item.mediaId)
+                            .put("title", item.mediaMetadata.title ?: "Unknown track")
+                            .put("artist", item.mediaMetadata.artist ?: "")
+                            .put("album", item.mediaMetadata.albumTitle ?: "")
+                            .put("duration_sec", if (player.duration > 0) player.duration / 1000 else JSONObject.NULL)
+                        scope.launch { runCatching { api.call("history/now-playing", "POST", body) } }
+                    }
+                }
+            }
         })
         handler.post(ticker)
     }
-    private fun recordProgress(item: MediaItem? = activeItem) {
+    private fun recordProgress(item: MediaItem? = activeItem, force: Boolean = false) {
         if (item == null) return
         val delta = (listenedMs - recordedMs) / 1000
-        if (delta <= 0) return
+        if (delta <= 0 && !force) return
         recordedMs = listenedMs
         val b = JSONObject().put("video_id", item.mediaId).put("title", item.mediaMetadata.title ?: "Unknown track")
             .put("artist", item.mediaMetadata.artist ?: "").put("listened_sec", listenedMs / 1000)

@@ -50,7 +50,7 @@ class LetterLibraryIntegrationTest {
         fun browser() = waitNode("letter browser") { it.className?.toString() == "androidx.recyclerview.widget.RecyclerView" }
         context.startActivity(Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
         clickDescription("Library"); clickText("Artists")
-        waitNode("letter index") { it.isClickable && it.contentDescription?.toString() == "Expand artists special characters" }
+        waitNode("letter index") { it.isClickable && it.contentDescription?.toString() == "Expand artists A" }
         assertNull("Artists must stay hidden until a group is expanded", find { it.text?.startsWith("Alpha ") == true })
         assertFalse("Collapsed groups must not load entry pages", requests().drop(baseline).any { "initial=" in it })
         clickText("A–Z · Jump to letter"); clickDescription("Jump to artists A")
@@ -77,7 +77,7 @@ class LetterLibraryIntegrationTest {
         pages = requests().drop(baseline).filter { "/artists?initial=A" in it }
         assertTrue(pages.any { "offset=40" in it }); assertTrue(pages.any { "offset=80" in it })
         clickDescription("Library"); clickText("Albums")
-        waitNode("album letters") { it.isClickable && it.contentDescription?.toString() == "Expand albums special characters" }
+        waitNode("album letters") { it.isClickable && it.contentDescription?.toString() == "Expand albums A" }
         val albumRequests = requests().drop(baseline).filter { "/albums?initial=" in it }
         assertTrue("Albums start collapsed too", albumRequests.isEmpty())
         clickText("A–Z · Jump to letter"); clickDescription("Jump to albums A")
@@ -109,5 +109,18 @@ class LetterLibraryIntegrationTest {
         // Picking immediately must apply the draft, even before the 300 ms debounce.
         clickText("A–Z · Jump to letter"); clickDescription("Jump to artists A")
         waitNode("immediate filtered jump") { it.text?.toString() == "Alpha 083" && it.className?.toString() == "android.widget.TextView" }
+        clickDescription("Library"); clickText("Songs")
+        waitNode("song letters") { it.isClickable && it.contentDescription?.toString() == "Expand songs A" }
+        val songBaseline = requests().size
+        assertNull(find { it.text?.toString() == "Letter fixture song" })
+        clickText("A–Z · Jump to letter"); clickDescription("Jump to songs L")
+        waitNode("first song page") { it.text?.toString() == "Letter fixture song" }
+        assertTrue(requests().drop(songBaseline).any { "/tracks?initial=L" in it && "offset=0" in it })
+        clickDescription("Collapse songs L")
+        assertNull(find { it.text?.toString() == "Letter fixture song" })
+        clickDescription("Expand songs L")
+        waitNode("cached song page") { it.text?.toString() == "Letter fixture song" }
+        assertEquals(1, requests().drop(songBaseline).count { "/tracks?initial=L" in it })
+
     }
 }

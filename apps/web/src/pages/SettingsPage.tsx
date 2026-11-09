@@ -430,6 +430,11 @@ export function SettingsPage() {
                       />
                       Scrobble plays for this profile
                     </label>
+                    <p className="m-0 text-sm text-text-secondary">
+                      {status.delivery?.last_success_at ? `Last accepted play: ${status.delivery.last_success_at} UTC.` : "No accepted plays reported yet."}
+                      {status.delivery?.pending_count ? ` ${status.delivery.pending_count} plays waiting to be sent.` : ""}
+                    </p>
+                    {status.delivery?.last_error ? <p role="alert" className="m-0 text-sm text-danger-fg">{status.delivery.last_error}</p> : null}
                     <Button variant="secondary" block onClick={() => void unlinkScrobbler(provider.id)}>
                       Unlink {provider.name}
                     </Button>

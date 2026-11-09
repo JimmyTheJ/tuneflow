@@ -15,9 +15,9 @@ class LibraryLettersTest {
         for (value in listOf("!Artist", "_Album", "Édith", "東京", "Kelvin", "", "   "))
             assertEquals(value, "#", LibraryLetters.initial(value))
     }
-    @Test fun indexStartsWithSpecialThenDigitsThenAlphabet() {
+    @Test fun indexStartsWithAlphabetThenDigitsThenSpecial() {
         assertEquals(37, LibraryLetters.keys.size)
-        assertEquals(listOf("#", "0", "1"), LibraryLetters.keys.take(3))
-        assertEquals(listOf("X", "Y", "Z"), LibraryLetters.keys.takeLast(3))
+        assertEquals(listOf("A", "B", "C"), LibraryLetters.keys.take(3))
+        assertEquals(listOf("8", "9", "#"), LibraryLetters.keys.takeLast(3))
     }
 }

@@ -30,7 +30,7 @@ pub fn track_from_row(s: &Shared, u: &Value, r: &Value) -> Result<Value> {
         json!({"id":format!("jellyfin:{}",text(r,"item_id")),"video_id":vid,"source":"jellyfin","title":r["title"],"artist":r["artist"],"album":r["album"],"album_id":album_id,"album_artist":r["album_artist"],"disc_number":r["disc_number"],"track_number":r["track_number"],"duration_sec":r["duration_sec"],"explicit":r["explicit"],"recording_mbid":r["recording_mbid"],"thumbnail_url":format!("/api/library/images/{vid}?token={ticket}"),"mime_type":match text(r,"container"){"flac"=>"audio/flac","mp3"=>"audio/mpeg","m4a"|"mp4"=>"audio/mp4","ogg"|"opus"=>"audio/ogg","wav"=>"audio/wav",_=>"application/octet-stream"}}),
     )
 }
-async fn tracks(s: &Shared, u: &Value, q: &Params) -> Result<Vec<Value>> {
+fn track_selection(u: &Value, q: &Params) -> Result<(String, Vec<Value>)> {
     let query = q.get("q").map(|v| v.trim()).unwrap_or("");
     let terms = query
         .split_whitespace()
@@ -66,7 +66,53 @@ async fn tracks(s: &Shared, u: &Value, q: &Params) -> Result<Vec<Value>> {
         sql.push_str(&format!(" AND instr(lower('/' || replace(replace({artist_name}, ' / ', '/'), '/ ', '/') || '/'), lower('/' || ? || '/'))>0"));
         args.push(json!(artist));
     }
-    sql.push_str(&format!(" ORDER BY {artist_name} COLLATE NOCASE,album COLLATE NOCASE,COALESCE(disc_number,1),COALESCE(track_number,1000000),title COLLATE NOCASE LIMIT ? OFFSET ?"));
+    Ok((sql, args))
+}
+fn initial_bucket(name: &str) -> String {
+    let first = format!("substr(upper(trim({name})),1,1)");
+    format!(
+        "CASE WHEN {first} BETWEEN 'A' AND 'Z' OR {first} BETWEEN '0' AND '9' THEN {first} ELSE '#' END"
+    )
+}
+fn initial_order() -> &'static str {
+    "CASE WHEN initial BETWEEN 'A' AND 'Z' THEN 0 WHEN initial BETWEEN '0' AND '9' THEN 1 ELSE 2 END,initial"
+}
+fn apply_initial(
+    sql: &mut String,
+    args: &mut Vec<Value>,
+    q: &Params,
+    bucket: &str,
+    join: &str,
+) -> Result<()> {
+    if let Some(initial) = q.get("initial") {
+        let initial = initial.to_ascii_uppercase();
+        if initial.len() != 1
+            || !initial
+                .bytes()
+                .all(|c| c.is_ascii_alphanumeric() || c == b'#')
+        {
+            return Err(ApiError::bad("Initial must be A–Z, 0–9 or #"));
+        }
+        sql.push_str(&format!(" {join} {bucket}=?"));
+        args.push(json!(initial));
+    }
+    Ok(())
+}
+async fn track_index(s: &Shared, u: &Value, q: &Params) -> Result<Value> {
+    let (sql, args) = track_selection(u, q)?;
+    let bucket = initial_bucket("title");
+    let rows = db::all(&s.db, &format!("SELECT {bucket} AS initial,count(*) AS count FROM ({sql}) GROUP BY initial ORDER BY {}", initial_order()), args).await?;
+    Ok(json!({"grouping":"initial","groups":rows}))
+}
+async fn tracks(s: &Shared, u: &Value, q: &Params) -> Result<Vec<Value>> {
+    let (mut sql, mut args) = track_selection(u, q)?;
+    apply_initial(&mut sql, &mut args, q, &initial_bucket("title"), "AND")?;
+    let artist_name = "COALESCE(NULLIF(album_artist,''),NULLIF(artist,''),'Unknown artist')";
+    if q.contains_key("initial") {
+        sql.push_str(" ORDER BY title COLLATE NOCASE,artist COLLATE NOCASE,album COLLATE NOCASE,item_id LIMIT ? OFFSET ?");
+    } else {
+        sql.push_str(&format!(" ORDER BY {artist_name} COLLATE NOCASE,album COLLATE NOCASE,COALESCE(disc_number,1),COALESCE(track_number,1000000),title COLLATE NOCASE,item_id LIMIT ? OFFSET ?"));
+    }
     args.extend([
         json!(number(q, "limit", 100, 1, 500)),
         json!(number(q, "offset", 0, 0, 1_000_000)),
@@ -120,28 +166,14 @@ async fn groups(s: &Shared, u: &Value, q: &Params, albums: bool) -> Result<Value
     });
     // Filter the grouped display name, not a track title or an album's artist.
     let display_name = if albums { "title" } else { "name" };
-    let first = format!("substr(upper(trim({display_name})),1,1)");
-    let bucket = format!(
-        "CASE WHEN {first} BETWEEN 'A' AND 'Z' OR {first} BETWEEN '0' AND '9' THEN {first} ELSE '#' END"
-    );
+    let bucket = initial_bucket(display_name);
     let grouped = format!("SELECT * FROM ({sql}) AS library_groups");
     if q.get("group_by").is_some_and(|value| value == "initial") {
-        let counts = db::all(&s.db, &format!("SELECT {bucket} AS initial,count(*) AS count FROM ({grouped}) GROUP BY initial ORDER BY initial"), args).await?;
+        let counts = db::all(&s.db, &format!("SELECT {bucket} AS initial,count(*) AS count FROM ({grouped}) GROUP BY initial ORDER BY {}", initial_order()), args).await?;
         return Ok(json!({"grouping":"initial","groups":counts}));
     }
     sql = grouped;
-    if let Some(initial) = q.get("initial") {
-        let initial = initial.to_ascii_uppercase();
-        if initial.len() != 1
-            || !initial
-                .bytes()
-                .all(|c| c.is_ascii_alphanumeric() || c == b'#')
-        {
-            return Err(ApiError::bad("Initial must be A–Z, 0–9 or #"));
-        }
-        sql.push_str(&format!(" WHERE {bucket}=?"));
-        args.push(json!(initial));
-    }
+    apply_initial(&mut sql, &mut args, q, &bucket, "WHERE")?;
     sql.push_str(if albums && q.contains_key("initial") {
         " ORDER BY title COLLATE NOCASE,artist COLLATE NOCASE,id"
     } else if albums {
@@ -201,7 +233,11 @@ pub async fn handle(
         }
         ("GET", "library/tracks") => {
             auth::enforce(s, u, None, false).await?;
-            json!(tracks(s, u, q).await?)
+            if q.get("group_by").is_some_and(|v| v == "initial") {
+                track_index(s, u, q).await?
+            } else {
+                json!(tracks(s, u, q).await?)
+            }
         }
         ("GET", "library/albums") => {
             auth::enforce(s, u, None, false).await?;

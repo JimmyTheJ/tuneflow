@@ -280,3 +280,17 @@ CREATE TABLE IF NOT EXISTS listening_sessions (
  history_id INTEGER NOT NULL REFERENCES play_history(id) ON DELETE CASCADE,
  UNIQUE(user_id,session_id)
 );
+
+-- Durable, per-provider submissions: progress heartbeats never submit a play twice.
+CREATE TABLE IF NOT EXISTS scrobble_deliveries (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ history_id INTEGER NOT NULL REFERENCES play_history(id) ON DELETE CASCADE,
+ connection_id INTEGER NOT NULL REFERENCES scrobbler_connections(id) ON DELETE CASCADE,
+ status TEXT NOT NULL DEFAULT 'pending',
+ attempts INTEGER NOT NULL DEFAULT 0,
+ next_attempt INTEGER NOT NULL DEFAULT 0,
+ last_error TEXT,
+ sent_at TEXT,
+ UNIQUE(history_id,connection_id)
+);
+CREATE INDEX IF NOT EXISTS idx_scrobble_pending ON scrobble_deliveries(status,next_attempt);

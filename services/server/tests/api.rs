@@ -631,3 +631,90 @@ async fn spotify_import_matching_is_scoped_and_progress_and_manual_corrections_a
     let (_, providers) = request(&app, "GET", "/api/imports/providers", &token, json!({})).await;
     assert_eq!(providers["spotify"], true);
 }
+
+#[tokio::test]
+async fn scrobble_queue_is_cumulative_scoped_and_once_per_play_and_provider() {
+    let (_dir, s, app) = test_app().await;
+    let root = setup(&app).await;
+    // No real credentials or external submissions: unconfigured providers retain retryable work.
+    db::exec(&s.db,"INSERT INTO scrobbler_connections(user_id,provider,username,session_key) VALUES(1,'lastfm','test','not-a-real-session')",vec![]).await.unwrap();
+    let mut body = json!({"video_id":"abcdefghijk","title":"Song","artist":"Artist","session_id":"web-play-1","listened_sec":0,"duration_sec":200});
+    let (status, first) = request(&app, "POST", "/api/history", &root, body.clone()).await;
+    assert_eq!(status, 200);
+    body["listened_sec"] = json!(99);
+    request(&app, "POST", "/api/history", &root, body.clone()).await;
+    assert!(
+        db::all(&s.db, "SELECT * FROM scrobble_deliveries", vec![])
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    body["listened_sec"] = json!(100);
+    request(&app, "POST", "/api/history", &root, body.clone()).await;
+    body["listened_sec"] = json!(150);
+    request(&app, "POST", "/api/history", &root, body.clone()).await;
+    body["listened_sec"] = json!(30);
+    let (_, older) = request(&app, "POST", "/api/history", &root, body.clone()).await;
+    assert_eq!(older["listened_sec"], 150);
+    let rows = db::all(&s.db, "SELECT * FROM scrobble_deliveries", vec![])
+        .await
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["history_id"], first["id"]);
+    let (_, status) = request(&app, "GET", "/api/scrobbler/lastfm", &root, json!({})).await;
+    assert!(status.get("session_key").is_none());
+    assert_eq!(status["delivery"]["pending_count"], 1);
+    body["session_id"] = json!("web-repeat-2");
+    body["listened_sec"] = json!(100);
+    request(&app, "POST", "/api/history", &root, body.clone()).await;
+    assert_eq!(
+        db::all(&s.db, "SELECT * FROM scrobble_deliveries", vec![])
+            .await
+            .unwrap()
+            .len(),
+        2
+    );
+    body["session_id"] = json!("short");
+    body["duration_sec"] = json!(30);
+    body["listened_sec"] = json!(30);
+    request(&app, "POST", "/api/history", &root, body.clone()).await;
+    assert_eq!(
+        db::all(&s.db, "SELECT * FROM scrobble_deliveries", vec![])
+            .await
+            .unwrap()
+            .len(),
+        2
+    );
+    body["session_id"] = json!("unknown");
+    body["duration_sec"] = Value::Null;
+    body["listened_sec"] = json!(40);
+    let (_, unknown) = request(&app, "POST", "/api/history", &root, body.clone()).await;
+    assert_eq!(
+        db::all(&s.db, "SELECT * FROM scrobble_deliveries", vec![])
+            .await
+            .unwrap()
+            .len(),
+        2
+    );
+    // Metadata arriving after playback starts can make this same play eligible.
+    body["duration_sec"] = json!(70);
+    let (_, known) = request(&app, "POST", "/api/history", &root, body.clone()).await;
+    assert_eq!(known["id"], unknown["id"]);
+    assert_eq!(known["duration_sec"], 70);
+    assert_eq!(
+        db::all(&s.db, "SELECT * FROM scrobble_deliveries", vec![])
+            .await
+            .unwrap()
+            .len(),
+        3
+    );
+    let (_, now) = request(
+        &app,
+        "POST",
+        "/api/history/now-playing",
+        &root,
+        json!({"video_id":"abcdefghijk","title":"Song","artist":""}),
+    )
+    .await;
+    assert_eq!(now["status"], "missing_artist");
+}

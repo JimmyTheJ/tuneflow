@@ -62,5 +62,17 @@ class PlaybackIntegrationTest {
         instrumentation.runOnMainSync { player.seekToNextMediaItem() }
         waitFor("Queue should advance") { player.currentMediaItem?.mediaId == items[1].mediaId && player.currentMediaItemIndex == 0 && player.isPlaying && player.currentPosition > 500 }
         instrumentation.runOnMainSync { player.stop(); player.clearMediaItems(); player.release(); MediaController.releaseFuture(future) }
+        val deadline = System.currentTimeMillis() + 8000
+        var reported = false
+        while (System.currentTimeMillis() < deadline && !reported) {
+            val history = api.array("history")
+            reported = (0 until history.length()).any { index ->
+                val row = history.getJSONObject(index)
+                row.optString("video_id") == items[0].mediaId && row.optInt("listened_sec") >= 1
+            }
+            if (!reported) Thread.sleep(100)
+        }
+        assertTrue("Native playback reports actual listening time", reported)
+
     }
 }
