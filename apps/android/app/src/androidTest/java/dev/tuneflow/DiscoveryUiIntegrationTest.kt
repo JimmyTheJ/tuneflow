@@ -50,7 +50,9 @@ class DiscoveryUiIntegrationTest {
                 find(predicate)?.let { return it }
                 Thread.sleep(100)
             }
-            error("Could not find $description")
+            fun describe(node: AccessibilityNodeInfo?): String = if (node == null) "null" else
+                "${node.packageName}:${node.text}:${node.contentDescription} " + (0 until node.childCount).joinToString(" ") { describe(node.getChild(it)) }
+            error("Could not find $description; ${describe(ui.rootInActiveWindow).take(2500)}")
         }
         fun clickDescription(value: String) { assertTrue(value, waitNode(value) { it.isVisibleToUser && it.isClickable && it.contentDescription?.toString() == value }.performAction(AccessibilityNodeInfo.ACTION_CLICK)); Thread.sleep(200) }
         fun clickText(value: String) { assertTrue(value, waitNode(value) { it.isVisibleToUser && it.isClickable && it.text?.toString() == value }.performAction(AccessibilityNodeInfo.ACTION_CLICK)); Thread.sleep(200) }

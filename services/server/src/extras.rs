@@ -525,9 +525,7 @@ async fn ai(s: &Shared, u: &Value, path: &str, q: &Params) -> Result<Value> {
 }
 async fn imports(s: &Shared, u: &Value, path: &str, m: &Method, b: Value) -> Result<Value> {
     if path == "imports/providers" {
-        return Ok(
-            json!({"youtube":true,"spotify":std::env::var("SPOTIFY_CLIENT_ID").is_ok()&&std::env::var("SPOTIFY_CLIENT_SECRET").is_ok()}),
-        );
+        return Ok(json!({"youtube":true,"spotify":true}));
     }
     if path == "imports" && m == Method::GET {
         return Ok(json!(
@@ -543,6 +541,18 @@ async fn imports(s: &Shared, u: &Value, path: &str, m: &Method, b: Value) -> Res
         let provider = required(&b, "provider", 20)?;
         if !["youtube", "spotify"].contains(&provider.as_str()) {
             return Err(ApiError::bad("Unknown import provider"));
+        }
+        auth::budget(s, format!("playlist-import:{}", id(u)), 20).await?;
+        let active = db::one(
+            &s.db,
+            "SELECT count(*) n FROM import_jobs WHERE user_id=? AND status IN ('queued','running')",
+            vec![json!(id(u))],
+        )
+        .await?;
+        if active["n"].as_i64().unwrap_or(0) >= 2 {
+            return Err(ApiError::bad(
+                "An import is already running. Wait for it to finish.",
+            ));
         }
         let source = required(&b, "url", 2000)?;
         let url = url::Url::parse(&source).map_err(|_| ApiError::bad("Invalid playlist URL"))?;
@@ -562,16 +572,13 @@ async fn imports(s: &Shared, u: &Value, path: &str, m: &Method, b: Value) -> Res
                 .map(|(_, v)| v.to_string())
                 .ok_or_else(|| ApiError::bad("Playlist ID is missing"))?
         } else {
-            if url.host_str() != Some("open.spotify.com") {
-                return Err(ApiError::bad("Use a Spotify playlist URL"));
+            if !crate::spotify::valid_link(&source) {
+                return Err(ApiError::bad("Use a Spotify playlist link"));
             }
-            url.path()
-                .strip_prefix("/playlist/")
-                .filter(|v| v.bytes().all(|c| c.is_ascii_alphanumeric()))
-                .ok_or_else(|| ApiError::bad("Invalid Spotify playlist"))?
-                .to_string()
+            crate::spotify::playlist_id(&source).unwrap_or_default()
         };
-        let jid=db::exec(&s.db,"INSERT INTO import_jobs(user_id,provider,status,source_url,source_external_id,requested_name,visibility,progress_done,progress_total,options_json) VALUES(?,?,'queued',?,?,?,?,0,0,'{}')",vec![json!(id(u)),json!(provider),json!(source),json!(external),b["name"].clone(),json!(b["visibility"].as_str().filter(|v|["private","household"].contains(v)).unwrap_or("private"))]).await?;
+        let options = json!({"youtube_fallback":b["youtube_fallback"].as_bool().unwrap_or(true)});
+        let jid=db::exec(&s.db,"INSERT INTO import_jobs(user_id,provider,status,source_url,source_external_id,requested_name,visibility,progress_done,progress_total,options_json) VALUES(?,?,'queued',?,?,?,?,0,0,?)",vec![json!(id(u)),json!(provider),json!(source),json!(external),b["name"].clone(),json!(b["visibility"].as_str().filter(|v|["private","household"].contains(v)).unwrap_or("private")),json!(options.to_string())]).await?;
         let s2 = s.clone();
         let u2 = u.clone();
         tokio::spawn(async move {
@@ -639,70 +646,38 @@ async fn run_import(s: &Shared, u: &Value, jid: i64) -> Result<()> {
             .map(|a| a.iter().filter_map(media::track).collect())
             .unwrap_or_default();
     } else {
-        let cid = std::env::var("SPOTIFY_CLIENT_ID")
-            .map_err(|_| ApiError::bad("Spotify import is not configured"))?;
-        let secret = std::env::var("SPOTIFY_CLIENT_SECRET").unwrap_or_default();
-        let token: Value = s
-            .http
-            .post("https://accounts.spotify.com/api/token")
-            .basic_auth(cid, Some(secret))
-            .form(&[("grant_type", "client_credentials")])
-            .send()
-            .await?
-            .error_for_status()?
-            .json()
-            .await?;
-        let pid = text(&job, "source_external_id");
-        let p: Value = s
-            .http
-            .get(format!("https://api.spotify.com/v1/playlists/{pid}"))
-            .bearer_auth(text(&token, "access_token"))
-            .send()
-            .await?
-            .error_for_status()?
-            .json()
-            .await?;
+        let playlist = crate::spotify::fetch(s, text(&job, "source_url")).await?;
         if name.is_empty() {
-            name = text(&p, "name").to_string();
+            name = playlist.name;
         }
-        let mut page = p["tracks"].clone();
-        loop {
-            for item in page["items"].as_array().into_iter().flatten() {
-                let t = &item["track"];
-                if t.is_null() {
-                    continue;
-                }
-                let artist = t["artists"][0]["name"].as_str().unwrap_or("");
-                let title = text(t, "name");
-                let local=db::optional(&s.db,"SELECT * FROM library_tracks WHERE user_id=? AND lower(title)=lower(?) AND lower(artist)=lower(?) LIMIT 1",vec![json!(id(u)),json!(title),json!(artist)]).await?;
-                tracks.push(if let Some(local)=local{crate::library::track_from_row(s,u,&local)?}else{json!({"video_id":null,"title":title,"artist":artist,"duration_sec":t["duration_ms"].as_i64().map(|v|v/1000),"source_spotify_id":t["id"]})});
-            }
-            if tracks.len() > 5000 {
-                return Err(ApiError::bad("Playlist exceeds 5000 tracks"));
-            }
-            let Some(next) = page["next"].as_str() else {
-                break;
-            };
-            if !next.starts_with("https://api.spotify.com/") {
-                return Err(ApiError::upstream("Invalid Spotify pagination"));
-            }
-            page = s
-                .http
-                .get(next)
-                .bearer_auth(text(&token, "access_token"))
-                .send()
-                .await?
-                .error_for_status()?
-                .json()
-                .await?;
-        }
+        let options: Value = serde_json::from_str(text(&job, "options_json")).unwrap_or(json!({}));
+        tracks = crate::spotify::match_tracks(
+            s,
+            u,
+            jid,
+            playlist.tracks,
+            options["youtube_fallback"] != false,
+        )
+        .await?;
     }
     let mut tx = s.db.begin().await?;
     let pid=sqlx::query("INSERT INTO playlists(user_id,name,visibility,source_type,source_url,import_job_id) VALUES(?,?,?,?,?,?)").bind(id(u)).bind(if name.is_empty(){"Imported playlist"}else{&name}).bind(text(&job,"visibility")).bind(text(&job,"provider")).bind(text(&job,"source_url")).bind(jid).execute(&mut *tx).await?.last_insert_rowid();
     for (i, t) in tracks.iter().enumerate() {
-        sqlx::query("INSERT INTO playlist_tracks(playlist_id,video_id,title,artist,thumbnail_url,duration_sec,position,match_status,source_spotify_id,added_by_user_id) VALUES(?,?,?,?,?,?,?,?,?,?)").bind(pid).bind(t["video_id"].as_str()).bind(text(t,"title")).bind(t["artist"].as_str()).bind(t["thumbnail_url"].as_str()).bind(t["duration_sec"].as_i64()).bind(i as i64).bind(if t["video_id"].is_null(){"unmatched"}else{"matched"}).bind(t["source_spotify_id"].as_str()).bind(id(u)).execute(&mut *tx).await?;
+        sqlx::query("INSERT INTO playlist_tracks(playlist_id,video_id,title,artist,thumbnail_url,duration_sec,position,match_status,source_spotify_id,added_by_user_id,source_title,source_artist,source_duration_ms) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)").bind(pid).bind(t["video_id"].as_str()).bind(text(t,"title")).bind(t["artist"].as_str()).bind(t["thumbnail_url"].as_str()).bind(t["duration_sec"].as_i64()).bind(i as i64).bind(if t["video_id"].is_null(){"unmatched"}else{"matched"}).bind(t["source_spotify_id"].as_str()).bind(id(u)).bind(t["source_title"].as_str()).bind(t["source_artist"].as_str()).bind(t["source_duration_ms"].as_i64()).execute(&mut *tx).await?;
     }
-    sqlx::query("UPDATE import_jobs SET status='completed',result_playlist_id=?,progress_done=?,progress_total=?,message='Import complete',finished_at=CURRENT_TIMESTAMP WHERE id=?").bind(pid).bind(tracks.len() as i64).bind(tracks.len() as i64).bind(jid).execute(&mut *tx).await?;
+    let matched = tracks.iter().filter(|t| !t["video_id"].is_null()).count();
+    let message = if job["provider"] == "spotify" {
+        format!(
+            "{} tracks · {} matched · {} unmatched. {}",
+            tracks.len(),
+            matched,
+            tracks.len() - matched,
+            crate::spotify::PUBLIC_NOTICE
+        )
+    } else {
+        "Import complete".into()
+    };
+    sqlx::query("UPDATE import_jobs SET status='completed',result_playlist_id=?,progress_done=?,progress_total=?,message=?,finished_at=CURRENT_TIMESTAMP WHERE id=?").bind(pid).bind(tracks.len() as i64).bind(tracks.len() as i64).bind(message).bind(jid).execute(&mut *tx).await?;
     tx.commit().await?;
     Ok(())
 }

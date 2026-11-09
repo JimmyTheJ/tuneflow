@@ -508,3 +508,126 @@ async fn family_playlist_management_and_track_attribution() {
         204
     );
 }
+
+#[tokio::test]
+async fn spotify_import_matching_is_scoped_and_progress_and_manual_corrections_are_preserved() {
+    let (_d, s, app) = test_app().await;
+    let token = setup(&app).await;
+    let u = tuneflow_server::auth::user(&s, 1).await.unwrap();
+    let jid = db::exec(&s.db,"INSERT INTO import_jobs(user_id,provider,status,visibility) VALUES(1,'spotify','running','private')",vec![]).await.unwrap();
+    db::exec(&s.db,"INSERT INTO library_tracks(user_id,item_id,title,artist,duration_sec,generation) VALUES(1,'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','Local Song','Artist',180,'test')",vec![]).await.unwrap();
+    let source = |title: &str| json!({"video_id":null,"title":title,"artist":"Artist","duration_sec":180,"source_spotify_id":"abcdefghijkl0123456789","source_title":title,"source_artist":"Artist","source_duration_ms":180000});
+    s.searches.insert("youtube:artist missing song:5".into(),json!({"entries":[{"id":"abcdefghijk","title":"Artist - Missing Song (Official Audio)","artist":"Artist","duration":180}]})).await;
+    s.searches.insert("youtube:artist uncertain song:5".into(),json!({"entries":[{"id":"abcdefghijk","title":"Other Artist - Uncertain Song cover","artist":"Other Artist","duration":180}]})).await;
+    let tracks = tuneflow_server::spotify::match_tracks(
+        &s,
+        &u,
+        jid,
+        vec![
+            source("Local Song"),
+            source("Missing Song"),
+            source("Uncertain Song"),
+            source("Missing Song"),
+        ],
+        true,
+    )
+    .await
+    .unwrap();
+    assert_eq!(tracks.len(), 4);
+    assert_eq!(tracks[0]["video_id"], "jf_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    assert_eq!(tracks[1]["video_id"], "abcdefghijk");
+    assert_eq!(tracks[1], tracks[3]);
+    assert!(tracks[2]["video_id"].is_null());
+    assert_eq!(tracks[1]["source_spotify_id"], "abcdefghijkl0123456789");
+    assert_eq!(tracks[1]["source_duration_ms"], 180000);
+    let (_, job) = request(
+        &app,
+        "GET",
+        &format!("/api/imports/{jid}"),
+        &token,
+        json!({}),
+    )
+    .await;
+    assert_eq!(job["progress_done"], 4);
+    assert_eq!(job["progress_total"], 4);
+    let outside = household(&app, &token, "spotify-outside").await;
+    assert_eq!(
+        request(
+            &app,
+            "GET",
+            &format!("/api/imports/{jid}"),
+            &outside,
+            json!({})
+        )
+        .await
+        .0,
+        404
+    );
+    let (_, playlist) = request(
+        &app,
+        "POST",
+        "/api/playlists",
+        &token,
+        json!({"name":"Imported"}),
+    )
+    .await;
+    let pid = playlist["id"].as_i64().unwrap();
+    let tid = db::exec(&s.db,"INSERT INTO playlist_tracks(playlist_id,title,artist,source_spotify_id,match_status,added_by_user_id) VALUES(?,'Uncertain Song','Artist','abcdefghijkl0123456789','unmatched',1)",vec![json!(pid)]).await.unwrap();
+    let path = format!("/api/playlists/{pid}/tracks/{tid}");
+    assert_eq!(
+        request(
+            &app,
+            "PATCH",
+            &path,
+            &outside,
+            json!({"video_id":"abcdefghijk","title":"A match"})
+        )
+        .await
+        .0,
+        403
+    );
+    let (status, corrected) = request(
+        &app,
+        "PATCH",
+        &path,
+        &token,
+        json!({"video_id":"abcdefghijk","title":"Chosen recording","duration_sec":181}),
+    )
+    .await;
+    assert_eq!(status, 200);
+    assert_eq!(corrected["video_id"], "abcdefghijk");
+    assert_eq!(corrected["title"], "Uncertain Song");
+    assert_eq!(corrected["source_spotify_id"], "abcdefghijkl0123456789");
+    assert_eq!(corrected["added_by_user_id"], 1);
+    assert_eq!(corrected["match_status"], "matched");
+    let foreign_user = tuneflow_server::auth::user(&s, 2).await.unwrap();
+    let foreign_tracks = tuneflow_server::spotify::match_tracks(
+        &s,
+        &foreign_user,
+        jid,
+        vec![source("Local Song")],
+        false,
+    )
+    .await
+    .unwrap();
+    assert!(foreign_tracks[0]["video_id"].is_null());
+    for url in [
+        "https://open.spotify.com/track/abcdefghijkl0123456789",
+        "https://evil.test/playlist/abcdefghijkl0123456789",
+    ] {
+        assert_eq!(
+            request(
+                &app,
+                "POST",
+                "/api/imports",
+                &token,
+                json!({"provider":"spotify","url":url})
+            )
+            .await
+            .0,
+            400
+        );
+    }
+    let (_, providers) = request(&app, "GET", "/api/imports/providers", &token, json!({})).await;
+    assert_eq!(providers["spotify"], true);
+}

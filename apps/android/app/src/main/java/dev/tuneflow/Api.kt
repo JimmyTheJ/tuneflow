@@ -15,12 +15,12 @@ data class Track(val id: String, val title: String, val artist: String, val dura
                  val album: String = "", val albumId: String = "", val albumArtist: String = "", val discNumber: Int? = null, val trackNumber: Int? = null,
                  val sourceTitle: String = "", val uploader: String = "", val channelId: String = "",
                  val playlistId: Long = 0, val playlistTrackId: Long = 0, val canManagePlaylist: Boolean = false,
-                 val addedBy: String = "", val addedAt: String = "") {
+                 val addedBy: String = "", val addedAt: String = "", val spotifyId: String = "") {
     fun json() = JSONObject().put("video_id", id).put("title", title).put("artist", artist)
         .put("duration_sec", duration).put("thumbnail_url", artwork).put("album", album).put("album_id", albumId)
         .put("album_artist", albumArtist).put("disc_number", discNumber).put("track_number", trackNumber)
         .put("playlist_id", playlistId).put("playlist_track_id", playlistTrackId).put("can_manage_playlist", canManagePlaylist)
-        .put("added_by_display_name", addedBy).put("added_at", addedAt).put("source_title", sourceTitle).put("uploader", uploader).put("channel_id", channelId).put("blocked_reason", blocked)
+        .put("source_spotify_id", spotifyId).put("added_by_display_name", addedBy).put("added_at", addedAt).put("source_title", sourceTitle).put("uploader", uploader).put("channel_id", channelId).put("blocked_reason", blocked)
     companion object {
         fun from(v: JSONObject) = Track(v.optString("video_id"), v.optString("title", "Unknown track"),
             v.optString("artist", "").takeUnless { it == "null" } ?: "", v.optLong("duration_sec", 0),
@@ -35,7 +35,8 @@ data class Track(val id: String, val title: String, val artist: String, val dura
             v.optString("uploader", "").takeUnless { it == "null" } ?: "",
             v.optString("channel_id", "").takeUnless { it == "null" } ?: "",
             v.optLong("playlist_id"), v.optLong("playlist_track_id", v.optLong("id")), v.optBoolean("can_manage_playlist"),
-            v.optString("added_by_display_name", "").takeUnless { it == "null" } ?: "", v.optString("added_at", "").takeUnless { it == "null" } ?: "")
+            v.optString("added_by_display_name", "").takeUnless { it == "null" } ?: "", v.optString("added_at", "").takeUnless { it == "null" } ?: "",
+            v.optString("source_spotify_id", "").takeUnless { it == "null" } ?: "")
     }
 }
 class ApiException(val status: Int, message: String) : IOException(message)

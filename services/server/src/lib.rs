@@ -8,6 +8,7 @@ pub mod library;
 pub mod management;
 pub mod media;
 pub mod search;
+pub mod spotify;
 
 use crate::error::{ApiError, Result};
 use axum::{
@@ -101,6 +102,7 @@ impl App {
         db::init(&db)
             .await
             .map_err(|e| anyhow::anyhow!("{}", e.1))?;
+        db::exec(&db,"UPDATE import_jobs SET status='failed',error='Server restarted before the import finished. Import the link again.',finished_at=CURRENT_TIMESTAMP WHERE status IN ('queued','running')",vec![]).await.map_err(|e| anyhow::anyhow!("{}",e.1))?;
         Ok(Arc::new(Self {
             db,
             http: reqwest::Client::builder()

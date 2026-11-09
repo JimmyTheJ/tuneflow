@@ -20,6 +20,7 @@ export function ImportPlaylistWizard({ visible, onClose }: Props) {
   const [url, setUrl] = useState("");
   const [name, setName] = useState("");
   const [visibility, setVisibility] = useState<PlaylistVisibility>("private");
+  const [youtubeFallback, setYoutubeFallback] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [job, setJob] = useState<ImportJob | null>(null);
@@ -54,8 +55,7 @@ export function ImportPlaylistWizard({ visible, onClose }: Props) {
         .then((next) => {
           setJob(next);
           if (next.status === "completed" && next.result_playlist_id) {
-            onClose();
-            navigate(`/playlist/${next.result_playlist_id}`);
+            setBusy(false);
           }
           if (next.status === "failed") {
             setBusy(false);
@@ -85,11 +85,11 @@ export function ImportPlaylistWizard({ visible, onClose }: Props) {
         url: url.trim(),
         name: name.trim() || undefined,
         visibility,
+        youtube_fallback: youtubeFallback,
       });
       setJob(created);
       if (created.status === "completed" && created.result_playlist_id) {
-        onClose();
-        navigate(`/playlist/${created.result_playlist_id}`);
+        setBusy(false);
       }
       if (created.status === "failed") {
         setBusy(false);
@@ -117,8 +117,7 @@ export function ImportPlaylistWizard({ visible, onClose }: Props) {
       >
         <h3 className="m-0 text-xl font-bold tracking-tight">Import playlist</h3>
         <p className="mt-2 mb-0 text-sm text-text-secondary">
-          Paste a YouTube or Spotify playlist URL. Spotify tracks are matched to YouTube
-          automatically.
+          Paste a public YouTube or Spotify playlist link. Spotify songs match your Jellyfin library first; uncertain matches stay unmatched.
         </p>
 
         <div className="mt-4 flex gap-2">
@@ -139,7 +138,7 @@ export function ImportPlaylistWizard({ visible, onClose }: Props) {
             className="flex-1"
             disabled={busy || !spotifyReady}
             onClick={() => setProvider("spotify")}
-            title={spotifyReady ? undefined : "Set SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET on the server"}
+            title={spotifyReady ? undefined : "Spotify import is unavailable on this server"}
           >
             Spotify{spotifyReady ? "" : " (not configured)"}
           </Button>
@@ -188,6 +187,11 @@ export function ImportPlaylistWizard({ visible, onClose }: Props) {
           </div>
         </div>
 
+        {provider === "spotify" ? <div className="mt-3 text-sm text-text-secondary">
+          <label><input type="checkbox" checked={youtubeFallback} disabled={busy} onChange={e => setYoutubeFallback(e.target.checked)} /> Match missing songs on YouTube</label>
+          <p>Spotify's public view may omit tracks, especially in long playlists. Compare the imported count with the original.</p>
+        </div> : null}
+        {job?.status === "completed" ? <p className="mt-4 text-sm" role="status">{job.message}</p> : null}
         {job && (job.status === "queued" || job.status === "running") ? (
           <p className="mt-4 text-sm text-accent" role="status" aria-live="polite">
             {job.message || "Importing…"} {progressLabel}
@@ -200,9 +204,10 @@ export function ImportPlaylistWizard({ visible, onClose }: Props) {
           <Button variant="secondary" className="flex-1" onClick={onClose} disabled={busy}>
             Cancel
           </Button>
+          {job?.status === "completed" && job.result_playlist_id ? <Button className="flex-1" onClick={() => { onClose(); navigate(`/playlist/${job.result_playlist_id}`); }}>Open imported playlist</Button> :
           <Button className="flex-1" onClick={() => void startImport()} disabled={!canSubmit}>
             {busy ? "Importing…" : "Start import"}
-          </Button>
+          </Button>}
         </div>
       </div>
     </div>

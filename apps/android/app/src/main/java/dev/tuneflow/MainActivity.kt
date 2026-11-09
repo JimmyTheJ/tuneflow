@@ -62,6 +62,7 @@ class MainActivity : Activity() {
     private var sheetDuration: TextView? = null
     private var navigationEnabled = false
     private var playGeneration = 0L
+    private var sharedSpotifyLink: String? = null
     private var tab = "Home"
     private var pageOffset = 0
     private var backAction: (() -> Unit)? = null
@@ -82,6 +83,7 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         session = Session(this); api = Api(session)
+        readSharedPlaylist(intent)
         window.decorView.setOnApplyWindowInsetsListener { view, insets ->
             if (Build.VERSION.SDK_INT >= 30) {
                 val bars = insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.ime())
@@ -99,6 +101,22 @@ class MainActivity : Activity() {
             OnBackInvokedDispatcher.PRIORITY_DEFAULT, OnBackInvokedCallback { navigateBack() })
         if (session.token.isEmpty()) loginScreen() else restore()
         tick.post(pulse)
+    }
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent); setIntent(intent); readSharedPlaylist(intent)
+        if (navigationEnabled) offerSharedPlaylist()
+    }
+    private fun readSharedPlaylist(intent: android.content.Intent) {
+        if (intent.action == android.content.Intent.ACTION_SEND) {
+            val text = intent.getStringExtra(android.content.Intent.EXTRA_TEXT).orEmpty()
+            sharedSpotifyLink = SpotifyLinks.fromSharedText(text)
+            if (sharedSpotifyLink == null) Toast.makeText(this, "Share a Spotify playlist link to import it", Toast.LENGTH_LONG).show()
+        }
+    }
+    private fun offerSharedPlaylist() {
+        val link = sharedSpotifyLink ?: return
+        sharedSpotifyLink = null
+        importSpotify(link)
     }
     private fun restore() {
         navigationEnabled = false; frame("Connecting")
@@ -223,6 +241,7 @@ class MainActivity : Activity() {
             "Artists" -> artists()
             else -> libraryOrDiscovery()
         }
+        offerSharedPlaylist()
     }
     private fun navigationBar() {
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER; setPadding(dp(4), dp(6), dp(4), dp(4)) }
@@ -642,7 +661,8 @@ class MainActivity : Activity() {
         }
         field("Album", track.album)
         if (track.duration > 0) field("Duration", formatTime(track.duration * 1000))
-        if (!track.id.startsWith("jf_")) {
+        if (track.spotifyId.isNotBlank()) field("Spotify link", "https://open.spotify.com/track/${track.spotifyId}")
+        if (track.id.matches(Regex("[A-Za-z0-9_-]{11}"))) {
             val url = "https://www.youtube.com/watch?v=${track.id}"
             field("YouTube link", url); field("Channel", track.channelId); field("Video ID", track.id)
             action("Open in YouTube", details) { startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse(url))) }
@@ -650,7 +670,7 @@ class MainActivity : Activity() {
                 (getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager).setPrimaryClip(android.content.ClipData.newPlainText(track.title, url))
                 Toast.makeText(this, "Link copied", Toast.LENGTH_SHORT).show()
             }
-        } else field("Source", "Jellyfin")
+        } else field("Source", if (track.id.startsWith("jf_")) "Jellyfin" else "Spotify · no playable match selected")
         panel.addView(ScrollView(this).apply { addView(details) }, LinearLayout.LayoutParams(-1, 0, 1f))
         dialog.setContentView(panel); dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
         dialog.window?.setGravity(Gravity.BOTTOM); dialog.window?.attributes?.windowAnimations = R.style.PlayerSheetAnimation
@@ -672,6 +692,7 @@ class MainActivity : Activity() {
             option("Add to your queue") { controller?.let { PlaybackQueue.add(it, item(track)) } }
         }
         option("Info") { trackInfo(track) }
+        if (track.canManagePlaylist && track.playlistId > 0) option("Choose playable match") { findPlaylistMatch(track) }
         if (track.canManagePlaylist && track.playlistId > 0) option("Remove from playlist") {
             AlertDialog.Builder(this).setTitle("Remove track?").setMessage(track.title)
                 .setPositiveButton("Remove") { _, _ -> launchWork {
@@ -679,7 +700,7 @@ class MainActivity : Activity() {
                     showTracks(titleView.text.toString(), "playlists/${track.playlistId}", track.playlistId)
                 } }.setNegativeButton("Cancel", null).show()
         }
-        option("Like") { launchWork { api.call("likes", "POST", track.json()); Toast.makeText(this@MainActivity, "Liked", Toast.LENGTH_SHORT).show() } }
+        if (track.id.isNotBlank() && track.id != "null") option("Like") { launchWork { api.call("likes", "POST", track.json()); Toast.makeText(this@MainActivity, "Liked", Toast.LENGTH_SHORT).show() } }
         option("Add to playlist") { launchWork {
             val playlists = (api.array("playlists").objects() + api.array("playlists?scope=household").objects())
                 .distinctBy { it.getLong("id") }.filter { it.optBoolean("can_manage", it.optBoolean("is_owner")) }
@@ -945,6 +966,12 @@ class MainActivity : Activity() {
         action("Back") { home() }
         screenJob = scope.launch { try {
             val playlist = if (playlistId != null) api.obj(path) else null
+            if (playlist != null) titleView.text = playlist.optString("name", title)
+            if (playlist?.optString("source_type") == "spotify") {
+                val summary = playlist.optJSONObject("match_summary")
+                label("Spotify import · ${playlist.optInt("track_count")} tracks · ${summary?.optInt("matched") ?: 0} matched · ${summary?.optInt("unmatched") ?: 0} unmatched")
+                label("Compare this count with the original Spotify playlist; its public view may omit songs. Use a track's options to choose or correct its recording.")
+            }
             val tracks = if (playlist == null) api.array(path).objects().map(Track::from)
                 else playlist.getJSONArray("tracks").objects().map { row ->
                     val track = Track.from(row)
@@ -975,7 +1002,107 @@ class MainActivity : Activity() {
             content.addView(list); renderTracks(list, tracks, "songs")
         } catch (e: Exception) { showError(e) } }
     }
+    private fun importSpotify(initialLink: String = "") {
+        val form = box()
+        label("Import a snapshot of a public Spotify playlist. Songs match your Jellyfin library first; uncertain matches stay visible for review.", form)
+        val link = input("Spotify playlist link", initialLink, target = form)
+        val name = input("Playlist name (optional)", target = form)
+        val family = Switch(this).apply { text = "Family playlist"; setTextColor(Color.WHITE) }
+        val youtube = Switch(this).apply { text = "Match missing songs on YouTube"; isChecked = true; setTextColor(Color.WHITE) }
+        form.addView(family); form.addView(youtube)
+        label("Spotify's public view may omit tracks in long playlists. Compare the imported count with the original.", form)
+        val dialog = AlertDialog.Builder(this).setTitle("Import Spotify playlist")
+            .setView(ScrollView(this).apply { addView(form) }).setPositiveButton("Import", null).setNegativeButton("Cancel", null).create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val url = SpotifyLinks.fromSharedText(link.text.toString())
+                if (url == null) { link.error = "Enter a Spotify playlist link"; return@setOnClickListener }
+                dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = false
+                scope.launch { try {
+                    val body = JSONObject().put("provider", "spotify").put("url", url).put("name", name.text.toString().trim())
+                        .put("visibility", if (family.isChecked) "household" else "private").put("youtube_fallback", youtube.isChecked)
+                    val job = api.obj("imports", "POST", body)
+                    dialog.dismiss(); tab = "Playlists"; showImport(job.getLong("id"))
+                } catch (e: CancellationException) { throw e } catch (e: Exception) {
+                    dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = true; showError(e)
+                } }
+            }
+        }
+        dialog.show()
+    }
+    private fun showImport(jobId: Long) {
+        screenJob?.cancel(); backAction = { tab = "Playlists"; home() }; frame("Playlist import", detail = true)
+        val status = text("Checking import…"); content.addView(status)
+        val bar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply { isIndeterminate = true }
+        content.addView(bar)
+        label("You can leave this screen. The server continues importing; return through Import history.")
+        val result = box(0); content.addView(result)
+        screenJob = scope.launch { try {
+            while (true) {
+                val job = api.obj("imports/$jobId")
+                status.text = job.optString("message", "Importing…")
+                val total = job.optInt("progress_total")
+                bar.isIndeterminate = total <= 0; bar.max = total.coerceAtLeast(1); bar.progress = job.optInt("progress_done")
+                when (job.optString("status")) {
+                    "completed" -> {
+                        bar.visibility = View.GONE
+                        action("Open imported playlist", result) {
+                            val pid = job.getLong("result_playlist_id")
+                            showTracks(job.optString("requested_name").ifBlank { "Imported playlist" }, "playlists/$pid", pid)
+                        }
+                        return@launch
+                    }
+                    "failed", "cancelled" -> {
+                        bar.visibility = View.GONE; status.text = job.optString("error").takeUnless { it == "null" || it.isBlank() } ?: "Import could not finish"
+                        action("Try another link", result) { importSpotify(job.optString("source_url")) }
+                        return@launch
+                    }
+                }
+                delay(1000)
+            }
+        } catch (e: CancellationException) { throw e } catch (e: Exception) {
+            bar.visibility = View.GONE; status.text = e.message ?: "Could not check import"
+            action("Retry", result) { showImport(jobId) }
+        } }
+    }
+    private fun importHistory() {
+        screenJob?.cancel(); backAction = { home() }; frame("Import history", detail = true)
+        screenJob = scope.launch { try {
+            val jobs = api.array("imports").objects()
+            if (jobs.isEmpty()) label("No playlist imports yet")
+            for (job in jobs) action("${job.optString("requested_name").takeUnless { it == "null" || it.isBlank() } ?: "Spotify playlist"} · ${job.optString("status")}") { showImport(job.getLong("id")) }
+        } catch (e: CancellationException) { throw e } catch (e: Exception) { showError(e) } }
+    }
+    private fun findPlaylistMatch(track: Track) {
+        val form = box(); val query = input("Artist and song", "${track.artist} ${track.title}".trim(), target = form)
+        val results = box(0)
+        val scroll = ScrollView(this).apply { addView(results) }
+        form.addView(scroll, LinearLayout.LayoutParams(-1, dp(300)))
+        val dialog = AlertDialog.Builder(this).setTitle("Choose a playable match").setView(form).setNegativeButton("Close", null).create()
+        var search: Job? = null
+        fun load(youtube: Boolean) {
+            search?.cancel(); results.removeAllViews(); label("Searching…", results)
+            search = scope.launch { try {
+                val q = Api.encode(query.text.toString().trim())
+                val tracks = if (youtube) api.obj("music/search?source=youtube&q=$q&limit=10").getJSONArray("groups").objects()
+                    .map { Track.from(it.getJSONObject("primary")) } else api.array("library/tracks?q=$q&limit=20").objects().map(Track::from)
+                results.removeAllViews()
+                if (tracks.isEmpty()) label("No matches found. Try changing the search.", results)
+                for (candidate in tracks.filter { it.blocked.isBlank() }) action("${candidate.title} · ${candidate.artist}", results) {
+                    AlertDialog.Builder(this@MainActivity).setTitle("Use this recording?").setMessage("${candidate.title}\n${candidate.artist}")
+                        .setPositiveButton("Use recording") { _, _ -> launchWork {
+                            api.call("playlists/${track.playlistId}/tracks/${track.playlistTrackId}", "PATCH", candidate.json())
+                            dialog.dismiss(); showTracks(titleView.text.toString(), "playlists/${track.playlistId}", track.playlistId)
+                        } }.setNegativeButton("Cancel", null).show()
+                }
+            } catch (e: CancellationException) { throw e } catch (e: Exception) { results.removeAllViews(); label(e.message ?: "Search failed", results) } }
+        }
+        action("Search library", form) { load(false) }; action("Search YouTube", form) { load(true) }
+        dialog.setOnDismissListener { search?.cancel() }; dialog.show(); load(false)
+    }
     private fun playlists() {
+        action("Import Spotify playlist") { importSpotify() }
+        action("Import history") { importHistory() }
         action("Liked tracks") { showTracks("Liked tracks", "likes") }
         action("Recently played") { showTracks("Recently played", "history?limit=100") }
         action("Create playlist") {

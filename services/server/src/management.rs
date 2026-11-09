@@ -158,6 +158,11 @@ pub async fn personal(
  ("POST",["restore"])=>{db::exec(&s.db,"UPDATE playlists SET deleted_at=NULL,deleted_by_user_id=NULL WHERE id=?",vec![json!(pid)]).await?;playlist_read(s,u,playlist(s,u,pid,false,false).await?,false).await},
  ("POST",["copy"])=>{let copy=db::exec(&s.db,"INSERT INTO playlists(user_id,name,description,visibility,source_type) VALUES(?,?,?,'private','manual')",vec![uid,json!(format!("{} (copy)",text(&p,"name"))),p["description"].clone()]).await?;db::exec(&s.db,"INSERT INTO playlist_tracks(playlist_id,video_id,title,artist,thumbnail_url,duration_sec,position,match_status,added_by_user_id) SELECT ?,video_id,title,artist,thumbnail_url,duration_sec,position,match_status,? FROM playlist_tracks WHERE playlist_id=?",vec![json!(copy),json!(id(u)),json!(pid)]).await?;playlist_read(s,u,playlist(s,u,copy,false,false).await?,false).await},
  ("POST",["tracks"])=>add_track(s,u,pid,&b).await,
+ ("PATCH",["tracks",tid])=>{
+ track_body(&b)?;let tid=tid.parse::<i64>().map_err(|_|ApiError::missing())?;
+ db::one(&s.db,"SELECT id FROM playlist_tracks WHERE playlist_id=? AND id=?",vec![json!(pid),json!(tid)]).await?;
+ db::exec(&s.db,"UPDATE playlist_tracks SET video_id=?,thumbnail_url=?,duration_sec=?,match_status='matched',match_score=100 WHERE playlist_id=? AND id=?",vec![b["video_id"].clone(),b["thumbnail_url"].clone(),b["duration_sec"].clone(),json!(pid),json!(tid)]).await?;
+ db::one(&s.db,"SELECT * FROM playlist_tracks WHERE playlist_id=? AND id=?",vec![json!(pid),json!(tid)]).await},
  ("DELETE",["tracks",tid])=>{db::exec(&s.db,"DELETE FROM playlist_tracks WHERE playlist_id=? AND id=?",vec![json!(pid),json!(tid.parse::<i64>().map_err(|_|ApiError::missing())?)]).await?;Ok(Value::Null)},
  ("POST",["tracks","reorder"])=>{
  let ids=b["track_ids"].as_array().ok_or_else(||ApiError::bad("track_ids required"))?;let existing=db::all(&s.db,"SELECT id FROM playlist_tracks WHERE playlist_id=?",vec![json!(pid)]).await?;

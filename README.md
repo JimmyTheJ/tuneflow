@@ -142,8 +142,27 @@ removing data. Keep the backup until you have verified your installation.
 Do not run the Python and Rust APIs concurrently against the same database.
 
 A linked Jellyfin library requires a new sync. Existing YouTube IDs and playlists
-remain usable. Spotify imports first match tracks in your library; unmatched
-recordings remain explicitly unmatched rather than being silently substituted.
+remain usable. Spotify playlist links import a snapshot from Spotify's public embed, without a
+Spotify login or API credentials. On Android, use Library → Playlists and likes →
+Import Spotify playlist, or Spotify → Share → Tuneflow. Standard, localized, and
+Spotify short links are supported. Choose personal/family visibility and whether
+to match missing songs on YouTube. Import history retains progress and results
+when you leave the screen.
+
+Matching prefers a unique Jellyfin recording with matching title, artist and duration.
+Optional YouTube matching requires matching title, artist and duration and rejects
+unrequested covers, live versions and remixes. Uncertain songs stay visible as
+unmatched entries. A track's options → Choose playable match lets you search your
+library or YouTube and select a recording, while preserving the original Spotify
+metadata and contributor. Imported order and repeated entries are retained.
+
+**Public Spotify imports are best effort:** Spotify may expose only part of a
+playlist, especially long playlists. Both the import report and playlist page show
+the imported count and ask you to compare it with Spotify. Private/unavailable or
+changed public pages produce a clear error. Nothing silently reports an unreadable
+playlist as an empty successful import. This imports track metadata and locates
+recordings in Jellyfin/YouTube; it does not download Spotify audio. Re-importing
+creates a separate snapshot; imports do not synchronize later Spotify edits.
 
 ## Local Rust development
 

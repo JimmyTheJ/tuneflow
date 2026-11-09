@@ -246,6 +246,7 @@ export const api = {
   getImportProviders: () => request<ImportProvidersStatus>("/api/imports/providers"),
   createImportJob: (payload: {
     provider: "youtube" | "spotify";
+    youtube_fallback?: boolean;
     url: string;
     name?: string;
     visibility?: "private" | "household";
